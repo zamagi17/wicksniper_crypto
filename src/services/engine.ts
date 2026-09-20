@@ -78,7 +78,7 @@ export class WickSniperEngine {
     };
   }
 
-  public saveConfig(newConfig: Partial<BotConfig>): BotConfig {
+  public async saveConfig(newConfig: Partial<BotConfig>): Promise<BotConfig> {
     const oldBalance = this.config.paperTrading?.initialVirtualBalance;
     this.config = { ...this.config, ...newConfig };
     this.scanner.updateConfig(this.config.scanner);
@@ -90,7 +90,7 @@ export class WickSniperEngine {
       newConfig.paperTrading.initialVirtualBalance !== oldBalance
     ) {
       this.virtualBalance = newConfig.paperTrading.initialVirtualBalance;
-      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+      await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
       logger.log('INFO', `💰 Saldo Paper Trading disesuaikan ke $${this.virtualBalance.toFixed(2)} USDT.`);
     }
     try {
@@ -100,7 +100,7 @@ export class WickSniperEngine {
       logger.log('ERROR', `Gagal menyimpan konfigurasi: ${e.message}`);
     }
     this.lastSyncedConfigJson = JSON.stringify(this.config);
-    db.saveConfig(this.config).catch(() => {});
+    await db.saveConfig(this.config).catch(() => {});
     this.broadcastConfig();
     this.broadcastStatus();
     return this.config;

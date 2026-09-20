@@ -2,8 +2,18 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>🎯 Wick Sniper Bot - Binance Futures HFT Engine</title>
+  <!-- PWA Meta Tags -->
+  <meta name="theme-color" content="#070a0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="WickSniper">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -187,7 +197,10 @@
   <div id="settings-modal" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>⚙️ Pengaturan Parameter Wick Sniper</h3>
+        <div class="modal-title-box">
+          <h3>⚙️ Pengaturan Parameter</h3>
+          <button type="button" class="btn-refresh-cfg" onclick="reloadConfigFromServer()" title="Ambil konfigurasi tersimpan dari server">🔄 Refresh Server</button>
+        </div>
         <button class="btn-close" onclick="closeSettingsModal()">&times;</button>
       </div>
 
@@ -245,6 +258,13 @@
             <small class="form-hint">Cut loss mutlak jika koin terus melesat tanpa koreksi.</small>
           </div>
 
+          <div class="form-group">
+            <label>Maks Waktu Hold (Menit)</label>
+            <input type="number" id="cfg-max-hold" min="1" step="1" class="form-control" placeholder="10">
+            <small class="form-hint">Otomatis exit jika posisi bertahan melebihi X menit.</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Modal Per Layer (USDT)</label>
@@ -298,9 +318,9 @@
         </div>
       </div>
 
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
-        <button class="btn btn-primary" onclick="saveSettings()">Simpan Perubahan</button>
+      <div class="modal-footer floating-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
+        <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 Simpan Perubahan</button>
       </div>
     </div>
   </div>

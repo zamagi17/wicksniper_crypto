@@ -101,13 +101,29 @@ function playProfitSound() {
 }
 
 async function fetchInitialData() {
+  // Coba muat cache lokal terlebih dahulu untuk kecepatan render
+  try {
+    const cachedCfg = localStorage.getItem('wicksniper_config');
+    if (cachedCfg) {
+      currentConfig = JSON.parse(cachedCfg);
+      populateSettingsForm(currentConfig);
+    }
+  } catch (e) {}
+
   try {
     const [resStatus, resConfig, resLogs] = await Promise.all([
-      fetch('/api/status').then((r) => r.json()),
-      fetch('/api/config').then((r) => r.json()),
-      fetch('/api/logs').then((r) => r.json()),
+      fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
+      fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
+      fetch('/api/logs?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
     ]);
     currentConfig = resConfig;
+    try {
+      localStorage.setItem('wicksniper_config', JSON.stringify(resConfig));
+    } catch (e) {}
+    if (!settingsFormInitialized && !localStorage.getItem('wicksniper_settings_draft')) {
+      populateSettingsForm(resConfig);
+      settingsFormInitialized = true;
+    }
     renderStatus(resStatus);
     renderLogs(resLogs);
   } catch (err) {
@@ -366,65 +382,133 @@ async function resetDemo() {
   }
 }
 
-// MODAL SETTINGS
-async function openSettingsModal() {
-  try {
-    const fresh = await fetch('/api/config').then((r) => r.json());
-    if (fresh) currentConfig = fresh;
-  } catch {}
-  if (!currentConfig) return;
-  document.getElementById('cfg-mode').value = currentConfig.tradingMode || 'PAPER';
-  document.getElementById('cfg-virtual-balance').value = currentConfig.paperTrading?.initialVirtualBalance || currentStatus?.virtualBalance || 245;
-  document.getElementById('cfg-leverage').value = currentConfig.leverage || 5;
-  document.getElementById('cfg-margin-type').value = currentConfig.marginType || 'CROSSED';
-  document.getElementById('cfg-spike-pct').value = currentConfig.scanner?.spikeMinPercent || 3.2;
-  document.getElementById('cfg-tp-pct').value = currentConfig.exit?.takeProfitPct || 1.2;
-  document.getElementById('cfg-sl-pct').value = currentConfig.exit?.hardStopLossPct || 4.5;
-  document.getElementById('cfg-margin-layer').value = currentConfig.grid?.marginPerLayerUsdt || 3;
-  document.getElementById('cfg-max-margin').value = currentConfig.grid?.maxTotalMarginPerCoin || 80;
-  document.getElementById('cfg-total-layers').value = currentConfig.grid?.totalLayers || 6;
-  document.getElementById('cfg-layer-spacing').value = currentConfig.grid?.layerSpacingPct || 1.0;
-  document.getElementById('cfg-max-coins').value = currentConfig.grid?.maxConcurrentCoins || 2;
-  document.getElementById('cfg-martingale').value = currentConfig.grid?.martingaleMultiplier || 1.15;
-  document.getElementById('cfg-api-key').value = currentConfig.apiKey || '';
-  document.getElementById('cfg-api-secret').value = currentConfig.apiSecret || '';
+// ==========================================
+// MODAL SETTINGS (PERSISTENT & FLOATING FOOTER)
+// ==========================================
+let settingsFormInitialized = false;
+let isFormModifiedByUser = false;
 
+function populateSettingsForm(cfg) {
+  if (!cfg) return;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.value = val;
+  };
+
+  setVal('cfg-mode', cfg.tradingMode || 'PAPER');
+  setVal('cfg-virtual-balance', cfg.paperTrading?.initialVirtualBalance ?? currentStatus?.virtualBalance ?? 245);
+  setVal('cfg-leverage', cfg.leverage || 5);
+  setVal('cfg-margin-type', cfg.marginType || 'CROSSED');
+  setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 3.2);
+  setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
+  setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
+  setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 10);
+  setVal('cfg-margin-layer', cfg.grid?.marginPerLayerUsdt || 3);
+  setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 80);
+  setVal('cfg-total-layers', cfg.grid?.totalLayers || 6);
+  setVal('cfg-layer-spacing', cfg.grid?.layerSpacingPct || 1.0);
+  setVal('cfg-max-coins', cfg.grid?.maxConcurrentCoins || 2);
+  setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.15);
+  setVal('cfg-api-key', cfg.apiKey || '');
+  setVal('cfg-api-secret', cfg.apiSecret || '');
+}
+
+function getSettingsFormData() {
+  const getVal = (id, def) => {
+    const el = document.getElementById(id);
+    return el ? el.value : def;
+  };
+
+  return {
+    tradingMode: getVal('cfg-mode', 'PAPER'),
+    leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
+    marginType: getVal('cfg-margin-type', 'CROSSED'),
+    paperTrading: {
+      initialVirtualBalance: parseFloat(getVal('cfg-virtual-balance', '245')) || 245,
+    },
+    scanner: {
+      ...(currentConfig?.scanner || {}),
+      spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '3.2')) || 3.2,
+    },
+    exit: {
+      ...(currentConfig?.exit || {}),
+      takeProfitPct: parseFloat(getVal('cfg-tp-pct', '1.2')) || 1.2,
+      hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
+      maxHoldMinutes: parseInt(getVal('cfg-max-hold', '10')) || 10,
+    },
+    grid: {
+      ...(currentConfig?.grid || {}),
+      marginPerLayerUsdt: parseFloat(getVal('cfg-margin-layer', '3')) || 3,
+      maxTotalMarginPerCoin: parseFloat(getVal('cfg-max-margin', '80')) || 80,
+      totalLayers: parseInt(getVal('cfg-total-layers', '6')) || 6,
+      layerSpacingPct: parseFloat(getVal('cfg-layer-spacing', '1.0')) || 1.0,
+      maxConcurrentCoins: parseInt(getVal('cfg-max-coins', '2')) || 2,
+      martingaleMultiplier: parseFloat(getVal('cfg-martingale', '1.15')) || 1.15,
+    },
+    apiKey: (getVal('cfg-api-key', '') || '').trim(),
+    apiSecret: (getVal('cfg-api-secret', '') || '').trim(),
+  };
+}
+
+async function reloadConfigFromServer() {
+  try {
+    const fresh = await fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    if (fresh) {
+      currentConfig = fresh;
+      try {
+        localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+        localStorage.removeItem('wicksniper_settings_draft');
+      } catch (e) {}
+      populateSettingsForm(fresh);
+      isFormModifiedByUser = false;
+      const btn = document.querySelector('.btn-refresh-cfg');
+      if (btn) {
+        const oldText = btn.innerText;
+        btn.innerText = '✅ Tersinkron!';
+        setTimeout(() => (btn.innerText = oldText), 1500);
+      }
+    }
+  } catch (err) {
+    alert(`Gagal mengambil konfigurasi dari server: ${err.message}`);
+  }
+}
+
+async function openSettingsModal() {
+  // Jika form belum diisi, ambil dari draft lokal atau dari server
+  if (!settingsFormInitialized) {
+    const draft = localStorage.getItem('wicksniper_settings_draft');
+    if (draft) {
+      try {
+        const parsedDraft = JSON.parse(draft);
+        populateSettingsForm(parsedDraft);
+        isFormModifiedByUser = true;
+      } catch (e) {}
+    } else {
+      if (!currentConfig) {
+        try {
+          const fresh = await fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+          if (fresh) {
+            currentConfig = fresh;
+            localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+          }
+        } catch {}
+      }
+      populateSettingsForm(currentConfig);
+    }
+    settingsFormInitialized = true;
+  }
+
+  // Buka modal TANPA menghapus editan pengguna
   document.getElementById('settings-modal').classList.add('open');
 }
 
 function closeSettingsModal() {
+  // Hanya sembunyikan modal - JANGAN pernah mereset input form agar draf tidak hilang
   document.getElementById('settings-modal').classList.remove('open');
 }
 
 async function saveSettings() {
-  const updated = {
-    tradingMode: document.getElementById('cfg-mode').value,
-    leverage: parseInt(document.getElementById('cfg-leverage').value) || 5,
-    marginType: document.getElementById('cfg-margin-type').value,
-    paperTrading: {
-      initialVirtualBalance: parseFloat(document.getElementById('cfg-virtual-balance').value) || 245,
-    },
-    scanner: {
-      ...currentConfig.scanner,
-      spikeMinPercent: parseFloat(document.getElementById('cfg-spike-pct').value) || 3.2,
-    },
-    exit: {
-      ...currentConfig.exit,
-      takeProfitPct: parseFloat(document.getElementById('cfg-tp-pct').value) || 1.2,
-      hardStopLossPct: parseFloat(document.getElementById('cfg-sl-pct').value) || 4.5,
-    },
-    grid: {
-      ...currentConfig.grid,
-      marginPerLayerUsdt: parseFloat(document.getElementById('cfg-margin-layer').value) || 3,
-      maxTotalMarginPerCoin: parseFloat(document.getElementById('cfg-max-margin').value) || 80,
-      totalLayers: parseInt(document.getElementById('cfg-total-layers').value) || 6,
-      layerSpacingPct: parseFloat(document.getElementById('cfg-layer-spacing').value) || 1.0,
-      maxConcurrentCoins: parseInt(document.getElementById('cfg-max-coins').value) || 2,
-      martingaleMultiplier: parseFloat(document.getElementById('cfg-martingale').value) || 1.15,
-    },
-    apiKey: document.getElementById('cfg-api-key').value.trim(),
-    apiSecret: document.getElementById('cfg-api-secret').value.trim(),
-  };
+  const updated = getSettingsFormData();
 
   try {
     const res = await fetch('/api/config', {
@@ -435,8 +519,16 @@ async function saveSettings() {
 
     if (res.success) {
       currentConfig = res.config;
+      try {
+        localStorage.setItem('wicksniper_config', JSON.stringify(res.config));
+        localStorage.removeItem('wicksniper_settings_draft');
+      } catch (e) {}
+      isFormModifiedByUser = false;
+      populateSettingsForm(res.config);
       closeSettingsModal();
-      alert('Pengaturan berhasil disimpan!');
+      alert('✅ Pengaturan berhasil disimpan!');
+    } else {
+      alert(`Gagal menyimpan: ${res.message || 'Unknown error'}`);
     }
   } catch (err) {
     alert(`Gagal menyimpan: ${err.message}`);
@@ -593,4 +685,39 @@ async function executeBacktest() {
     btnText.innerText = 'Mulai Backtest Historis';
     loading.style.display = 'none';
   }
+}
+
+// ==========================================
+// DRAFT AUTO-SAVE & PWA SERVICE WORKER
+// ==========================================
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('settings-modal');
+  if (modal) {
+    modal.addEventListener('input', () => {
+      isFormModifiedByUser = true;
+      try {
+        localStorage.setItem('wicksniper_settings_draft', JSON.stringify(getSettingsFormData()));
+      } catch (e) {}
+    });
+    modal.addEventListener('change', () => {
+      isFormModifiedByUser = true;
+      try {
+        localStorage.setItem('wicksniper_settings_draft', JSON.stringify(getSettingsFormData()));
+      } catch (e) {}
+    });
+  }
+});
+
+// PWA Service Worker Registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        console.log('✅ PWA Service Worker registered:', reg.scope);
+      })
+      .catch((err) => {
+        console.warn('⚠️ PWA Service Worker registration skipped/failed:', err.message);
+      });
+  });
 }

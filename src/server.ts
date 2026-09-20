@@ -24,13 +24,14 @@ app.get('/api/status', (req, res) => {
 });
 
 app.get('/api/config', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   await engine.syncConfigFromDb();
   res.json(engine.getConfig());
 });
 
-app.post('/api/config', (req, res) => {
+app.post('/api/config', async (req, res) => {
   try {
-    const updated = engine.saveConfig(req.body);
+    const updated = await engine.saveConfig(req.body);
     res.json({ success: true, config: updated });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
