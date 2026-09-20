@@ -14,6 +14,8 @@ export interface BotConfig {
     maxPriceUsdt: number;
     excludeSymbols: string[];
     cooldownMinutes: number;
+    whitelistEnabled?: boolean;
+    whitelistSymbols?: string[];
   };
   grid: {
     maxConcurrentCoins: number;

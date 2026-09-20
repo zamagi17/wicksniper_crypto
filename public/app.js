@@ -607,6 +607,14 @@ function populateSettingsForm(cfg) {
   setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.15);
   setVal('cfg-api-key', cfg.apiKey || '');
   setVal('cfg-api-secret', cfg.apiSecret || '');
+
+  // Whitelist
+  const wlCheckbox = document.getElementById('cfg-whitelist-enabled');
+  if (wlCheckbox) {
+    wlCheckbox.checked = !!cfg.scanner?.whitelistEnabled;
+    toggleWhitelistInput();
+  }
+  setVal('cfg-whitelist-symbols', (cfg.scanner?.whitelistSymbols || []).join(', '));
 }
 
 function getSettingsFormData() {
@@ -625,6 +633,8 @@ function getSettingsFormData() {
     scanner: {
       ...(currentConfig?.scanner || {}),
       spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '3.2')) || 3.2,
+      whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
+      whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
     },
     exit: {
       ...(currentConfig?.exit || {}),
@@ -728,6 +738,23 @@ async function saveSettings() {
     }
   } catch (err) {
     alert(`Gagal menyimpan: ${err.message}`);
+  }
+}
+
+// ==========================================
+// WHITELIST TOGGLE
+// ==========================================
+function toggleWhitelistInput() {
+  const checkbox = document.getElementById('cfg-whitelist-enabled');
+  const inputGroup = document.getElementById('whitelist-input-group');
+  if (inputGroup) {
+    if (checkbox && checkbox.checked) {
+      inputGroup.style.opacity = '1';
+      inputGroup.style.pointerEvents = 'auto';
+    } else {
+      inputGroup.style.opacity = '0.4';
+      inputGroup.style.pointerEvents = 'none';
+    }
   }
 }
 

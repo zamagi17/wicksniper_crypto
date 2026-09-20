@@ -86,6 +86,11 @@ export class SpikeScanner {
       if (!symbol || !symbol.endsWith('USDT')) continue;
       if (this.config.excludeSymbols.includes(symbol)) continue;
 
+      // Whitelist: Jika aktif, HANYA proses koin yang ada di daftar putih
+      if (this.config.whitelistEnabled && this.config.whitelistSymbols && this.config.whitelistSymbols.length > 0) {
+        if (!this.config.whitelistSymbols.includes(symbol)) continue;
+      }
+
       const currentPrice = parseFloat(t.c || t.p || '0');
       if (currentPrice <= 0) continue;
       if (currentPrice < this.config.minPriceUsdt || currentPrice > this.config.maxPriceUsdt) continue;
