@@ -79,10 +79,19 @@ export class WickSniperEngine {
   }
 
   public saveConfig(newConfig: Partial<BotConfig>): BotConfig {
+    const oldBalance = this.config.paperTrading?.initialVirtualBalance;
     this.config = { ...this.config, ...newConfig };
     this.scanner.updateConfig(this.config.scanner);
     if (this.config.apiKey && this.config.apiSecret) {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+    }
+    if (
+      newConfig.paperTrading?.initialVirtualBalance !== undefined &&
+      newConfig.paperTrading.initialVirtualBalance !== oldBalance
+    ) {
+      this.virtualBalance = newConfig.paperTrading.initialVirtualBalance;
+      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+      logger.log('INFO', `💰 Saldo Paper Trading disesuaikan ke $${this.virtualBalance.toFixed(2)} USDT.`);
     }
     try {
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
@@ -578,16 +587,36 @@ export class WickSniperEngine {
       if (!dbCfg) return false;
       const raw = JSON.stringify(dbCfg);
       if (raw !== this.lastSyncedConfigJson) {
+        const oldBalance = this.config.paperTrading?.initialVirtualBalance;
         this.lastSyncedConfigJson = raw;
         this.config = { ...this.config, ...dbCfg };
         this.scanner.updateConfig(this.config.scanner);
         if (this.config.apiKey && this.config.apiSecret) {
           binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
         }
+        if (
+          this.config.paperTrading?.initialVirtualBalance !== undefined &&
+          this.config.paperTrading.initialVirtualBalance !== oldBalance
+        ) {
+          this.virtualBalance = this.config.paperTrading.initialVirtualBalance;
+          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+          logger.log('INFO', `💰 Saldo Paper Trading disesuaikan ke $${this.virtualBalance.toFixed(2)} USDT.`);
+        }
         logger.log('INFO', '🔄 [DATABASE AUTO-SYNC] Konfigurasi bot otomatis diperbarui dari PostgreSQL!');
         this.broadcastConfig();
         this.broadcastStatus();
         return true;
+      }
+
+      // Cek apakah ada perubahan saldo manual di tabel wicksniper_state (hanya jika tidak ada posisi floating)
+      if (this.activePositions.size === 0) {
+        const dbState = await db.loadState();
+        if (dbState && typeof dbState.virtualBalance === 'number') {
+          if (Math.abs(dbState.virtualBalance - this.virtualBalance) > 0.01) {
+            this.virtualBalance = dbState.virtualBalance;
+            this.broadcastStatus();
+          }
+        }
       }
     } catch (e: any) {
       // ignore

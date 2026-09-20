@@ -374,6 +374,7 @@ async function openSettingsModal() {
   } catch {}
   if (!currentConfig) return;
   document.getElementById('cfg-mode').value = currentConfig.tradingMode || 'PAPER';
+  document.getElementById('cfg-virtual-balance').value = currentConfig.paperTrading?.initialVirtualBalance || currentStatus?.virtualBalance || 245;
   document.getElementById('cfg-leverage').value = currentConfig.leverage || 5;
   document.getElementById('cfg-margin-type').value = currentConfig.marginType || 'CROSSED';
   document.getElementById('cfg-spike-pct').value = currentConfig.scanner?.spikeMinPercent || 2.5;
@@ -397,6 +398,9 @@ async function saveSettings() {
     tradingMode: document.getElementById('cfg-mode').value,
     leverage: parseInt(document.getElementById('cfg-leverage').value) || 5,
     marginType: document.getElementById('cfg-margin-type').value,
+    paperTrading: {
+      initialVirtualBalance: parseFloat(document.getElementById('cfg-virtual-balance').value) || 245,
+    },
     scanner: {
       ...currentConfig.scanner,
       spikeMinPercent: parseFloat(document.getElementById('cfg-spike-pct').value) || 2.5,

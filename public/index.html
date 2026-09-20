@@ -208,12 +208,20 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label>Tipe Margin</label>
-          <select id="cfg-margin-type" class="form-control">
-            <option value="CROSSED">Cross Margin (Disarankan)</option>
-            <option value="ISOLATED">Isolated Margin</option>
-          </select>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Tipe Margin</label>
+            <select id="cfg-margin-type" class="form-control">
+              <option value="CROSSED">Cross Margin (Disarankan)</option>
+              <option value="ISOLATED">Isolated Margin</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Saldo Virtual Paper (USDT)</label>
+            <input type="number" id="cfg-virtual-balance" min="5" step="1" class="form-control" placeholder="245">
+            <small class="form-hint">Saldo simulasi untuk pengujian bot.</small>
+          </div>
         </div>
 
         <div class="form-row">
