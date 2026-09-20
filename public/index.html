@@ -391,17 +391,17 @@
 
           <div class="form-group">
             <label>Modal Per Layer (USDT):</label>
-            <input type="number" id="bt-margin" class="form-control" value="4" step="1" min="1" />
+            <input type="number" id="bt-margin" class="form-control" value="3" step="1" min="1" />
           </div>
 
           <div class="form-group">
             <label>Jarak Antar Layer (%):</label>
-            <input type="number" id="bt-spacing" class="form-control" value="1.4" step="0.1" min="0.2" />
+            <input type="number" id="bt-spacing" class="form-control" value="1.0" step="0.1" min="0.2" />
           </div>
 
           <div class="form-group">
             <label>Jumlah Layer Jaring:</label>
-            <input type="number" id="bt-total-layers" class="form-control" value="8" min="1" max="15" step="1" />
+            <input type="number" id="bt-total-layers" class="form-control" value="6" min="1" max="15" step="1" />
           </div>
 
           <div class="form-group">
@@ -413,14 +413,32 @@
             <label>Pengali Martingale (x):</label>
             <input type="number" id="bt-martingale" class="form-control" value="1.15" min="1.0" max="2.5" step="0.05" />
           </div>
+
+          <div class="form-group">
+            <label>Maks. Waktu Tahan Posisi (menit):</label>
+            <input type="number" id="bt-max-hold" class="form-control" value="10" min="1" max="120" step="1" />
+          </div>
+
+          <div class="form-group">
+            <label>Cooldown Antar Trade (menit):</label>
+            <input type="number" id="bt-cooldown" class="form-control" value="10" min="1" max="60" step="1" />
+          </div>
+
+          <div class="form-group">
+            <label>Saldo Awal Simulasi (USDT):</label>
+            <input type="number" id="bt-init-balance" class="form-control" value="245" min="10" step="5" />
+          </div>
         </div>
 
         <!-- TOMBOL JALANKAN -->
-        <div style="margin: 16px 0; display: flex; justify-content: flex-end; gap: 10px;">
-          <button class="btn btn-secondary" onclick="closeBacktestModal()">Tutup</button>
-          <button class="btn btn-primary" id="btn-run-backtest" onclick="executeBacktest()">
-            <span id="bt-btn-icon">🚀</span> <span id="bt-btn-text">Mulai Backtest Historis</span>
-          </button>
+        <div style="margin: 16px 0; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+          <button class="btn btn-warning" onclick="resetBacktestParams()" title="Reset semua parameter ke nilai config bot saat ini">🔄 Reset ke Config Bot</button>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary" onclick="closeBacktestModal()">Tutup</button>
+            <button class="btn btn-primary" id="btn-run-backtest" onclick="executeBacktest()">
+              <span id="bt-btn-icon">🚀</span> <span id="bt-btn-text">Mulai Backtest Historis</span>
+            </button>
+          </div>
         </div>
 
         <!-- LOADING STATE -->

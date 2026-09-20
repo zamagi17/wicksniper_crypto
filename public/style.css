@@ -190,6 +190,16 @@ body {
   background: rgba(255, 51, 102, 0.25);
 }
 
+.btn-warning {
+  background: rgba(255, 179, 0, 0.15);
+  color: var(--color-gold);
+  border-color: rgba(255, 179, 0, 0.3);
+}
+
+.btn-warning:hover {
+  background: rgba(255, 179, 0, 0.25);
+}
+
 .btn-xs {
   padding: 4px 8px;
   font-size: 11px;

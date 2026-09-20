@@ -744,14 +744,22 @@ function formatDateTimeLocal(date) {
   return `${y}-${m}-${d}T${h}:${min}`;
 }
 
+let _backtestModalInitialized = false;
+
 function openBacktestModal() {
-  const now = new Date();
-  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
+  // Hanya set tanggal default jika belum terisi
+  const startEl = document.getElementById('bt-start-date');
+  const endEl = document.getElementById('bt-end-date');
+  if (!startEl.value || !endEl.value) {
+    const now = new Date();
+    const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
+    startEl.value = formatDateTimeLocal(threeDaysAgo);
+    endEl.value = formatDateTimeLocal(now);
+  }
 
-  document.getElementById('bt-start-date').value = formatDateTimeLocal(threeDaysAgo);
-  document.getElementById('bt-end-date').value = formatDateTimeLocal(now);
-
-  if (currentConfig) {
+  // Hanya inisialisasi dari config SEKALI saja (saat pertama kali dibuka)
+  // Supaya perubahan user tidak ter-reset tiap buka modal
+  if (!_backtestModalInitialized && currentConfig) {
     if (currentConfig.leverage) document.getElementById('bt-leverage').value = currentConfig.leverage;
     if (currentConfig.scanner?.spikeMinPercent) document.getElementById('bt-spike').value = currentConfig.scanner.spikeMinPercent;
     if (currentConfig.exit?.takeProfitPct) document.getElementById('bt-tp').value = currentConfig.exit.takeProfitPct;
@@ -761,9 +769,32 @@ function openBacktestModal() {
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
     if (currentConfig.grid?.maxTotalMarginPerCoin) document.getElementById('bt-max-margin').value = currentConfig.grid.maxTotalMarginPerCoin;
     if (currentConfig.grid?.martingaleMultiplier) document.getElementById('bt-martingale').value = currentConfig.grid.martingaleMultiplier;
+    if (currentConfig.exit?.maxHoldMinutes) document.getElementById('bt-max-hold').value = currentConfig.exit.maxHoldMinutes;
+    if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
+    _backtestModalInitialized = true;
   }
 
   document.getElementById('backtest-modal').style.display = 'flex';
+}
+
+function resetBacktestParams() {
+  // Reset parameter backtest ke nilai config bot saat ini
+  _backtestModalInitialized = false;
+  openBacktestModal();
+  if (currentConfig) {
+    // Force re-init
+    if (currentConfig.leverage) document.getElementById('bt-leverage').value = currentConfig.leverage;
+    if (currentConfig.scanner?.spikeMinPercent) document.getElementById('bt-spike').value = currentConfig.scanner.spikeMinPercent;
+    if (currentConfig.exit?.takeProfitPct) document.getElementById('bt-tp').value = currentConfig.exit.takeProfitPct;
+    if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
+    if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
+    if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
+    if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
+    if (currentConfig.grid?.maxTotalMarginPerCoin) document.getElementById('bt-max-margin').value = currentConfig.grid.maxTotalMarginPerCoin;
+    if (currentConfig.grid?.martingaleMultiplier) document.getElementById('bt-martingale').value = currentConfig.grid.martingaleMultiplier;
+    if (currentConfig.exit?.maxHoldMinutes) document.getElementById('bt-max-hold').value = currentConfig.exit.maxHoldMinutes;
+    if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
+  }
 }
 
 function closeBacktestModal() {
@@ -803,15 +834,20 @@ async function executeBacktest() {
     leverage: parseFloat(document.getElementById('bt-leverage').value) || 5,
     spikeMinPercent: parseFloat(document.getElementById('bt-spike').value) || 3.2,
     takeProfitPct: parseFloat(document.getElementById('bt-tp').value) || 1.2,
-    hardStopLossPct: parseFloat(document.getElementById('bt-sl').value) || 6.0,
-    marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 4,
-    layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.4,
-    totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 8,
+    hardStopLossPct: parseFloat(document.getElementById('bt-sl').value) || 4.5,
+    marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 3,
+    layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.0,
+    totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 6,
     maxTotalMarginPerCoin: parseFloat(document.getElementById('bt-max-margin').value) || 80,
     martingaleMultiplier: parseFloat(document.getElementById('bt-martingale').value) || 1.15,
-    partialTpEnabled: true,
-    partialTpRatio: 0.5,
+    maxHoldMinutes: parseInt(document.getElementById('bt-max-hold').value) || 10,
+    cooldownMinutes: parseInt(document.getElementById('bt-cooldown').value) || 10,
+    initialBalance: parseFloat(document.getElementById('bt-init-balance').value) || 245,
+    partialTpEnabled: false,
   };
+
+  // Debug log untuk memastikan params terkirim dengan benar
+  console.log('🧪 Backtest payload:', JSON.stringify(payload, null, 2));
 
   const btn = document.getElementById('btn-run-backtest');
   const btnIcon = document.getElementById('bt-btn-icon');
