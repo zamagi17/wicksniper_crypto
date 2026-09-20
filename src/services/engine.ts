@@ -466,6 +466,9 @@ export class WickSniperEngine {
       this.virtualBalance += Math.round(pnl * 100) / 100;
     }
 
+    const filledLayersCount = (pos.layers || []).filter((l) => l.status === 'FILLED').length;
+    const totalLayersCount = (pos.layers || []).length;
+
     const trade: ClosedTrade = {
       id: Math.random().toString(36).substring(2, 9),
       symbol: pos.symbol,
@@ -481,6 +484,27 @@ export class WickSniperEngine {
       isPaper: this.config.tradingMode === 'PAPER',
       closedAt: new Date().toLocaleTimeString('id-ID'),
       timestamp: Date.now(),
+      layersFilled: `${filledLayersCount}/${totalLayersCount}`,
+      layersDetail: (pos.layers || []).map((l) => ({
+        layerIndex: l.layerIndex,
+        price: l.price,
+        qty: l.qty,
+        marginUsdt: l.marginUsdt,
+        status: l.status,
+      })),
+      paramsSnapshot: {
+        marginPerLayerUsdt: this.config.grid.marginPerLayerUsdt,
+        totalLayers: this.config.grid.totalLayers,
+        layerSpacingPct: this.config.grid.layerSpacingPct,
+        martingaleMultiplier: this.config.grid.martingaleMultiplier,
+        maxTotalMarginPerCoin: this.config.grid.maxTotalMarginPerCoin,
+        takeProfitPct: this.config.exit.takeProfitPct,
+        hardStopLossPct: this.config.exit.hardStopLossPct,
+        maxHoldMinutes: this.config.exit.maxHoldMinutes,
+        spikeMinPercent: this.config.scanner.spikeMinPercent,
+        leverage: this.config.leverage,
+        marginType: this.config.marginType,
+      },
     };
 
     this.closedTrades.unshift(trade);

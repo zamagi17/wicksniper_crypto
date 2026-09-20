@@ -474,6 +474,30 @@
     </div>
   </div>
 
+  <!-- DETAIL TRADE & PARAMETER POPUP MODAL -->
+  <div id="trade-detail-modal" class="modal-backdrop">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3 id="td-title">🔍 Detail Eksekusi Trade</h3>
+          <span id="td-pnl-badge" class="badge-mode">PnL</span>
+        </div>
+        <button type="button" class="btn-close" onclick="closeTradeDetailModal()">&times;</button>
+      </div>
+
+      <div class="modal-body" id="td-body">
+        <!-- Konten dinamis diisi oleh openTradeDetailModal di app.js -->
+      </div>
+
+      <div class="modal-footer floating-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeTradeDetailModal()">Tutup</button>
+        <button type="button" id="td-apply-params-btn" class="btn btn-primary" onclick="applySnapshotParamsToConfig()">
+          ⚙️ Terapkan Parameter Ini ke Bot
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

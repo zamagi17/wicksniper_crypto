@@ -305,7 +305,11 @@ function renderSpikesTable(spikes) {
     .join('');
 }
 
+let recentClosedTrades = [];
+let selectedTradeForDetail = null;
+
 function renderClosedTradesTable(trades) {
+  recentClosedTrades = trades || [];
   const tbody = document.getElementById('closed-trades-body');
   if (!trades || trades.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Belum ada trade yang ditutup.</td></tr>`;
@@ -313,25 +317,217 @@ function renderClosedTradesTable(trades) {
   }
 
   tbody.innerHTML = trades
-    .slice(0, 15)
+    .slice(0, 25)
     .map((t) => {
       const isWin = t.realizedPnl >= 0;
       const pnlColor = isWin ? 'text-green' : 'text-red';
       const sign = isWin ? '+' : '';
+      const layerBadge = t.layersFilled
+        ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
+        : '';
 
       return `
-        <tr>
+        <tr class="clickable-trade-row" onclick="openTradeDetailModal('${t.id}')" title="Klik untuk melihat rincian trade & perbandingan parameter">
           <td>${t.closedAt}</td>
-          <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span></td>
+          <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span> ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
           <td><b>${t.durationSeconds}s</b></td>
           <td class="${pnlColor}"><b>${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</b></td>
-          <td><small>${t.exitReason}</small></td>
+          <td>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+              <small>${t.exitReason}</small>
+              <button type="button" class="btn btn-xs" onclick="event.stopPropagation(); openTradeDetailModal('${t.id}')" style="font-size: 10px; padding: 2px 7px;">🔍 Detail</button>
+            </div>
+          </td>
         </tr>
       `;
     })
     .join('');
+}
+
+function openTradeDetailModal(tradeId) {
+  const t = recentClosedTrades.find((x) => x.id === tradeId);
+  if (!t) return;
+  selectedTradeForDetail = t;
+
+  const isWin = t.realizedPnl >= 0;
+  const pnlColor = isWin ? 'text-green' : 'text-red';
+  const sign = isWin ? '+' : '';
+
+  // Header Title & Badge
+  document.getElementById('td-title').innerText = `🔍 Detail Trade: ${t.symbol} SHORT (${t.isPaper ? 'Paper' : 'Live'})`;
+  const badge = document.getElementById('td-pnl-badge');
+  badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
+  badge.innerText = `${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)`;
+
+  // Fallback snapshot jika trade lama belum memiliki snapshot
+  const snap = t.paramsSnapshot || {
+    marginPerLayerUsdt: 3,
+    totalLayers: 6,
+    layerSpacingPct: 1.0,
+    martingaleMultiplier: 1.15,
+    maxTotalMarginPerCoin: 80,
+    takeProfitPct: 1.2,
+    hardStopLossPct: 4.5,
+    maxHoldMinutes: 10,
+    spikeMinPercent: 3.2,
+    leverage: 5,
+    marginType: 'CROSSED',
+  };
+
+  const curr = currentConfig || {};
+  const currGrid = curr.grid || {};
+  const currExit = curr.exit || {};
+  const currScanner = curr.scanner || {};
+
+  // Helper render baris perbandingan
+  const renderCompareRow = (name, valSnap, valCurr, unit = '') => {
+    const isSame = String(valSnap) === String(valCurr);
+    const statusBadge = isSame
+      ? `<span class="badge-same">Sama</span>`
+      : `<span class="badge-diff">Berbeda</span>`;
+    const valCurrStyle = isSame ? '' : 'color: var(--color-cyan); font-weight: 700;';
+    return `
+      <tr>
+        <td class="param-name">${name}</td>
+        <td><b>${valSnap !== undefined ? valSnap : '-'}${unit}</b></td>
+        <td style="${valCurrStyle}">${valCurr !== undefined ? valCurr : '-'}${unit}</td>
+        <td>${statusBadge}</td>
+      </tr>
+    `;
+  };
+
+  // Layers breakdown
+  let layersHtml = '';
+  if (t.layersDetail && t.layersDetail.length > 0) {
+    layersHtml = `
+      <div class="td-section-title">🧱 Rincian Layer Jaring Terisi (${t.layersFilled || 'Grid'})</div>
+      <div class="td-layers-wrap">
+        ${t.layersDetail
+          .map(
+            (l) => `
+          <div class="td-layer-row ${l.status === 'FILLED' ? 'filled' : ''}">
+            <span><b>Layer #${l.layerIndex}</b>: $${l.price.toFixed(4)}</span>
+            <span>Margin: $${l.marginUsdt.toFixed(2)} USDT</span>
+            <span class="${l.status === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${l.status}]</b></span>
+          </div>
+        `
+          )
+          .join('')}
+      </div>
+    `;
+  }
+
+  const body = document.getElementById('td-body');
+  body.innerHTML = `
+    <!-- KPI SUMMARY -->
+    <div class="td-kpi-grid">
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Realized PnL</div>
+        <div class="td-kpi-val ${pnlColor}">${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</div>
+      </div>
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Entry ➜ Exit</div>
+        <div class="td-kpi-val" style="font-size: 12.5px;">$${t.entryPrice} ➜ $${t.exitPrice}</div>
+      </div>
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Total Margin Terpakai</div>
+        <div class="td-kpi-val text-cyan">$${(t.marginUsed || 0).toFixed(2)} USDT</div>
+      </div>
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Durasi & Waktu</div>
+        <div class="td-kpi-val">${t.durationSeconds} detik <small style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(${t.closedAt})</small></div>
+      </div>
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Alasan Selesai</div>
+        <div class="td-kpi-val text-gold" style="font-size: 12px;">${t.exitReason}</div>
+      </div>
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Layer Terisi</div>
+        <div class="td-kpi-val text-purple">${t.layersFilled || '-'}</div>
+      </div>
+    </div>
+
+    <!-- PARAMETER COMPARISON TABLE -->
+    <div class="td-section-title">⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)</div>
+    <div style="overflow-x: auto;">
+      <table class="param-compare-table">
+        <thead>
+          <tr>
+            <th>Parameter Bot</th>
+            <th>Saat Trade Ini Berjalan</th>
+            <th>Konfigurasi Aktif Sekarang</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${renderCompareRow('Modal Per Layer', snap.marginPerLayerUsdt ?? 3, currGrid.marginPerLayerUsdt ?? 3, ' USDT')}
+          ${renderCompareRow('Jumlah Layer', snap.totalLayers ?? 6, currGrid.totalLayers ?? 6, ' Lapis')}
+          ${renderCompareRow('Jarak Antar Jaring (Spacing)', snap.layerSpacingPct ?? 1.0, currGrid.layerSpacingPct ?? 1.0, '%')}
+          ${renderCompareRow('Pengali Martingale', snap.martingaleMultiplier ?? 1.15, currGrid.martingaleMultiplier ?? 1.15, 'x')}
+          ${renderCompareRow('Target Take Profit', snap.takeProfitPct ?? 1.2, currExit.takeProfitPct ?? 1.2, '%')}
+          ${renderCompareRow('Hard Stop Loss', snap.hardStopLossPct ?? 4.5, currExit.hardStopLossPct ?? 4.5, '%')}
+          ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes ?? 10, currExit.maxHoldMinutes ?? 10, ' Menit')}
+          ${renderCompareRow('Minimal Spike', snap.spikeMinPercent ?? 3.2, currScanner.spikeMinPercent ?? 3.2, '%')}
+          ${renderCompareRow('Leverage', snap.leverage ?? 5, curr.leverage ?? 5, 'x')}
+          ${renderCompareRow('Maks Margin Per Koin', snap.maxTotalMarginPerCoin ?? 80, currGrid.maxTotalMarginPerCoin ?? 80, ' USDT')}
+        </tbody>
+      </table>
+    </div>
+
+    ${layersHtml}
+  `;
+
+  document.getElementById('trade-detail-modal').classList.add('open');
+}
+
+function closeTradeDetailModal() {
+  document.getElementById('trade-detail-modal').classList.remove('open');
+}
+
+function applySnapshotParamsToConfig() {
+  if (!selectedTradeForDetail) return;
+  const snap = selectedTradeForDetail.paramsSnapshot || {
+    marginPerLayerUsdt: 3,
+    totalLayers: 6,
+    layerSpacingPct: 1.0,
+    martingaleMultiplier: 1.15,
+    maxTotalMarginPerCoin: 80,
+    takeProfitPct: 1.2,
+    hardStopLossPct: 4.5,
+    maxHoldMinutes: 10,
+    spikeMinPercent: 3.2,
+    leverage: 5,
+    marginType: 'CROSSED',
+  };
+
+  // Isi ke form modal pengaturan
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.value = val;
+  };
+
+  setVal('cfg-margin-layer', snap.marginPerLayerUsdt);
+  setVal('cfg-total-layers', snap.totalLayers);
+  setVal('cfg-layer-spacing', snap.layerSpacingPct);
+  setVal('cfg-martingale', snap.martingaleMultiplier);
+  setVal('cfg-max-margin', snap.maxTotalMarginPerCoin);
+  setVal('cfg-tp-pct', snap.takeProfitPct);
+  setVal('cfg-sl-pct', snap.hardStopLossPct);
+  setVal('cfg-max-hold', snap.maxHoldMinutes);
+  setVal('cfg-spike-pct', snap.spikeMinPercent);
+  setVal('cfg-leverage', snap.leverage);
+  setVal('cfg-margin-type', snap.marginType);
+
+  isFormModifiedByUser = true;
+  try {
+    localStorage.setItem('wicksniper_settings_draft', JSON.stringify(getSettingsFormData()));
+  } catch (e) {}
+
+  closeTradeDetailModal();
+  openSettingsModal();
+  alert('✅ Parameter dari trade ini berhasil dimuat ke formulir pengaturan! Silakan periksa lalu klik "Simpan Perubahan" jika ingin menggunakannya.');
 }
 
 function renderLogs(logs) {

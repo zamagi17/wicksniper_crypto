@@ -105,9 +105,13 @@ export class DatabaseService {
             is_paper BOOLEAN DEFAULT TRUE,
             closed_at VARCHAR(64) NOT NULL,
             timestamp BIGINT NOT NULL,
+            params_snapshot JSONB,
+            layers_detail JSONB,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
           CREATE INDEX IF NOT EXISTS idx_wicksniper_trades_timestamp ON wicksniper_trades (timestamp DESC);
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS params_snapshot JSONB;
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS layers_detail JSONB;
         `);
 
         this.isConnected = true;
@@ -192,8 +196,8 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_trades (
-           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          ON CONFLICT (id) DO NOTHING;`,
         [
           t.id,
@@ -210,6 +214,8 @@ export class DatabaseService {
           t.isPaper,
           t.closedAt,
           t.timestamp,
+          t.paramsSnapshot ? JSON.stringify(t.paramsSnapshot) : null,
+          t.layersDetail ? JSON.stringify(t.layersDetail) : null,
         ]
       );
     } catch (e: any) {
@@ -225,7 +231,9 @@ export class DatabaseService {
                 qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
                 pnl_pct AS "pnlPct", duration_seconds AS "durationSeconds",
                 exit_reason AS "exitReason", is_paper AS "isPaper",
-                closed_at AS "closedAt", timestamp
+                closed_at AS "closedAt", timestamp,
+                params_snapshot AS "paramsSnapshot",
+                layers_detail AS "layersDetail"
          FROM wicksniper_trades
          ORDER BY timestamp DESC
          LIMIT $1;`,
@@ -246,6 +254,8 @@ export class DatabaseService {
         isPaper: r.isPaper,
         closedAt: r.closedAt,
         timestamp: parseInt(r.timestamp, 10),
+        paramsSnapshot: r.paramsSnapshot || null,
+        layersDetail: r.layersDetail || null,
       }));
     } catch (e: any) {
       console.error('[Database] Gagal load trades dari DB:', e.message);

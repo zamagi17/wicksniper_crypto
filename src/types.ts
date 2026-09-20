@@ -104,6 +104,27 @@ export interface ClosedTrade {
   isPaper: boolean;
   closedAt: string;
   timestamp: number;
+  layersFilled?: string;
+  layersDetail?: {
+    layerIndex: number;
+    price: number;
+    qty: number;
+    marginUsdt: number;
+    status: string;
+  }[];
+  paramsSnapshot?: {
+    marginPerLayerUsdt: number;
+    totalLayers: number;
+    layerSpacingPct: number;
+    martingaleMultiplier: number;
+    maxTotalMarginPerCoin: number;
+    takeProfitPct: number;
+    hardStopLossPct: number;
+    maxHoldMinutes: number;
+    spikeMinPercent: number;
+    leverage: number;
+    marginType: string;
+  };
 }
 
 export interface EngineStatus {
