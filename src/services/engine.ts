@@ -17,6 +17,7 @@ export class WickSniperEngine {
   private spikesDetectedToday: number = 0;
   private statusListeners: ((status: EngineStatus) => void)[] = [];
   private configListeners: ((config: BotConfig) => void)[] = [];
+  private lastSyncedConfigJson: string = '';
   private tickInterval: NodeJS.Timeout | null = null;
 
   constructor(configPath: string) {
@@ -89,7 +90,9 @@ export class WickSniperEngine {
     } catch (e: any) {
       logger.log('ERROR', `Gagal menyimpan konfigurasi: ${e.message}`);
     }
+    this.lastSyncedConfigJson = JSON.stringify(this.config);
     db.saveConfig(this.config).catch(() => {});
+    this.broadcastConfig();
     this.broadcastStatus();
     return this.config;
   }
@@ -118,8 +121,10 @@ export class WickSniperEngine {
       if (dbCfg) {
         this.config = { ...this.config, ...dbCfg };
         this.scanner.updateConfig(this.config.scanner);
+        this.lastSyncedConfigJson = JSON.stringify(dbCfg);
       } else {
         await db.saveConfig(this.config);
+        this.lastSyncedConfigJson = JSON.stringify(this.config);
       }
       const dbState = await db.loadState();
       if (dbState) {
@@ -570,7 +575,10 @@ export class WickSniperEngine {
     if (!db.isConnected) return false;
     try {
       const dbCfg = await db.loadConfig();
-      if (dbCfg && JSON.stringify(dbCfg) !== JSON.stringify(this.config)) {
+      if (!dbCfg) return false;
+      const raw = JSON.stringify(dbCfg);
+      if (raw !== this.lastSyncedConfigJson) {
+        this.lastSyncedConfigJson = raw;
         this.config = { ...this.config, ...dbCfg };
         this.scanner.updateConfig(this.config.scanner);
         if (this.config.apiKey && this.config.apiSecret) {
