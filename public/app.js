@@ -377,12 +377,15 @@ async function openSettingsModal() {
   document.getElementById('cfg-virtual-balance').value = currentConfig.paperTrading?.initialVirtualBalance || currentStatus?.virtualBalance || 245;
   document.getElementById('cfg-leverage').value = currentConfig.leverage || 5;
   document.getElementById('cfg-margin-type').value = currentConfig.marginType || 'CROSSED';
-  document.getElementById('cfg-spike-pct').value = currentConfig.scanner?.spikeMinPercent || 2.5;
+  document.getElementById('cfg-spike-pct').value = currentConfig.scanner?.spikeMinPercent || 3.2;
   document.getElementById('cfg-tp-pct').value = currentConfig.exit?.takeProfitPct || 1.2;
   document.getElementById('cfg-sl-pct').value = currentConfig.exit?.hardStopLossPct || 4.5;
-  document.getElementById('cfg-margin-layer').value = currentConfig.grid?.marginPerLayerUsdt || 10;
+  document.getElementById('cfg-margin-layer').value = currentConfig.grid?.marginPerLayerUsdt || 3;
+  document.getElementById('cfg-max-margin').value = currentConfig.grid?.maxTotalMarginPerCoin || 80;
   document.getElementById('cfg-total-layers').value = currentConfig.grid?.totalLayers || 6;
-  document.getElementById('cfg-layer-spacing').value = currentConfig.grid?.layerSpacingPct || 0.6;
+  document.getElementById('cfg-layer-spacing').value = currentConfig.grid?.layerSpacingPct || 1.0;
+  document.getElementById('cfg-max-coins').value = currentConfig.grid?.maxConcurrentCoins || 2;
+  document.getElementById('cfg-martingale').value = currentConfig.grid?.martingaleMultiplier || 1.15;
   document.getElementById('cfg-api-key').value = currentConfig.apiKey || '';
   document.getElementById('cfg-api-secret').value = currentConfig.apiSecret || '';
 
@@ -403,7 +406,7 @@ async function saveSettings() {
     },
     scanner: {
       ...currentConfig.scanner,
-      spikeMinPercent: parseFloat(document.getElementById('cfg-spike-pct').value) || 2.5,
+      spikeMinPercent: parseFloat(document.getElementById('cfg-spike-pct').value) || 3.2,
     },
     exit: {
       ...currentConfig.exit,
@@ -412,9 +415,12 @@ async function saveSettings() {
     },
     grid: {
       ...currentConfig.grid,
-      marginPerLayerUsdt: parseFloat(document.getElementById('cfg-margin-layer').value) || 10,
+      marginPerLayerUsdt: parseFloat(document.getElementById('cfg-margin-layer').value) || 3,
+      maxTotalMarginPerCoin: parseFloat(document.getElementById('cfg-max-margin').value) || 80,
       totalLayers: parseInt(document.getElementById('cfg-total-layers').value) || 6,
-      layerSpacingPct: parseFloat(document.getElementById('cfg-layer-spacing').value) || 0.6,
+      layerSpacingPct: parseFloat(document.getElementById('cfg-layer-spacing').value) || 1.0,
+      maxConcurrentCoins: parseInt(document.getElementById('cfg-max-coins').value) || 2,
+      martingaleMultiplier: parseFloat(document.getElementById('cfg-martingale').value) || 1.15,
     },
     apiKey: document.getElementById('cfg-api-key').value.trim(),
     apiSecret: document.getElementById('cfg-api-secret').value.trim(),

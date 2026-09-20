@@ -245,22 +245,45 @@
             <small class="form-hint">Cut loss mutlak jika koin terus melesat tanpa koreksi.</small>
           </div>
 
+        <div class="form-row">
           <div class="form-group">
             <label>Modal Per Layer (USDT)</label>
-            <input type="number" id="cfg-margin-layer" step="1" class="form-control" placeholder="10">
-            <small class="form-hint">Modal dasar untuk setiap jaring order Short.</small>
+            <input type="number" id="cfg-margin-layer" min="1" step="1" class="form-control" placeholder="3">
+            <small class="form-hint">Modal dasar untuk jaring pertama (Layer 0).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Maksimal Margin Per Koin (USDT)</label>
+            <input type="number" id="cfg-max-margin" min="5" step="1" class="form-control" placeholder="80">
+            <small class="form-hint">Batas akumulasi margin maksimal untuk satu koin.</small>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label>Jumlah Layer Jaring (Maks 10)</label>
-            <input type="number" id="cfg-total-layers" step="1" class="form-control" placeholder="6">
+            <input type="number" id="cfg-total-layers" min="1" max="10" step="1" class="form-control" placeholder="6">
+            <small class="form-hint">Total lapis jaring averaging.</small>
           </div>
 
           <div class="form-group">
             <label>Jarak Antar Jaring (%)</label>
-            <input type="number" id="cfg-layer-spacing" step="0.1" class="form-control" placeholder="0.6">
+            <input type="number" id="cfg-layer-spacing" min="0.1" step="0.1" class="form-control" placeholder="1.0">
+            <small class="form-hint">Jarak kenaikan harga tiap tingkatan layer.</small>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Maksimal Koin Aktif Bersamaan</label>
+            <input type="number" id="cfg-max-coins" min="1" max="10" step="1" class="form-control" placeholder="2">
+            <small class="form-hint">Kuota koin yang boleh ditembak bersamaan.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Pengali Martingale (x)</label>
+            <input type="number" id="cfg-martingale" min="1.0" max="2.5" step="0.05" class="form-control" placeholder="1.15">
+            <small class="form-hint">Faktor kelipatan modal pada layer berikutnya.</small>
           </div>
         </div>
 
