@@ -1,0 +1,22 @@
+node_modules/
+dist/
+data_cache/
+.env
+
+# Local deployment & secret files
+deploy.bat
+*.key
+*.pem
+
+# Config & state (disimpan di PostgreSQL, tidak perlu .json)
+config.json
+trade_history.json
+virtual_state.json
+
+# Logs & OS files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+.DS_Store
+Thumbs.db

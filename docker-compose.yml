@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  wicksniper-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wicksniper-bot
+    restart: always
+    environment:
+      PORT: ${PORT:-3005}
+      TZ: ${TZ:-Asia/Jakarta}
+      # Menggunakan database PostgreSQL zamagi_postgres di Oracle VPS
+      DB_HOST: ${DB_HOST:-zamagi_postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-zamagi}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-copytrading}
+    ports:
+      - "127.0.0.1:${PORT:-3005}:3005"
+    networks:
+      - db_zamagi_net
+
+networks:
+  db_zamagi_net:
+    external: true

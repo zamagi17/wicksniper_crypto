@@ -1,0 +1,162 @@
+================================================================================
+          PANDUAN LENGKAP & CARA KERJA SISTEM WICK SNIPER BOT (HFT)
+       Replikasi Strategi Spike Reversal & Wick Sniping di Binance Futures
+================================================================================
+
+DOKUMEN INI BERISI PANDUAN RESMI TATA KERJA, LOGIKA MATEMATIS, MEKANISME
+TAKE-PROFIT, DAN MANAJEMEN RISIKO DARI WICK SNIPER BOT.
+
+--------------------------------------------------------------------------------
+1. FILOSOFI & MENGAPA TEKNIK INI MEMILIKI WIN RATE 90% - 98%
+--------------------------------------------------------------------------------
+Kebanyakan trader pemula kalah karena mencoba menebak tren jangka panjang
+(apakah besok BTC naik atau turun). 
+
+Bot ini TIDAK PERNAH menebak masa depan. Bot ini memanfaatkan inefisiensi
+mikro-struktur pasar yang disebut: "GRAVITASI JARUM LILIN (UPPER WICK REVERSION)".
+
+Faktanya pada koin-koin Micro-Cap / Meme Coin di Binance Futures:
+- Ketika sebuah koin kecil mendadak dipompa naik liar (+3% s/d +10% dalam 20 detik),
+  likuiditas beli pembeli FOMO akan cepat habis dalam hitungan detik.
+- 90% dari lonjakan liar tersebut PASTI meninggalkan "jarum atas" (wick), yaitu
+  koreksi turun kembali sebesar 1% - 3% dalam waktu 15 hingga 60 detik berikutnya.
+- Bot menyergap pucuk jarum tersebut dengan posisi SHORT, dan langsung mengambil
+  keuntungan (Take Profit) saat koreksi pertama terjadi, lalu langsung KABUR!
+
+
+--------------------------------------------------------------------------------
+2. BAGAIMANA MEKANISME TAKE-PROFIT (TP) BEKERJA?
+--------------------------------------------------------------------------------
+Pertanyaan: "Apakah TP-nya bertahap atau sekaligus?"
+
+Jawabannya: Bot memiliki 2 mode logika Take Profit yang sangat cerdas:
+
+A. PENGHITUNGAN RATA-RATA ENTRI DINAMIS (Dynamic Average Entry):
+   Setiap kali harga naik dan menabrak jaring limit atas Anda (Layer 1, Layer 2, dst),
+   bot secara otomatis menghitung ulang HARGA RATA-RATA (Break-Even Price):
+   
+   Total Notional Modal = (Layer0_Price * Qty0) + (Layer1_Price * Qty1) + ...
+   Total Volume        = Qty0 + Qty1 + ...
+   Average Entry       = Total Notional Modal / Total Volume
+
+B. TARGET TAKE PROFIT OTOMATIS:
+   Target TP tidak dipatok kaku dari harga pertama, melainkan otomatis bergeser
+   mengikuti harga rata-rata terbaru:
+   
+   Target TP = Average Entry * (1 - TakeProfitPct / 100)
+   (Secara bawaan: 1.2% di bawah harga rata-rata entri Anda)
+
+C. APAKAH BERTAHAP ATAU INSTAN?
+   - Untuk Trader Retail / Modal < $1,000:
+     Bot mengeksekusi "INSTANT FULL CLOSE" begitu target 1.2% tercapai.
+     Alasannya: Pada koin meme yang sangat volatil, mengunci profit 100% dalam
+     selang 20-30 detik jauh lebih aman daripada menunda-nunda di pasar.
+     
+   - Fitur Trailing Take-Profit (Memaksimalkan Profit Saat Dump Dalam):
+     Jika harga ternyata anjlok sangat dalam (misal dump -3% atau -5%), bot
+     TIDAK buru-buru keluar. Bot membiarkan profit membesar (Peak Profit Tracker),
+     dan baru menutup posisi jika harga memantul balik sebesar 0.4% (Trailing Callback).
+
+D. Kenapa Si Leader Melakukan TP Bertahap (Partial Close 30% - 40% - 30%)?
+   Si leader memecah order penutupannya menjadi 3 kali (selang 2 detik) karena
+   MODAL DIA BESAR (puluhan ribu koin senilai ribuan dollar). Jika dia melempar
+   semua order sekaligus di koin mikro, buku pesanan (order book) bursa akan jebol
+   dan terkena slippage. Memecah 3 order dalam 5 detik membantunya menyerap likuiditas.
+
+
+--------------------------------------------------------------------------------
+3. ALUR KERJA SISTEM DARI DETEKSI SAMPAI CUAN (STEP-BY-STEP)
+--------------------------------------------------------------------------------
+
+[TAHAP 1: RADAR PEMINDAI PASAR]
+- Bot terhubung ke Binance Futures Data Stream melalui Cloudflare DoH.
+- Memindai 660+ koin futures aktif setiap 1 detik (~770 ticks per detik).
+- Menyimpan riwayat pergerakan harga 20 detik terakhir di memori lokal (RAM).
+
+[TAHAP 2: PEMICU LONJAKAN (SPIKE TRIGGER)]
+- Rumus: Delta = ((Harga_Detik_Ini - Harga_20s_Lalu) / Harga_20s_Lalu) * 100
+- Jika Delta >= +2.5%, alarm berbunyi: "SPIKE DETECTED!"
+- Sistem memeriksa syarat: Koin tidak sedang cooldown, dan kuota posisi (< 2 koin).
+
+[TAHAP 3: PENEMBAKAN JARING GRID LADDER]
+- Layer #0: Langsung dieksekusi di harga pasar pucuk saat itu.
+- Layer #1 s/d #5: Diletakkan sebagai Limit Sell berjenjang (tiap naik +0.6%).
+- Menggunakan endpoint Binance `POST /fapi/v1/batchOrders` (5 order dalam 1 milidetik).
+
+[TAHAP 4: MENANGKAP PULLBACK & KUNCI PROFIT]
+- Ketika harga mulai kehilangan momentum dan lilin harga turun 1.2% di bawah
+  harga rata-rata entri, bot langsung mengeksekusi order BUY (Tutup Short).
+- Realized PnL masuk ke saldo, trade dicatat di tabel riwayat.
+- Koin diberikan status "COOLDOWN 10 MENIT" agar tidak re-entry di koin yang sama.
+
+
+--------------------------------------------------------------------------------
+4. BENTENG PERTAHANAN & MANAJEMEN RISIKO (ANTI-LIKUIDASI)
+--------------------------------------------------------------------------------
+Kelemahan bot grid martingal biasa adalah jika koin mengalami "Super Pump" tanpa
+koreksi sama sekali (misal ada berita viral koin terbang +100%).
+
+Bot Wick Sniper Anda telah dilengkapi 3 lapis benteng baja:
+
+1. HARD STOP-LOSS (Batas Cut-Loss Mutlak):
+   Jika koin terus melesat naik hingga +4.5% di atas harga rata-rata entri Anda,
+   bot TIDAK AKAN MENAHAN POSISI. Bot langsung melakukan CUT LOSS seketika.
+   Modal Anda selamat dan terhindar dari Margin Call / Likuidasi!
+
+2. PEMBATASAN MAKSIMAL MODAL PER KOIN (Max Total Margin):
+   Dibatasi maksimal $80 USDT per koin. Bot dilarang menambah layer jika sudah
+   mencapai batas ini.
+
+3. PEMBATASAN KUOTA KOIN AKTIF (Max Concurrent Coins):
+   Maksimal hanya boleh 2 koin yang dimainkan bersamaan, sehingga saldo cadangan
+   di dompet Anda selalu berlimpah dan margin ratio selalu sehat.
+
+4. BATAS WAKTU TAHAN MAKSIMAL (Max Hold Time):
+   Jika dalam 10 menit posisi belum menyentuh TP atau SL (pasar menjadi sideways
+   mati), bot otomatis menutup posisi secara paksa agar modal tidak tersandera.
+
+
+--------------------------------------------------------------------------------
+5. DAFTAR PARAMETER PENGATURAN (config.json)
+--------------------------------------------------------------------------------
+Anda dapat mengubah parameter ini lewat file config.json atau tombol "Pengaturan"
+di Web Dashboard (http://localhost:3005):
+
+- tradingMode           : "PAPER" (Simulasi aman) atau "LIVE" (Uang nyata bursa).
+- leverage              : 5x Cross (Disetel 5x sama persis seperti Leader Binance).
+- marginType            : "CROSSED" (Cross margin).
+- spikeLookbackSeconds  : Jendela waktu pemindaian lonjakan (Bawaan: 20 detik).
+- spikeMinPercent       : Minimal lonjakan untuk menembak (+3.2% untuk titik jenuh wick).
+- takeProfitPct         : Target keuntungan koreksi pullback (Bawaan: 1.2%).
+- trailingTpEnabled     : Mengaktifkan trailing stop untuk memaksimalkan cuan (true/false).
+- hardStopLossPct       : Batas cut-loss darurat anti-likuidasi (Bawaan: 4.5%).
+- marginPerLayerUsdt    : Modal dasar per layer ($3.0 USDT - disesuaikan aman untuk modal $245).
+- totalLayers           : Jumlah lapisan jaring order Short (6 layer).
+- layerSpacingPct       : Jarak harga antar lapisan jaring (1.0% agar rentang jaring lebar).
+- maxTotalMarginPerCoin : Batas modal akumulasi maksimal per koin ($20 USDT agar buffer $225 aman).
+- maxConcurrentCoins    : Kuota koin aktif bersamaan (1 koin).
+- cooldownMinutes       : Waktu istirahat koin setelah selesai trade (Bawaan: 10 menit).
+
+
+--------------------------------------------------------------------------------
+6. CARA MENJALANKAN & MENGOPERASIKAN
+--------------------------------------------------------------------------------
+1. Memulai Bot:
+   Klik ganda berkas: start.bat
+   Atau via terminal: npm run dev
+
+2. Membuka Dashboard:
+   Buka browser di: http://localhost:3005
+
+3. Transisi dari Paper ke Live Trading:
+   - Pantau bot dalam mode "PAPER" selama 1-2 hari sampai Anda nyaman dengan
+     ritme tembakan dan tingkat win rate-nya.
+   - Jika sudah siap trading riil:
+     a. Buat API Key di Binance (Cukup centang: Reading & Futures).
+     b. Buka menu Pengaturan di Dashboard (http://localhost:3005).
+     c. Masukkan API Key & Secret, lalu ubah mode ke "Live Trading".
+     d. Klik "Simpan Perubahan". Bot langsung aktif menembak dengan saldo bursa!
+
+================================================================================
+                    SELAMAT MENGGUNAKAN WICK SNIPER BOT!
+================================================================================

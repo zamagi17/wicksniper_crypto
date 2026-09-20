@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎯 Wick Sniper Bot - Binance Futures HFT Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="navbar">
+    <div class="nav-brand">
+      <div class="logo-badge">🎯</div>
+      <div class="brand-text">
+        <h1>WICK SNIPER <span class="badge-hft">HFT REVERSAL</span></h1>
+        <p class="subtitle">Spike Pump Hunter & Upper Wick Sniping Engine</p>
+      </div>
+    </div>
+
+    <div class="nav-actions">
+      <div id="ws-indicator" class="status-pill offline">
+        <span class="dot"></span>
+        <span id="ws-status-text">OFFLINE</span>
+      </div>
+
+      <div id="mode-badge" class="badge-mode paper">🧪 PAPER TRADING</div>
+
+      <button id="btn-toggle-engine" class="btn btn-primary" onclick="toggleEngine()">
+        <span id="btn-engine-icon">▶</span>
+        <span id="btn-engine-text">Jalankan Bot</span>
+      </button>
+
+      <button class="btn btn-secondary" onclick="openBacktestModal()">🧪 Backtest Lab</button>
+      <button class="btn btn-secondary" onclick="openSettingsModal()">⚙️ Pengaturan</button>
+      <button class="btn btn-danger" onclick="resetDemo()">🧹 Reset Demo</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- KPI METRICS ROW -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Saldo Akun</div>
+        <div class="kpi-value text-accent" id="metric-balance">$1,000.00</div>
+        <div class="kpi-sub" id="metric-balance-type">Mode Virtual Paper</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-label">Akumulasi Realized PnL</div>
+        <div class="kpi-value" id="metric-pnl">+$0.00</div>
+        <div class="kpi-sub" id="metric-pnl-sub">0 Trade Selesai</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-label">Win Rate</div>
+        <div class="kpi-value text-gold" id="metric-winrate">0.0%</div>
+        <div class="kpi-sub" id="metric-winrate-sub">0 Menang / 0 Kalah</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-label">Spike Terdeteksi Hari Ini</div>
+        <div class="kpi-value text-cyan" id="metric-spikes">0</div>
+        <div class="kpi-sub">Sensor WebSocket Live</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-label">Leverage & Kuota</div>
+        <div class="kpi-value text-purple" id="metric-leverage">5x Cross</div>
+        <div class="kpi-sub" id="metric-positions-count">0 / 2 Koin Aktif</div>
+      </div>
+    </section>
+
+    <!-- MAIN TWO-COLUMN LAYOUT -->
+    <div class="dashboard-columns">
+      <!-- LEFT COLUMN: POSITIONS & RADAR -->
+      <div class="col-left">
+        <!-- ACTIVE POSITIONS SECTION -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">⚡</span>
+              <h2>Posisi Aktif & Jaring Grid Ladder</h2>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span class="badge-margin-tag" id="active-margin-tag" style="display: none;">Margin Aktif: $0.00 USDT</span>
+              <span class="tag-counter" id="active-count-tag">0 Posisi</span>
+            </div>
+          </div>
+
+          <div id="active-positions-container" class="positions-list">
+            <div class="empty-state">
+              <div class="empty-icon">🕸️</div>
+              <p>Belum ada posisi aktif.</p>
+              <small>Bot sedang memindai 300+ koin futures untuk mendeteksi lonjakan harga (spike)...</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- SPIKE RADAR FEED -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">📡</span>
+              <h2>Radar Spike Lonjakan Pasar Terkini</h2>
+            </div>
+            <span class="tag-pulse" id="radar-pulse-tag">Memindai 0 Koin (0 tick/s)</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Simbol</th>
+                  <th>Harga Awal</th>
+                  <th>Puncak</th>
+                  <th>Lonjakan (%)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="spike-table-body">
+                <tr>
+                  <td colspan="6" class="text-center text-muted">Belum ada lonjakan harga yang melewati ambang batas.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: TRADES & LOGS -->
+      <div class="col-right">
+        <!-- LIVE TERMINAL LOGS -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">📟</span>
+              <h2>Live Terminal Log</h2>
+            </div>
+            <button class="btn btn-xs" onclick="clearLocalLogs()">Bersihkan</button>
+          </div>
+
+          <div class="terminal-box" id="terminal-logs">
+            <div class="log-entry info">[SISTEM] Inisialisasi Terminal Wick Sniper...</div>
+          </div>
+        </div>
+
+        <!-- CLOSED TRADES HISTORY -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">📜</span>
+              <h2>Riwayat Trade Selesai</h2>
+            </div>
+            <span class="tag-counter" id="closed-count-tag">0 Trade</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Simbol</th>
+                  <th>Margin</th>
+                  <th>Entry ➜ Exit</th>
+                  <th>Durasi</th>
+                  <th>Realized PnL</th>
+                  <th>Alasan Exit</th>
+                </tr>
+              </thead>
+              <tbody id="closed-trades-body">
+                <tr>
+                  <td colspan="7" class="text-center text-muted">Belum ada trade yang ditutup.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚙️ Pengaturan Parameter Wick Sniper</h3>
+        <button class="btn-close" onclick="closeSettingsModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Mode Trading</label>
+            <select id="cfg-mode" class="form-control">
+              <option value="PAPER">🧪 Paper Trading (Simulasi Demo Saldo Aman)</option>
+              <option value="LIVE">🟢 Live Trading (Akun Real Binance Futures)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Leverage Default (1x - 50x)</label>
+            <input type="number" id="cfg-leverage" min="1" max="50" step="1" class="form-control" placeholder="5">
+            <small class="form-hint">Leverage posisi Short (Leader rata-rata 5x - 10x).</small>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Tipe Margin</label>
+          <select id="cfg-margin-type" class="form-control">
+            <option value="CROSSED">Cross Margin (Disarankan)</option>
+            <option value="ISOLATED">Isolated Margin</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Minimal Spike Lonjakan (%)</label>
+            <input type="number" id="cfg-spike-pct" step="0.1" class="form-control" placeholder="2.5">
+            <small class="form-hint">Memicu jika harga melonjak >= X% dalam 20 detik.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Target Take Profit (%)</label>
+            <input type="number" id="cfg-tp-pct" step="0.1" class="form-control" placeholder="1.2">
+            <small class="form-hint">Exit saat harga koreksi X% di bawah harga rata-rata.</small>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Hard Stop Loss (%)</label>
+            <input type="number" id="cfg-sl-pct" step="0.1" class="form-control" placeholder="4.5">
+            <small class="form-hint">Cut loss mutlak jika koin terus melesat tanpa koreksi.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Modal Per Layer (USDT)</label>
+            <input type="number" id="cfg-margin-layer" step="1" class="form-control" placeholder="10">
+            <small class="form-hint">Modal dasar untuk setiap jaring order Short.</small>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Jumlah Layer Jaring (Maks 10)</label>
+            <input type="number" id="cfg-total-layers" step="1" class="form-control" placeholder="6">
+          </div>
+
+          <div class="form-group">
+            <label>Jarak Antar Jaring (%)</label>
+            <input type="number" id="cfg-layer-spacing" step="0.1" class="form-control" placeholder="0.6">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Binance API Key (Opsional untuk Live)</label>
+          <input type="text" id="cfg-api-key" class="form-control" placeholder="Masukkan API Key Binance">
+        </div>
+
+        <div class="form-group">
+          <label>Binance API Secret (Opsional untuk Live)</label>
+          <input type="password" id="cfg-api-secret" class="form-control" placeholder="Masukkan API Secret Binance">
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
+        <button class="btn btn-primary" onclick="saveSettings()">Simpan Perubahan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BACKTEST LAB MODAL -->
+  <div id="backtest-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="panel-title">
+          <span class="icon">🧪</span>
+          <h2>Wick Sniper Backtest Lab (Simulasi Data Historis)</h2>
+        </div>
+        <button class="btn-close" onclick="closeBacktestModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- FORM PENGATURAN BACKTEST -->
+        <div class="backtest-controls-grid">
+          <!-- TARGET SYMBOLS -->
+          <div class="form-group full-width">
+            <label>Target Koin Futures (Pisahkan dengan koma):</label>
+            <input type="text" id="bt-symbols" class="form-control" value="AKEUSDT, CROSSUSDT, BTWUSDT" placeholder="AKEUSDT, CROSSUSDT, BTWUSDT" />
+            <small class="form-hint">Mendukung semua koin perpetual USDT di Binance Futures.</small>
+          </div>
+
+          <!-- QUICK PRESETS -->
+          <div class="form-group full-width">
+            <label>Pilihan Cepat Rentang Waktu:</label>
+            <div class="preset-buttons-row">
+              <button type="button" class="btn-preset" onclick="setBtPreset(1)">⚡ 24 Jam</button>
+              <button type="button" class="btn-preset active" onclick="setBtPreset(3)">📅 3 Hari</button>
+              <button type="button" class="btn-preset" onclick="setBtPreset(7)">📅 7 Hari</button>
+              <button type="button" class="btn-preset" onclick="setBtPreset(14)">📅 14 Hari</button>
+              <button type="button" class="btn-preset" onclick="setBtPreset(30)">📅 30 Hari</button>
+            </div>
+          </div>
+
+          <!-- DATE RANGE PICKERS -->
+          <div class="form-group">
+            <label>Tanggal Mulai (Start Date & Time):</label>
+            <input type="datetime-local" id="bt-start-date" class="form-control" />
+          </div>
+
+          <div class="form-group">
+            <label>Tanggal Selesai (End Date & Time):</label>
+            <input type="datetime-local" id="bt-end-date" class="form-control" />
+          </div>
+
+          <!-- PARAMETERS -->
+          <div class="form-group">
+            <label>Leverage (Rekomendasi: 5x Cross):</label>
+            <input type="number" id="bt-leverage" class="form-control" value="5" min="1" max="50" />
+          </div>
+
+          <div class="form-group">
+            <label>Ambang Pemicu Spike (%):</label>
+            <input type="number" id="bt-spike" class="form-control" value="3.2" step="0.1" min="1.0" />
+          </div>
+
+          <div class="form-group">
+            <label>Target Take Profit (%):</label>
+            <input type="number" id="bt-tp" class="form-control" value="1.2" step="0.1" min="0.5" />
+          </div>
+
+          <div class="form-group">
+            <label>Hard Stop-Loss (%):</label>
+            <input type="number" id="bt-sl" class="form-control" value="4.5" step="0.1" min="1.0" />
+          </div>
+
+          <div class="form-group">
+            <label>Modal Per Layer (USDT):</label>
+            <input type="number" id="bt-margin" class="form-control" value="5" step="1" min="1" />
+          </div>
+
+          <div class="form-group">
+            <label>Jarak Antar Layer (%):</label>
+            <input type="number" id="bt-spacing" class="form-control" value="1.0" step="0.1" min="0.2" />
+          </div>
+        </div>
+
+        <!-- TOMBOL JALANKAN -->
+        <div style="margin: 16px 0; display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="btn btn-secondary" onclick="closeBacktestModal()">Tutup</button>
+          <button class="btn btn-primary" id="btn-run-backtest" onclick="executeBacktest()">
+            <span id="bt-btn-icon">🚀</span> <span id="bt-btn-text">Mulai Backtest Historis</span>
+          </button>
+        </div>
+
+        <!-- LOADING STATE -->
+        <div id="bt-loading" style="display: none; text-align: center; padding: 24px; background: rgba(0, 240, 255, 0.05); border-radius: var(--radius-sm); border: 1px dashed rgba(0, 240, 255, 0.3);">
+          <div style="font-size: 24px; animation: spin 1s infinite linear; display: inline-block;">⏳</div>
+          <p style="margin-top: 10px; color: var(--color-cyan); font-weight: 600;">Sedang mengunduh candlestick 1m dari Binance & mensimulasikan jaring Wick Sniper...</p>
+          <small class="text-muted">Proses ini memakan waktu 3 - 8 detik tergantung rentang hari.</small>
+        </div>
+
+        <!-- RESULTS AREA -->
+        <div id="bt-results-container" style="display: none; margin-top: 16px;">
+          <h3 style="font-size: 14px; font-weight: 800; margin-bottom: 12px; color: var(--color-cyan);">📈 RINGKASAN HASIL SIMULASI:</h3>
+
+          <!-- KPI CARDS -->
+          <div class="kpi-grid" style="margin-bottom: 16px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+            <div class="kpi-card">
+              <div class="kpi-label">Win Rate</div>
+              <div class="kpi-value text-green" id="bt-res-winrate">0%</div>
+              <div class="kpi-sub" id="bt-res-winrate-sub">0 Menang / 0 Kalah</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Keuntungan Bersih</div>
+              <div class="kpi-value text-green" id="bt-res-pnl">+$0.00</div>
+              <div class="kpi-sub" id="bt-res-pnl-sub">0.0% dari modal</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Total Trade Selesai</div>
+              <div class="kpi-value text-cyan" id="bt-res-trades">0</div>
+              <div class="kpi-sub" id="bt-res-candles">0 Lilin Dianalisis</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Profit Factor & Drawdown</div>
+              <div class="kpi-value text-purple" id="bt-res-pf">0.0</div>
+              <div class="kpi-sub" id="bt-res-mdd">Max Drawdown: -$0.00</div>
+            </div>
+          </div>
+
+          <!-- SIMULATED TRADES TABLE -->
+          <div class="panel-header" style="margin-top: 16px; border-radius: 6px 6px 0 0;">
+            <div class="panel-title">
+              <span class="icon">📜</span>
+              <h2>Daftar Riwayat Trade Teruji</h2>
+            </div>
+            <span class="tag-counter" id="bt-trade-count-tag">0 Trade</span>
+          </div>
+
+          <div class="table-responsive" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 6px 6px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Waktu Entri</th>
+                  <th>Simbol</th>
+                  <th>Margin</th>
+                  <th>Entry ➜ Exit</th>
+                  <th>Durasi</th>
+                  <th>Realized PnL</th>
+                  <th>Alasan Exit</th>
+                </tr>
+              </thead>
+              <tbody id="bt-trades-table-body">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
