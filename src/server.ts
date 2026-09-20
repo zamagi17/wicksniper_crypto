@@ -23,7 +23,8 @@ app.get('/api/status', (req, res) => {
   res.json(engine.getStatus());
 });
 
-app.get('/api/config', (req, res) => {
+app.get('/api/config', async (req, res) => {
+  await engine.syncConfigFromDb();
   res.json(engine.getConfig());
 });
 
@@ -77,8 +78,9 @@ app.get('/api/logs', (req, res) => {
 
 // WebSocket Realtime Broadcaster
 wss.on('connection', (ws) => {
-  // Kirim initial state
+  // Kirim initial state & config
   ws.send(JSON.stringify({ type: 'STATUS', data: engine.getStatus() }));
+  ws.send(JSON.stringify({ type: 'CONFIG', data: engine.getConfig() }));
   ws.send(JSON.stringify({ type: 'LOGS', data: logger.getLogs() }));
 });
 
@@ -93,6 +95,10 @@ function broadcast(type: string, data: any) {
 
 engine.onStatus((status) => {
   broadcast('STATUS', status);
+});
+
+engine.onConfig((config) => {
+  broadcast('CONFIG', config);
 });
 
 logger.onLog((log) => {

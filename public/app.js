@@ -26,6 +26,9 @@ function connectWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'STATUS') {
         renderStatus(msg.data);
+      } else if (msg.type === 'CONFIG') {
+        currentConfig = msg.data;
+        if (currentStatus) renderStatus(currentStatus);
       } else if (msg.type === 'LOG') {
         appendLog(msg.data);
         if (msg.data.level === 'SNIPER') {
@@ -364,7 +367,11 @@ async function resetDemo() {
 }
 
 // MODAL SETTINGS
-function openSettingsModal() {
+async function openSettingsModal() {
+  try {
+    const fresh = await fetch('/api/config').then((r) => r.json());
+    if (fresh) currentConfig = fresh;
+  } catch {}
   if (!currentConfig) return;
   document.getElementById('cfg-mode').value = currentConfig.tradingMode || 'PAPER';
   document.getElementById('cfg-leverage').value = currentConfig.leverage || 5;

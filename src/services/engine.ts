@@ -16,6 +16,7 @@ export class WickSniperEngine {
   private closedTrades: ClosedTrade[] = [];
   private spikesDetectedToday: number = 0;
   private statusListeners: ((status: EngineStatus) => void)[] = [];
+  private configListeners: ((config: BotConfig) => void)[] = [];
   private tickInterval: NodeJS.Timeout | null = null;
 
   constructor(configPath: string) {
@@ -145,10 +146,15 @@ export class WickSniperEngine {
     await binanceFutures.startTickerWebSocket();
     this.scanner.start();
 
-    // Heartbeat ticker & time-limit check tiap 1 detik
-    this.tickInterval = setInterval(() => {
+    // Heartbeat ticker, time-limit check tiap 1 detik, & sinkronisasi DB tiap 5 detik
+    let tickCount = 0;
+    this.tickInterval = setInterval(async () => {
       this.checkTimeLimitsAndTrailing();
       this.broadcastStatus();
+      tickCount++;
+      if (tickCount % 5 === 0) {
+        await this.syncConfigFromDb();
+      }
     }, 1000);
   }
 
@@ -540,11 +546,45 @@ export class WickSniperEngine {
     this.statusListeners.push(callback);
   }
 
+  public onConfig(callback: (config: BotConfig) => void) {
+    this.configListeners.push(callback);
+  }
+
   private broadcastStatus() {
     const status = this.getStatus();
     for (const fn of this.statusListeners) {
       fn(status);
     }
+  }
+
+  private broadcastConfig() {
+    for (const fn of this.configListeners) {
+      fn(this.config);
+    }
+  }
+
+  /**
+   * Otomatis membaca ulang konfigurasi dari Database PostgreSQL jika terjadi perubahan "dari belakang"
+   */
+  public async syncConfigFromDb(): Promise<boolean> {
+    if (!db.isConnected) return false;
+    try {
+      const dbCfg = await db.loadConfig();
+      if (dbCfg && JSON.stringify(dbCfg) !== JSON.stringify(this.config)) {
+        this.config = { ...this.config, ...dbCfg };
+        this.scanner.updateConfig(this.config.scanner);
+        if (this.config.apiKey && this.config.apiSecret) {
+          binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+        }
+        logger.log('INFO', '🔄 [DATABASE AUTO-SYNC] Konfigurasi bot otomatis diperbarui dari PostgreSQL!');
+        this.broadcastConfig();
+        this.broadcastStatus();
+        return true;
+      }
+    } catch (e: any) {
+      // ignore
+    }
+    return false;
   }
 
   public resetDemoWallet() {
