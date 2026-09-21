@@ -546,11 +546,15 @@ export class BinanceFuturesClient {
   /**
    * Mengambil riwayat trade pengguna terkini untuk koin tertentu untuk mendapatkan harga eksekusi riil, fee, dan realized PnL Binance
    */
-  public async getUserTrades(symbol: string, limit: number = 10): Promise<any[]> {
+  public async getUserTrades(symbol: string, limit: number = 20, startTime?: number): Promise<any[]> {
     if (!this.apiKey || !this.apiSecret) return [];
     try {
       const client = await this.getHttpClient();
-      const data = this.signParams({ symbol, limit: String(limit) });
+      const params: Record<string, any> = { symbol, limit: String(limit) };
+      if (startTime && startTime > 0) {
+        params.startTime = String(Math.floor(startTime));
+      }
+      const data = this.signParams(params);
       const res = await client.get(`/fapi/v1/userTrades?${data}`);
       return Array.isArray(res?.data) ? res.data : [];
     } catch (err: any) {

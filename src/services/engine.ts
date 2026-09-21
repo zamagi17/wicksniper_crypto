@@ -504,6 +504,7 @@ export class WickSniperEngine {
       const symbol = t.s;
       const pos = this.activePositions.get(symbol);
       if (!pos) continue;
+      if (pos.status === 'CLOSING' || pos.status === 'CLOSED') continue;
 
       const currentPrice = parseFloat(t.c || t.p || '0');
       if (currentPrice <= 0) continue;
@@ -610,10 +611,17 @@ export class WickSniperEngine {
       }
 
       // C. TRAILING TAKE PROFIT
-      if (this.config.exit.trailingTpEnabled && pos.peakPnlPct >= this.config.exit.takeProfitPct * pos.leverage) {
+      // Proteksi volatilitas: minimal 5 detik sejak order dibuka, pnlPct minimal 1.0% (menutupi fee roundtrip),
+      // dan harga pasar harus benar-benar di bawah avgEntryPrice (profit riil untuk SHORT)
+      const trailingAgeMs = Date.now() - pos.openedAt;
+      if (
+        this.config.exit.trailingTpEnabled &&
+        trailingAgeMs >= 5000 &&
+        pos.peakPnlPct >= this.config.exit.takeProfitPct * pos.leverage
+      ) {
         const dropFromPeak = pos.peakPnlPct - pos.pnlPct;
         const callbackThreshold = (this.config.exit.trailingCallbackPct || 0.4) * pos.leverage;
-        if (dropFromPeak >= callbackThreshold && pos.pnlPct > 0) {
+        if (dropFromPeak >= callbackThreshold && pos.pnlPct >= 1.0 && currentPrice < pos.avgEntryPrice) {
           this.closePosition(pos, 'TRAILING_TP', currentPrice);
           continue;
         }
@@ -721,7 +729,12 @@ export class WickSniperEngine {
     reason: ClosedTrade['exitReason'],
     closePrice: number
   ) {
+    if (pos.status === 'CLOSING' || pos.status === 'CLOSED') {
+      logger.log('WARN', `⚠️ [DUPLIKAT DIHINDARI] Posisi ${pos.symbol} sudah dalam proses penutupan (status: ${pos.status}).`, pos.symbol);
+      return;
+    }
     pos.status = 'CLOSING';
+
     const durationSeconds = Math.round((Date.now() - pos.openedAt) / 1000);
     const pnl = (pos.avgEntryPrice - closePrice) * pos.totalQty;
     const finalRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0)) * 100) / 100;
@@ -730,29 +743,43 @@ export class WickSniperEngine {
     let actualExitPrice = closePrice;
     let actualRealizedPnl = finalRealizedPnl;
     let actualPnlPct = pnlPct;
+    let closeResOrderId: string | undefined = undefined;
 
     if (this.config.tradingMode === 'LIVE') {
-      // Live Trading: Batalkan order limit pending lalu tutup posisi market
-      await binanceFutures.cancelAllOrders(pos.symbol);
+      // 1. Cek status posisi aktual di Binance matching engine
+      let realPos: any = null;
+      try {
+        realPos = await binanceFutures.getOpenPosition(pos.symbol);
+      } catch (e: any) {
+        console.warn(`[closePosition] Gagal cek posisi riil ${pos.symbol}:`, e.message);
+      }
 
-      // Ambil ukuran posisi riil langsung dari Binance matching engine agar kuantitas 100% presisi dan tidak kena reject -2022
-      const realPos = await binanceFutures.getOpenPosition(pos.symbol);
-      const closeQty = realPos && Math.abs(realPos.positionAmt) > 0 ? Math.abs(realPos.positionAmt) : pos.totalQty;
+      const isPositionAlreadyClosed = !realPos || Math.abs(realPos.positionAmt) === 0;
+
+      // 2. Batalkan order limit pending (layer grid belum terisi & limit TP jika ada)
+      await binanceFutures.cancelAllOrders(pos.symbol).catch(() => {});
 
       let fillExitPrice = 0;
       let execQty = 0;
 
-      if (closeQty > 0) {
-        const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
-        execQty = parseFloat(closeRes?.executedQty || '0');
-        const cumQuote = parseFloat(closeRes?.cumQuote || '0');
-        fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
-        if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
-          fillExitPrice = cumQuote / execQty;
-        }
+      // 3. HANYA kirim Market Order penutupan jika posisi di Binance benar-benar masih terbuka (> 0)
+      if (!isPositionAlreadyClosed) {
+        const closeQty = Math.abs(realPos.positionAmt);
+        if (closeQty > 0) {
+          const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+          if (closeRes?.orderId) {
+            closeResOrderId = String(closeRes.orderId);
+          }
+          execQty = parseFloat(closeRes?.executedQty || '0');
+          const cumQuote = parseFloat(closeRes?.cumQuote || '0');
+          fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
+          if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
+            fillExitPrice = cumQuote / execQty;
+          }
 
-        if (fillExitPrice > 0) {
-          actualExitPrice = fillExitPrice;
+          if (fillExitPrice > 0) {
+            actualExitPrice = fillExitPrice;
+          }
         }
       }
 
@@ -761,34 +788,34 @@ export class WickSniperEngine {
 
       // Ambil riwayat trade terakhir dari Binance untuk sinkronisasi Realized PnL, Entry Price, Exit Price & Fee 100% presisi
       try {
-        const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 10);
+        const minTime = pos.openedAt - 10000;
+        const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 20, minTime);
         if (recentTrades.length > 0) {
-          const minTime = pos.openedAt - 15000;
-          // Trade BUY (penutupan short)
-          let closingTrades = recentTrades.filter(
-            (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
-          );
+          // Cari trade BUY (penutupan short):
+          // Prioritas 1: Cocokkan dengan pos.tpOrderId (jika Limit TP terisi di Binance)
+          // Prioritas 2: Cocokkan dengan closeResOrderId (jika Market Close baru saja tereksekusi)
+          // Prioritas 3: Trade BUY yang waktu eksekusinya >= minTime
+          let closingTrades: any[] = [];
+          if (pos.tpOrderId) {
+            closingTrades = recentTrades.filter((tr: any) => String(tr.orderId) === String(pos.tpOrderId));
+          }
+          if (closingTrades.length === 0 && closeResOrderId) {
+            closingTrades = recentTrades.filter((tr: any) => String(tr.orderId) === String(closeResOrderId));
+          }
           if (closingTrades.length === 0) {
-            const latestBuy = recentTrades.find((tr: any) => tr.side === 'BUY');
-            if (latestBuy) closingTrades = [latestBuy];
+            closingTrades = recentTrades.filter(
+              (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
+            );
           }
 
-          // Trade SELL (pembukaan short / layer terisi) untuk sinkronkan entry price aktual
-          const openingTrades = recentTrades.filter(
-            (tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime)
-          );
-          if (openingTrades.length > 0) {
-            let totalEntryQty = 0;
-            let totalEntryQuote = 0;
-            for (const otr of openingTrades) {
-              const q = parseFloat(otr.qty || '0');
-              const p = parseFloat(otr.price || '0');
-              totalEntryQty += q;
-              totalEntryQuote += q * p;
-            }
-            if (totalEntryQty > 0) {
-              pos.avgEntryPrice = totalEntryQuote / totalEntryQty;
-            }
+          // Fallback ekstra jika closingTrades belum terbaca tetapi ada pos.tpOrderId
+          if (closingTrades.length === 0 && pos.tpOrderId) {
+            try {
+              const tpOrder = await binanceFutures.getOrder(pos.symbol, pos.tpOrderId);
+              if (tpOrder && parseFloat(tpOrder.avgPrice || '0') > 0) {
+                actualExitPrice = parseFloat(tpOrder.avgPrice);
+              }
+            } catch {}
           }
 
           if (closingTrades.length > 0) {
@@ -806,7 +833,10 @@ export class WickSniperEngine {
               totalTradedQuote += tQty * tPrice;
             }
 
-            // Tambahkan fee pembukaan (SELL) jika ada
+            // Tambahkan fee pembukaan (SELL) dalam rentang waktu posisi ini (openedAt - 10000)
+            const openingTrades = recentTrades.filter(
+              (tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime)
+            );
             for (const otr of openingTrades) {
               binanceFeeSum += parseFloat(otr.commission || '0');
             }
@@ -821,6 +851,11 @@ export class WickSniperEngine {
             const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
             actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
 
+            // Koreksi otomatis jika reason TAKE_PROFIT tapi PnL riil Binance justru minus
+            if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
+              reason = 'HARD_STOP_LOSS';
+            }
+
             logger.log(
               actualRealizedPnl >= 0 ? 'SUCCESS' : 'WARN',
               `📊 [BINANCE PNL SYNC] ${pos.symbol}: Entry Riil: $${pos.avgEntryPrice.toFixed(6)} | Exit Riil: $${actualExitPrice.toFixed(6)} | Gross: $${binancePnlSum.toFixed(4)} | Fee: $${binanceFeeSum.toFixed(4)} | Net PnL: ${actualRealizedPnl >= 0 ? '+' : ''}$${actualRealizedPnl.toFixed(2)} USDT`,
@@ -829,7 +864,7 @@ export class WickSniperEngine {
           } else if (fillExitPrice > 0) {
             const grossPnl = (pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
             const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.0005;
-            actualRealizedPnl = Math.round((grossPnl - estFee) * 100) / 100;
+            actualRealizedPnl = Math.round((grossPnl - estFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
             const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
             actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
           }
@@ -886,6 +921,7 @@ export class WickSniperEngine {
     this.closedTrades.unshift(trade);
     if (this.closedTrades.length > 100) this.closedTrades.pop();
 
+    pos.status = 'CLOSED';
     this.activePositions.delete(pos.symbol);
 
     db.saveTrade(trade).catch(() => {});
@@ -899,21 +935,21 @@ export class WickSniperEngine {
     // Berikan cooldown pada koin yang baru ditutup agar tidak re-enter pucuk yang sama
     this.scanner.setCooldown(pos.symbol, this.config.scanner.cooldownMinutes || 10);
 
-    const isProfit = finalRealizedPnl >= 0;
+    const isProfit = trade.realizedPnl >= 0;
     const reasonLabel =
-      reason === 'TAKE_PROFIT'
+      trade.exitReason === 'TAKE_PROFIT'
         ? '🎯 Take Profit (Pullback Wick)'
-        : reason === 'TRAILING_TP'
+        : trade.exitReason === 'TRAILING_TP'
         ? '📈 Trailing Take Profit'
-        : reason === 'HARD_STOP_LOSS'
+        : trade.exitReason === 'HARD_STOP_LOSS'
         ? '🛑 Hard Stop Loss (Cut-Off)'
-        : reason === 'TIME_LIMIT_EXIT'
+        : trade.exitReason === 'TIME_LIMIT_EXIT'
         ? '⏰ Batas Waktu Hold'
         : 'Tutup Manual';
 
     logger.log(
       isProfit ? 'SUCCESS' : 'WARN',
-      `🏁 [POSISI DITUTUP] ${pos.symbol} SHORT | Aksi: ${reasonLabel} | Entry: $${trade.entryPrice} ➜ Exit: $${trade.exitPrice} | PnL: ${finalRealizedPnl >= 0 ? '+' : ''}$${finalRealizedPnl} USDT (${pnlPct >= 0 ? '+' : ''}${pnlPct}%) | Durasi: ${durationSeconds} detik`,
+      `🏁 [POSISI DITUTUP] ${pos.symbol} SHORT | Aksi: ${reasonLabel} | Entry: $${trade.entryPrice} ➜ Exit: $${trade.exitPrice} | PnL: ${trade.realizedPnl >= 0 ? '+' : ''}$${trade.realizedPnl} USDT (${trade.pnlPct >= 0 ? '+' : ''}${trade.pnlPct}%) | Durasi: ${durationSeconds} detik`,
       pos.symbol
     );
 
@@ -949,7 +985,7 @@ export class WickSniperEngine {
         // Jika di Binance posisinya sudah 0 dan posisi bot sudah berjalan lebih dari 5 detik,
         // artinya posisi sudah tertutup otomatis di Binance (Limit Take Profit terisi oleh matching engine)
         if (realPos.positionAmt === 0 && Date.now() - pos.openedAt > 5000 && pos.status === 'SNIPING') {
-          logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Limit Order TP ${symbol} telah dieksekusi oleh Binance! Menandai profit di bot...`, symbol);
+          logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance! Menyinkronkan eksekusi riil...`, symbol);
           await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
           continue;
         }
