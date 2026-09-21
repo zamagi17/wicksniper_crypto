@@ -448,6 +448,9 @@ export class WickSniperEngine {
     }
 
     this.activePositions.set(symbol, initialPos);
+    if (this.config.tradingMode === 'LIVE') {
+      this.syncLiveTakeProfitOrder(initialPos).catch(() => {});
+    }
     db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
     telegram.notifyNewOrder(
@@ -470,7 +473,7 @@ export class WickSniperEngine {
   /**
    * Pembaruan live harga dari WebSocket untuk mengecek trigger jaring dan TP/SL
    */
-  private onPriceTick(tickers: any[]) {
+  private async onPriceTick(tickers: any[]) {
     if (this.activePositions.size === 0) return;
 
     for (const t of tickers) {
@@ -564,6 +567,17 @@ export class WickSniperEngine {
           }
         }
 
+        // Jika dalam mode LIVE dan memiliki Limit TP order yang terpasang di Binance:
+        if (this.config.tradingMode === 'LIVE' && pos.tpOrderId) {
+          // Periksa apakah posisi di Binance sudah tertutup otomatis oleh Limit TP matching engine
+          const openPos = await binanceFutures.getOpenPosition(pos.symbol);
+          if (!openPos || Math.abs(openPos.positionAmt) === 0) {
+            // Sudah terisi 100% oleh Limit Order Binance di targetTpPrice tanpa slippage!
+            this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice);
+            continue;
+          }
+        }
+
         this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
         continue;
       }
@@ -606,6 +620,46 @@ export class WickSniperEngine {
         `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${pos.avgEntryPrice.toFixed(4)} | Volume: ${pos.totalQty} | TP Baru: $${pos.targetTpPrice.toFixed(4)}`,
         pos.symbol
       );
+
+      // Jika dalam mode LIVE, sinkronkan Take Profit Limit Order ke Binance
+      if (this.config.tradingMode === 'LIVE') {
+        this.syncLiveTakeProfitOrder(pos).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Memasang atau memperbarui Order LIMIT BUY (Take Profit) langsung di buku pesanan Binance
+   * Nol slippage & mendapatkan fee Maker (0.02%) yang jauh lebih hemat daripada market order
+   */
+  public async syncLiveTakeProfitOrder(pos: ActivePosition) {
+    if (this.config.tradingMode !== 'LIVE' || !pos.targetTpPrice || pos.totalQty <= 0) return;
+    try {
+      // 1. Batalkan order TP lama jika ada
+      if (pos.tpOrderId) {
+        await binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
+        pos.tpOrderId = undefined;
+      }
+
+      // 2. Pasang LIMIT BUY untuk Take Profit (reduceOnly)
+      const tpRes = await binanceFutures.placeLimitOrder(
+        pos.symbol,
+        'BUY',
+        pos.totalQty,
+        pos.targetTpPrice,
+        true
+      );
+
+      if (tpRes?.orderId) {
+        pos.tpOrderId = String(tpRes.orderId);
+        logger.log(
+          'SUCCESS',
+          `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Order Limit Take Profit terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`,
+          pos.symbol
+        );
+      }
+    } catch (err: any) {
+      console.error(`Gagal syncLiveTakeProfitOrder untuk ${pos.symbol}:`, err.message);
     }
   }
 

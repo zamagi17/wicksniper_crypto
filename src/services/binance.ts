@@ -571,6 +571,63 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Memasang Order Limit (misalnya untuk Take Profit limit order atau entry limit)
+   */
+  public async placeLimitOrder(
+    symbol: string,
+    side: 'BUY' | 'SELL',
+    qty: number,
+    price: number,
+    reduceOnly: boolean = false
+  ): Promise<any> {
+    if (!this.apiKey || !this.apiSecret) return null;
+    try {
+      const client = await this.getHttpClient();
+      const formattedQty = this.formatQty(symbol, qty);
+      const formattedPrice = this.formatPrice(symbol, price);
+      const params: Record<string, any> = {
+        symbol,
+        side,
+        type: 'LIMIT',
+        timeInForce: 'GTC',
+        quantity: formattedQty,
+        price: formattedPrice,
+      };
+
+      if (this.isDualSidePosition) {
+        params.positionSide = side === 'BUY' ? 'SHORT' : 'LONG';
+      } else {
+        params.positionSide = 'BOTH';
+        if (reduceOnly) {
+          params.reduceOnly = 'true';
+        }
+      }
+
+      const data = this.signParams(params);
+      const res = await client.post('/fapi/v1/order', data);
+      return res?.data || null;
+    } catch (err: any) {
+      console.error(`Gagal memasang limit order ${symbol} (${side} @ ${price}):`, err.response?.data || err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Membatalkan order tertentu berdasarkan orderId
+   */
+  public async cancelOrder(symbol: string, orderId: string | number): Promise<boolean> {
+    if (!this.apiKey || !this.apiSecret) return false;
+    try {
+      const client = await this.getHttpClient();
+      const data = this.signParams({ symbol, orderId: String(orderId) });
+      await client.delete(`/fapi/v1/order?${data}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Membatalkan semua order aktif koin tertentu
    */
   public async cancelAllOrders(symbol: string): Promise<void> {

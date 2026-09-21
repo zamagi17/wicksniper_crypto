@@ -100,6 +100,7 @@ export interface ActivePosition {
   status: 'SNIPING' | 'HOLDING' | 'CLOSING' | 'CLOSED';
   partialTpDone?: boolean;
   partialRealizedPnl?: number;
+  tpOrderId?: string;
 }
 
 export interface ClosedTrade {
