@@ -101,6 +101,7 @@ export interface ActivePosition {
   partialTpDone?: boolean;
   partialRealizedPnl?: number;
   tpOrderId?: string;
+  lastTpAttempt?: number;
 }
 
 export interface ClosedTrade {

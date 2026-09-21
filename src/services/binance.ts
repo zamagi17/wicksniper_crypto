@@ -683,8 +683,65 @@ export class BinanceFuturesClient {
       const res = await client.post('/fapi/v1/order', data);
       return res?.data || null;
     } catch (err: any) {
-      console.error(`Gagal memasang limit order ${symbol} (${side} @ ${price}):`, err.response?.data || err.message);
-      return null;
+      const errCode = err.response?.data?.code;
+      const errMsg = err.response?.data?.msg || err.message;
+      console.error(`Gagal memasang limit order ${symbol} (${side} @ ${price}) [Code ${errCode}]:`, errMsg);
+
+      // AUTO-RECOVERY 1: Error -4061 (Order's position side does not match user's setting)
+      // Balikkan isDualSidePosition dan pasang ulang order dengan positionSide yang tepat!
+      if (errCode === -4061) {
+        try {
+          this.isDualSidePosition = !this.isDualSidePosition;
+          console.log(`🔄 [Auto-Recovery -4061] Mengalihkan isDualSidePosition ke ${this.isDualSidePosition} dan mencoba pasang ulang limit order ${symbol}...`);
+          const client = await this.getHttpClient();
+          const retryParams: Record<string, any> = {
+            symbol,
+            side,
+            type: 'LIMIT',
+            timeInForce: 'GTC',
+            quantity: this.formatQty(symbol, qty),
+            price: this.formatPrice(symbol, price),
+          };
+          if (this.isDualSidePosition) {
+            retryParams.positionSide = side === 'BUY' ? 'SHORT' : 'LONG';
+          } else {
+            retryParams.positionSide = 'BOTH';
+            if (reduceOnly) retryParams.reduceOnly = 'true';
+          }
+          const retryData = this.signParams(retryParams);
+          const retryRes = await client.post('/fapi/v1/order', retryData);
+          return retryRes?.data || null;
+        } catch (retryErr: any) {
+          const rCode = retryErr.response?.data?.code;
+          const rMsg = retryErr.response?.data?.msg || retryErr.message;
+          console.error(`Gagal retry limit order ${symbol} [Code ${rCode}]:`, rMsg);
+          return { error: true, code: rCode, msg: rMsg };
+        }
+      }
+
+      // AUTO-RECOVERY 2: Error -2022 (ReduceOnly reject)
+      if (errCode === -2022) {
+        try {
+          console.log(`🔄 [Auto-Recovery -2022] Mencoba tanpa reduceOnly untuk ${symbol}...`);
+          const client = await this.getHttpClient();
+          const retryParams: Record<string, any> = {
+            symbol,
+            side,
+            type: 'LIMIT',
+            timeInForce: 'GTC',
+            quantity: this.formatQty(symbol, qty),
+            price: this.formatPrice(symbol, price),
+            positionSide: this.isDualSidePosition ? (side === 'BUY' ? 'SHORT' : 'LONG') : 'BOTH',
+          };
+          const retryData = this.signParams(retryParams);
+          const retryRes = await client.post('/fapi/v1/order', retryData);
+          return retryRes?.data || null;
+        } catch (retryErr: any) {
+          return { error: true, code: retryErr.response?.data?.code, msg: retryErr.response?.data?.msg || retryErr.message };
+        }
+      }
+
+      return { error: true, code: errCode, msg: errMsg };
     }
   }
 

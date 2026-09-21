@@ -717,9 +717,10 @@ export class WickSniperEngine {
           pos.symbol
         );
       } else {
+        const errorDetail = tpRes?.msg || tpRes?.message || JSON.stringify(tpRes);
         logger.log(
           'ERROR',
-          `❌ [LIMIT TP GAGAL] ${pos.symbol}: Gagal memasang order Take Profit di Binance. Respons: ${JSON.stringify(tpRes)}`,
+          `❌ [LIMIT TP GAGAL] ${pos.symbol}: Gagal memasang order Take Profit di Binance. Alasan: ${errorDetail}`,
           pos.symbol
         );
       }
@@ -1055,8 +1056,12 @@ export class WickSniperEngine {
               const openOrders = await binanceFutures.getOpenOrders(symbol);
               const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
               if (!hasTpOrder) {
-                logger.log('WARN', `⚠️ [TP HILANG] ${symbol}: Tidak ada order Take Profit aktif di Binance. Memasang Limit TP baru...`, symbol);
-                await this.syncLiveTakeProfitOrder(pos);
+                const now = Date.now();
+                if (!pos.lastTpAttempt || now - pos.lastTpAttempt >= 10000) {
+                  pos.lastTpAttempt = now;
+                  logger.log('WARN', `⚠️ [TP HILANG] ${symbol}: Tidak ada order Take Profit aktif di Binance. Memasang Limit TP baru...`, symbol);
+                  await this.syncLiveTakeProfitOrder(pos);
+                }
               }
             } catch {}
           }
