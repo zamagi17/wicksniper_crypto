@@ -540,6 +540,37 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Mengambil riwayat trade pengguna terkini untuk koin tertentu untuk mendapatkan harga eksekusi riil, fee, dan realized PnL Binance
+   */
+  public async getUserTrades(symbol: string, limit: number = 10): Promise<any[]> {
+    if (!this.apiKey || !this.apiSecret) return [];
+    try {
+      const client = await this.getHttpClient();
+      const data = this.signParams({ symbol, limit: String(limit) });
+      const res = await client.get(`/fapi/v1/userTrades?${data}`);
+      return Array.isArray(res?.data) ? res.data : [];
+    } catch (err: any) {
+      console.error(`Gagal mengambil userTrades ${symbol}:`, err.response?.data || err.message);
+      return [];
+    }
+  }
+
+  /**
+   * Mengambil detail order Binance berdasarkan orderId untuk memeriksa harga eksekusi (avgPrice)
+   */
+  public async getOrder(symbol: string, orderId: string | number): Promise<any> {
+    if (!this.apiKey || !this.apiSecret) return null;
+    try {
+      const client = await this.getHttpClient();
+      const data = this.signParams({ symbol, orderId: String(orderId) });
+      const res = await client.get(`/fapi/v1/order?${data}`);
+      return res?.data || null;
+    } catch (err: any) {
+      return null;
+    }
+  }
+
+  /**
    * Membatalkan semua order aktif koin tertentu
    */
   public async cancelAllOrders(symbol: string): Promise<void> {

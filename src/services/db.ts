@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { BotConfig, ClosedTrade, ActivePosition } from '../types';
+import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert } from '../types';
 
 dotenv.config();
 
@@ -112,6 +112,23 @@ export class DatabaseService {
           CREATE INDEX IF NOT EXISTS idx_wicksniper_trades_timestamp ON wicksniper_trades (timestamp DESC);
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS params_snapshot JSONB;
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS layers_detail JSONB;
+        `);
+
+        // 4. Tabel Riwayat Spike Lonjakan Harga
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS wicksniper_spikes (
+            id VARCHAR(64) PRIMARY KEY,
+            symbol VARCHAR(32) NOT NULL,
+            start_price NUMERIC NOT NULL,
+            current_price NUMERIC NOT NULL,
+            surge_pct NUMERIC NOT NULL,
+            lookback_seconds INT NOT NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+            skip_reason VARCHAR(128),
+            timestamp BIGINT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_spikes_timestamp ON wicksniper_spikes (timestamp DESC);
         `);
 
         this.isConnected = true;
@@ -270,6 +287,67 @@ export class DatabaseService {
       console.log('[Database] 🧹 Tabel wicksniper_trades berhasil dibersihkan.');
     } catch (e: any) {
       console.error('[Database] Gagal truncate trades:', e.message);
+    }
+  }
+
+  // --- SPIKES PERSISTENCE ---
+  public async saveSpike(s: SpikeAlert): Promise<void> {
+    if (!this.isConnected || !this.pool) return;
+    try {
+      await this.pool.query(
+        `INSERT INTO wicksniper_spikes (
+           id, symbol, start_price, current_price, surge_pct, lookback_seconds, status, skip_reason, timestamp
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO UPDATE SET
+           status = EXCLUDED.status,
+           skip_reason = EXCLUDED.skip_reason;`,
+        [
+          s.id,
+          s.symbol,
+          s.startPrice,
+          s.currentPrice,
+          s.surgePct,
+          s.lookbackSeconds,
+          s.status,
+          s.skipReason || null,
+          s.timestamp,
+        ]
+      );
+    } catch (e: any) {
+      console.error('[Database] Gagal simpan spike ke DB:', e.message);
+    }
+  }
+
+  public async loadRecentSpikes(limit: number = 50): Promise<SpikeAlert[]> {
+    if (!this.isConnected || !this.pool) return [];
+    try {
+      const res = await this.pool.query(
+        `SELECT id, symbol,
+                start_price AS "startPrice",
+                current_price AS "currentPrice",
+                surge_pct AS "surgePct",
+                lookback_seconds AS "lookbackSeconds",
+                status, skip_reason AS "skipReason",
+                timestamp
+         FROM wicksniper_spikes
+         ORDER BY timestamp DESC
+         LIMIT $1;`,
+        [limit]
+      );
+      return res.rows.map((r: any) => ({
+        id: r.id,
+        symbol: r.symbol,
+        startPrice: parseFloat(r.startPrice),
+        currentPrice: parseFloat(r.currentPrice),
+        surgePct: parseFloat(r.surgePct),
+        lookbackSeconds: parseInt(r.lookbackSeconds, 10),
+        status: r.status as SpikeAlert['status'],
+        skipReason: r.skipReason || undefined,
+        timestamp: parseInt(r.timestamp, 10),
+      }));
+    } catch (e: any) {
+      console.error('[Database] Gagal load spikes dari DB:', e.message);
+      return [];
     }
   }
 

@@ -202,6 +202,11 @@ export class WickSniperEngine {
       if (dbTrades.length > 0) {
         this.closedTrades = dbTrades;
       }
+      const dbSpikes = await db.loadRecentSpikes(50);
+      if (dbSpikes.length > 0) {
+        this.scanner.setRecentSpikes(dbSpikes);
+        logger.log('INFO', `📡 [DATABASE] ${dbSpikes.length} riwayat spike dimuat dari PostgreSQL.`);
+      }
     }
 
     logger.log('SUCCESS', `🚀 [WICK SNIPER ENGINE AKTIF] Mode: ${this.config.tradingMode} | Leverage: ${this.config.leverage}x`);
@@ -268,16 +273,21 @@ export class WickSniperEngine {
       alert.status = 'SKIPPED';
       alert.skipReason = `Maksimal posisi aktif (${this.config.grid.maxConcurrentCoins}) tercapai`;
       logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh.`);
+      db.saveSpike(alert).catch(() => {});
       return;
     }
 
     // Cek apakah koin ini sudah memiliki posisi aktif
     if (this.activePositions.has(symbol)) {
+      alert.status = 'SKIPPED';
+      alert.skipReason = `Sudah ada posisi aktif pada ${symbol}`;
+      db.saveSpike(alert).catch(() => {});
       return;
     }
 
     alert.status = 'EXECUTING';
     logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
+    db.saveSpike(alert).catch(() => {});
 
     await this.deployGridLadder(symbol, alert.currentPrice, alert.surgePct, alert.lookbackSeconds);
   }
@@ -375,6 +385,47 @@ export class WickSniperEngine {
         return;
       }
       layers[0].orderId = String(res0.orderId);
+
+      // Sinkronisasi HARGA & KUANTITAS EKSEKUSI RIIL dari Binance matching engine
+      const executedQty = parseFloat(res0.executedQty || '0');
+      const cumQuote = parseFloat(res0.cumQuote || '0');
+      let realEntryPrice = parseFloat(res0.avgPrice || '0');
+      if ((!realEntryPrice || realEntryPrice <= 0) && executedQty > 0 && cumQuote > 0) {
+        realEntryPrice = cumQuote / executedQty;
+      }
+
+      if (realEntryPrice > 0) {
+        layers[0].price = realEntryPrice;
+        initialPos.avgEntryPrice = realEntryPrice;
+        if (executedQty > 0) {
+          layers[0].qty = executedQty;
+          initialPos.totalQty = executedQty;
+          layers[0].marginUsdt = (executedQty * realEntryPrice) / leverage;
+          initialPos.totalMarginUsed = layers[0].marginUsdt;
+        }
+
+        // Sinkronkan ulang harga Limit Order layer 1 ke atas dengan jangkar harga eksekusi riil (realEntryPrice)
+        let runningMargin = gridCfg.marginPerLayerUsdt;
+        for (let i = 1; i < layers.length; i++) {
+          runningMargin *= gridCfg.martingaleMultiplier;
+          const layerPrice = realEntryPrice * (1 + (i * gridCfg.layerSpacingPct) / 100);
+          let layerPlanned = (runningMargin * leverage) / layerPrice;
+          if (layerPlanned * layerPrice < prec.minNotional) {
+            layerPlanned = (prec.minNotional * 1.05) / layerPrice;
+          }
+          layers[i].price = parseFloat(binanceFutures.formatPrice(symbol, layerPrice));
+          layers[i].qty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
+        }
+
+        // Hitung ulang target TP dan SL berdasarkan harga eksekusi riil Binance
+        initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+        initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+        logger.log(
+          'INFO',
+          `🎯 [LIVE FILL SYNC] ${symbol} Layer #0 terisi riil di Binance @ $${realEntryPrice.toFixed(6)} | Grid Jaring & Target TP disinkronkan ke $${initialPos.targetTpPrice.toFixed(6)}`,
+          symbol
+        );
+      }
 
       // 2. Kirim limit orders untuk layer 1 ke atas via batchOrders
       const batchPayload = layers.slice(1).map((l) => ({
@@ -584,6 +635,10 @@ export class WickSniperEngine {
     const finalRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0)) * 100) / 100;
     const pnlPct = Math.round(((pos.avgEntryPrice - closePrice) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
 
+    let actualExitPrice = closePrice;
+    let actualRealizedPnl = finalRealizedPnl;
+    let actualPnlPct = pnlPct;
+
     if (this.config.tradingMode === 'LIVE') {
       // Live Trading: Batalkan order limit pending lalu tutup posisi market
       await binanceFutures.cancelAllOrders(pos.symbol);
@@ -593,7 +648,75 @@ export class WickSniperEngine {
       const closeQty = realPos && Math.abs(realPos.positionAmt) > 0 ? Math.abs(realPos.positionAmt) : pos.totalQty;
 
       if (closeQty > 0) {
-        await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+        const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+        
+        // Ekstrak harga penutupan riil dari respon Binance
+        const execQty = parseFloat(closeRes?.executedQty || '0');
+        const cumQuote = parseFloat(closeRes?.cumQuote || '0');
+        let fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
+        if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
+          fillExitPrice = cumQuote / execQty;
+        }
+
+        if (fillExitPrice > 0) {
+          actualExitPrice = fillExitPrice;
+        }
+
+        // Tunggu sejenak agar matching engine Binance selesai membukukan userTrades
+        await new Promise((resolve) => setTimeout(resolve, 600));
+
+        // Ambil riwayat trade terakhir dari Binance untuk sinkronisasi Realized PnL & Fee 100% presisi
+        try {
+          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 5);
+          if (recentTrades.length > 0) {
+            // Filter trade BUY (penutupan short) yang terjadi dalam rentang 15 detik terakhir
+            const nowTs = Date.now();
+            const closingTrades = recentTrades.filter(
+              (tr: any) => tr.side === 'BUY' && (nowTs - tr.time) < 15000
+            );
+
+            if (closingTrades.length > 0) {
+              let binancePnlSum = 0;
+              let binanceFeeSum = 0;
+              let totalTradedQty = 0;
+              let totalTradedQuote = 0;
+
+              for (const tr of closingTrades) {
+                binancePnlSum += parseFloat(tr.realizedPnl || '0');
+                binanceFeeSum += parseFloat(tr.commission || '0');
+                const tQty = parseFloat(tr.qty || '0');
+                const tPrice = parseFloat(tr.price || '0');
+                totalTradedQty += tQty;
+                totalTradedQuote += tQty * tPrice;
+              }
+
+              if (totalTradedQty > 0) {
+                actualExitPrice = totalTradedQuote / totalTradedQty;
+              }
+
+              // Realized PnL bersih (dikurangi fee)
+              const netBinancePnl = binancePnlSum - binanceFeeSum;
+              actualRealizedPnl = Math.round(netBinancePnl * 100) / 100;
+              const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+              actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+
+              logger.log(
+                actualRealizedPnl >= 0 ? 'SUCCESS' : 'WARN',
+                `📊 [BINANCE PNL SYNC] ${pos.symbol}: Gross PnL: $${binancePnlSum.toFixed(4)} | Fee: $${binanceFeeSum.toFixed(4)} | Net PnL Riil: ${actualRealizedPnl >= 0 ? '+' : ''}$${actualRealizedPnl.toFixed(2)} USDT`,
+                pos.symbol
+              );
+            } else if (fillExitPrice > 0) {
+              // Jika userTrades belum selesai diagregasi, hitung berdasarkan harga fill riil dikurangi estimasi fee taker (0.08% roundtrip)
+              const grossPnl = (pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
+              const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.0005;
+              actualRealizedPnl = Math.round((grossPnl - estFee) * 100) / 100;
+              const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+              actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+            }
+          }
+        } catch (e: any) {
+          console.warn(`[Sync PnL] Menggunakan kalkulasi lokal: ${e.message}`);
+        }
       }
     } else {
       // Paper Trading: Sesuaikan saldo virtual untuk sisa posisi
@@ -608,11 +731,11 @@ export class WickSniperEngine {
       symbol: pos.symbol,
       side: 'SHORT',
       entryPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, pos.avgEntryPrice)),
-      exitPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, closePrice)),
+      exitPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, actualExitPrice)),
       qty: pos.totalQty,
       marginUsed: pos.totalMarginUsed,
-      realizedPnl: finalRealizedPnl,
-      pnlPct,
+      realizedPnl: actualRealizedPnl,
+      pnlPct: actualPnlPct,
       durationSeconds,
       exitReason: reason,
       isPaper: this.config.tradingMode === 'PAPER',

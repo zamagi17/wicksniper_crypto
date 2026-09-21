@@ -60,6 +60,10 @@ export class SpikeScanner {
     return this.recentSpikes.slice(0, 30);
   }
 
+  public setRecentSpikes(spikes: SpikeAlert[]) {
+    this.recentSpikes = spikes;
+  }
+
   public getCurrentPrice(symbol: string): number {
     return this.lastPrices.get(symbol) || 0;
   }
