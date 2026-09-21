@@ -882,21 +882,18 @@ async function testBinanceConnection() {
 }
 
 // ==========================================
+// ==========================================
 // WHITELIST TOGGLE
 // ==========================================
 function toggleWhitelistInput() {
   const checkbox = document.getElementById('cfg-whitelist-enabled');
   const inputGroup = document.getElementById('whitelist-input-group');
   if (inputGroup) {
-    if (checkbox && checkbox.checked) {
-      inputGroup.style.opacity = '1';
-      inputGroup.style.pointerEvents = 'auto';
-    } else {
-      inputGroup.style.opacity = '0.4';
-      inputGroup.style.pointerEvents = 'none';
-    }
+    inputGroup.style.pointerEvents = 'auto';
+    inputGroup.style.opacity = checkbox && checkbox.checked ? '1' : '0.8';
   }
 }
+window.toggleWhitelistInput = toggleWhitelistInput;
 
 // ==========================================
 // PARTIAL TAKE PROFIT TOGGLE
@@ -905,15 +902,11 @@ function togglePartialTpInput() {
   const checkbox = document.getElementById('cfg-partial-tp-enabled');
   const group = document.getElementById('partial-tp-ratio-group');
   if (group) {
-    if (checkbox && checkbox.checked) {
-      group.style.opacity = '1';
-      group.style.pointerEvents = 'auto';
-    } else {
-      group.style.opacity = '0.4';
-      group.style.pointerEvents = 'none';
-    }
+    group.style.pointerEvents = 'auto';
+    group.style.opacity = checkbox && checkbox.checked ? '1' : '0.8';
   }
 }
+window.togglePartialTpInput = togglePartialTpInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER
@@ -922,15 +915,11 @@ function toggleTelegramInputs() {
   const checkbox = document.getElementById('cfg-tg-enabled');
   const group = document.getElementById('telegram-input-group');
   if (group) {
-    if (checkbox && checkbox.checked) {
-      group.style.opacity = '1';
-      group.style.pointerEvents = 'auto';
-    } else {
-      group.style.opacity = '0.4';
-      group.style.pointerEvents = 'none';
-    }
+    group.style.pointerEvents = 'auto';
+    group.style.opacity = checkbox && checkbox.checked ? '1' : '0.85';
   }
 }
+window.toggleTelegramInputs = toggleTelegramInputs;
 
 async function testTelegramConnection() {
   const botToken = (document.getElementById('cfg-tg-token')?.value || '').trim();
@@ -1221,6 +1210,10 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {}
     });
   }
+
+  document.getElementById('cfg-tg-enabled')?.addEventListener('change', toggleTelegramInputs);
+  document.getElementById('cfg-partial-tp-enabled')?.addEventListener('change', togglePartialTpInput);
+  document.getElementById('cfg-whitelist-enabled')?.addEventListener('change', toggleWhitelistInput);
 });
 
 // PWA Service Worker Registration

@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=1.2.1">
 </head>
 <body>
   <!-- HEADER -->
@@ -275,7 +275,7 @@
             <small class="form-hint">Saat TP awal tercapai, cairkan sebagian posisi untuk mengunci profit, lalu otomatis geser Stop-Loss sisa posisi ke titik BEP (bebas risiko 100%).</small>
           </div>
 
-          <div class="form-group" id="partial-tp-ratio-group" style="grid-column: span 2; opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease;">
+          <div class="form-group" id="partial-tp-ratio-group" style="grid-column: span 2;">
             <label>Porsi Pencairan TP Tahap 1 (%)</label>
             <input type="number" id="cfg-partial-tp-ratio" min="10" max="90" step="5" class="form-control" placeholder="50">
             <small class="form-hint">Rekomendasi: 50% (cairkan 50% saat TP awal, sisa 50% memburu cuan lebih besar di bawahnya).</small>
@@ -341,7 +341,7 @@
             <small class="form-hint">Jika aktif, bot HANYA memantau koin yang ada di daftar ini.</small>
           </div>
 
-          <div class="form-group" id="whitelist-input-group" style="opacity: 0.4; pointer-events: none;">
+          <div class="form-group" id="whitelist-input-group">
             <label>Daftar Koin Whitelist (Pisahkan dengan koma)</label>
             <input type="text" id="cfg-whitelist-symbols" class="form-control" placeholder="AKEUSDT, BTWUSDT, CROSSUSDT">
             <small class="form-hint">Contoh: AKEUSDT, BTWUSDT, SAGAUSDT</small>
@@ -368,7 +368,7 @@
         <!-- TELEGRAM NOTIFICATIONS SECTION -->
         <div class="form-row" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
           <div class="form-group" style="grid-column: span 2;">
-            <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; color: var(--color-cyan);">
+            <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; color: var(--color-cyan); cursor: pointer;">
               <input type="checkbox" id="cfg-tg-enabled" onchange="toggleTelegramInputs()" style="width: 18px; height: 18px; accent-color: var(--color-cyan);">
               📱 Aktifkan Notifikasi Telegram Bot
             </label>
@@ -376,16 +376,16 @@
           </div>
         </div>
 
-        <div id="telegram-input-group" style="opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease;">
+        <div id="telegram-input-group">
           <div class="form-group">
             <label>Telegram Bot Token</label>
-            <input type="password" id="cfg-tg-token" class="form-control" placeholder="Contoh: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+            <input type="text" id="cfg-tg-token" class="form-control" placeholder="Contoh: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" autocomplete="off" spellcheck="false">
             <small class="form-hint">Didapatkan dari <b>@BotFather</b> di Telegram.</small>
           </div>
 
           <div class="form-group">
             <label>Telegram Chat ID (Pribadi atau ID Grup)</label>
-            <input type="text" id="cfg-tg-chatid" class="form-control" placeholder="Contoh: 123456789 atau -100123456789">
+            <input type="text" id="cfg-tg-chatid" class="form-control" placeholder="Contoh: 123456789 atau -100123456789" autocomplete="off" spellcheck="false">
             <small class="form-hint">ID chat atau grup Anda (bisa dicek via bot <b>@userinfobot</b> di Telegram).</small>
           </div>
 
@@ -627,6 +627,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=1.2.1"></script>
 </body>
 </html>
