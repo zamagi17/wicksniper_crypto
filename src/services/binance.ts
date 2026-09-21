@@ -689,6 +689,24 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Mengambil daftar order aktif/terbuka (Open Orders) dari Binance matching engine
+   */
+  public async getOpenOrders(symbol?: string): Promise<any[]> {
+    if (!this.apiKey || !this.apiSecret) return [];
+    try {
+      const client = await this.getHttpClient();
+      const params: Record<string, any> = {};
+      if (symbol) params.symbol = symbol;
+      const data = this.signParams(params);
+      const res = await client.get(`/fapi/v1/openOrders?${data}`);
+      return Array.isArray(res?.data) ? res.data : [];
+    } catch (err: any) {
+      console.error(`Gagal mengambil openOrders ${symbol || 'all'}:`, err.response?.data || err.message);
+      return [];
+    }
+  }
+
+  /**
    * Membatalkan order tertentu berdasarkan orderId
    */
   public async cancelOrder(symbol: string, orderId: string | number): Promise<boolean> {

@@ -219,6 +219,8 @@ export class WickSniperEngine {
     this.scanner.start();
 
     if (this.config.tradingMode === 'LIVE') {
+      await binanceFutures.checkPositionMode();
+      await this.syncLivePositions();
       await this.syncLiveBalance();
     }
 
@@ -714,8 +716,15 @@ export class WickSniperEngine {
           `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Order Limit Take Profit terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`,
           pos.symbol
         );
+      } else {
+        logger.log(
+          'ERROR',
+          `❌ [LIMIT TP GAGAL] ${pos.symbol}: Gagal memasang order Take Profit di Binance. Respons: ${JSON.stringify(tpRes)}`,
+          pos.symbol
+        );
       }
     } catch (err: any) {
+      logger.log('ERROR', `❌ [LIMIT TP ERROR] ${pos.symbol}: ${err.message}`, pos.symbol);
       console.error(`Gagal syncLiveTakeProfitOrder untuk ${pos.symbol}:`, err.message);
     }
   }
@@ -1038,6 +1047,18 @@ export class WickSniperEngine {
                 }
               }
             }
+          }
+
+          // Pastikan posisi aktif SELALU memiliki order Limit Take Profit di Binance
+          if (realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING') {
+            try {
+              const openOrders = await binanceFutures.getOpenOrders(symbol);
+              const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
+              if (!hasTpOrder) {
+                logger.log('WARN', `⚠️ [TP HILANG] ${symbol}: Tidak ada order Take Profit aktif di Binance. Memasang Limit TP baru...`, symbol);
+                await this.syncLiveTakeProfitOrder(pos);
+              }
+            } catch {}
           }
         } catch (posErr: any) {
           console.warn(`[syncLivePositions] Gagal sinkron ${symbol}:`, posErr.message);
