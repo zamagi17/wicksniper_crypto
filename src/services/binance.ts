@@ -921,9 +921,8 @@ export class BinanceFuturesClient {
       const agent = await this.getOrCreateDohAgent();
       this.wsClient = new WebSocket(this.wsUrl, {
         agent,
-        servername: 'fstream.binance.com',
         handshakeTimeout: 10000,
-      });
+      } as any);
 
       this.wsClient.on('open', () => {
         this.isWsConnected = true;
