@@ -302,6 +302,7 @@ export class BinanceFuturesClient {
     entryPrice: number;
     unRealizedProfit: number;
     leverage: number;
+    positionSide?: string;
   } | null> {
     if (!this.apiKey || !this.apiSecret) return null;
     try {
@@ -309,7 +310,35 @@ export class BinanceFuturesClient {
       const data = this.signParams({ symbol });
       const res = await client.get(`/fapi/v2/positionRisk?${data}`);
       if (Array.isArray(res?.data)) {
-        const item = res.data.find((p: any) => p.symbol === symbol);
+        // Auto-deteksi mode akun jika ada posisi SHORT atau LONG
+        if (res.data.some((p: any) => p.positionSide === 'SHORT' || p.positionSide === 'LONG')) {
+          this.isDualSidePosition = true;
+        }
+
+        // Prioritas 1: Cari posisi yang MEMILIKI ukuran aktif (positionAmt != 0)
+        let item = res.data.find(
+          (p: any) => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt || '0')) > 1e-8
+        );
+
+        // Prioritas 2: Jika posisi 0, cari posisi SHORT (untuk Hedge Mode)
+        if (!item) {
+          item = res.data.find(
+            (p: any) => p.symbol === symbol && p.positionSide === 'SHORT'
+          );
+        }
+
+        // Prioritas 3: Cari posisi BOTH (untuk One-Way Mode)
+        if (!item) {
+          item = res.data.find(
+            (p: any) => p.symbol === symbol && p.positionSide === 'BOTH'
+          );
+        }
+
+        // Prioritas 4: Fallback ke item pertama yang cocok dengan simbol
+        if (!item) {
+          item = res.data.find((p: any) => p.symbol === symbol);
+        }
+
         if (item) {
           return {
             symbol: item.symbol,
@@ -317,6 +346,7 @@ export class BinanceFuturesClient {
             entryPrice: parseFloat(item.entryPrice || '0'),
             unRealizedProfit: parseFloat(item.unRealizedProfit || '0'),
             leverage: parseInt(item.leverage || '5'),
+            positionSide: item.positionSide,
           };
         }
       }
@@ -324,6 +354,44 @@ export class BinanceFuturesClient {
     } catch (err: any) {
       console.error(`Gagal mengecek posisi ${symbol} di Binance:`, err.response?.data || err.message);
       return null;
+    }
+  }
+
+  /**
+   * Mengambil semua posisi yang AKTIF (positionAmt != 0) langsung dari Binance Futures
+   */
+  public async getAllOpenPositions(): Promise<{
+    symbol: string;
+    positionAmt: number;
+    entryPrice: number;
+    unRealizedProfit: number;
+    leverage: number;
+    positionSide: string;
+  }[]> {
+    if (!this.apiKey || !this.apiSecret) return [];
+    try {
+      const client = await this.getHttpClient();
+      const data = this.signParams({});
+      const res = await client.get(`/fapi/v2/positionRisk?${data}`);
+      if (Array.isArray(res?.data)) {
+        if (res.data.some((p: any) => p.positionSide === 'SHORT' || p.positionSide === 'LONG')) {
+          this.isDualSidePosition = true;
+        }
+        return res.data
+          .filter((p: any) => Math.abs(parseFloat(p.positionAmt || '0')) > 1e-8)
+          .map((item: any) => ({
+            symbol: item.symbol,
+            positionAmt: parseFloat(item.positionAmt || '0'),
+            entryPrice: parseFloat(item.entryPrice || '0'),
+            unRealizedProfit: parseFloat(item.unRealizedProfit || '0'),
+            leverage: parseInt(item.leverage || '5'),
+            positionSide: item.positionSide || 'BOTH',
+          }));
+      }
+      return [];
+    } catch (err: any) {
+      console.error('Gagal mengambil semua posisi aktif Binance:', err.message);
+      return [];
     }
   }
 

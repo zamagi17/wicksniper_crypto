@@ -268,11 +268,19 @@ export class WickSniperEngine {
 
     const symbol = alert.symbol;
 
-    // Cek kuota posisi aktif
-    if (this.activePositions.size >= this.config.grid.maxConcurrentCoins) {
+    // Cek kuota posisi aktif (di memori bot DAN di Binance aktual untuk mode LIVE)
+    let currentActiveCount = this.activePositions.size;
+    if (this.config.tradingMode === 'LIVE') {
+      try {
+        const livePositions = await binanceFutures.getAllOpenPositions();
+        currentActiveCount = Math.max(currentActiveCount, livePositions.length);
+      } catch {}
+    }
+
+    if (currentActiveCount >= this.config.grid.maxConcurrentCoins) {
       alert.status = 'SKIPPED';
       alert.skipReason = `Maksimal posisi aktif (${this.config.grid.maxConcurrentCoins}) tercapai`;
-      logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh.`);
+      logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh (${currentActiveCount}/${this.config.grid.maxConcurrentCoins}).`);
       db.saveSpike(alert).catch(() => {});
       return;
     }
@@ -511,31 +519,34 @@ export class WickSniperEngine {
 
       pos.currentPrice = currentPrice;
 
-      // 1. Cek apakah ada layer pending yang tertabrak harga atas (Layer Fill)
-      let layersChanged = false;
-      for (const layer of pos.layers) {
-        if (layer.status === 'PENDING' && currentPrice >= layer.price) {
-          layer.status = 'FILLED';
-          layer.filledAt = Date.now();
-          layersChanged = true;
-          logger.log(
-            'SNIPER',
-            `🕸️ [LAYER TERISI] ${symbol} Layer #${layer.layerIndex} terisi @ $${layer.price} (Qty: ${layer.qty}, Margin: $${layer.marginUsdt.toFixed(2)})`,
-            symbol
-          );
-          telegram.notifyLayerFill(
-            pos,
-            layer,
-            pos.layers.filter((l) => l.status === 'FILLED').length,
-            pos.layers.length
-          );
+      // 1. Cek layer fill (hanya untuk mode PAPER: simulasi pengisian jaring)
+      // Pada mode LIVE, layer diisi langsung oleh matching engine Binance dan disinkronkan di syncLivePositions
+      if (this.config.tradingMode === 'PAPER') {
+        let layersChanged = false;
+        for (const layer of pos.layers) {
+          if (layer.status === 'PENDING' && currentPrice >= layer.price) {
+            layer.status = 'FILLED';
+            layer.filledAt = Date.now();
+            layersChanged = true;
+            logger.log(
+              'SNIPER',
+              `🕸️ [LAYER TERISI PAPER] ${symbol} Layer #${layer.layerIndex} terisi @ $${layer.price} (Qty: ${layer.qty}, Margin: $${layer.marginUsdt.toFixed(2)})`,
+              symbol
+            );
+            telegram.notifyLayerFill(
+              pos,
+              layer,
+              pos.layers.filter((l) => l.status === 'FILLED').length,
+              pos.layers.length
+            );
+          }
         }
-      }
 
-      // 2. Jika ada layer baru yang terisi, hitung ulang Average Entry Price & Target TP
-      if (layersChanged) {
-        this.recalculatePositionAverage(pos);
-        db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+        // 2. Jika ada layer baru yang terisi, hitung ulang Average Entry Price & Target TP
+        if (layersChanged) {
+          this.recalculatePositionAverage(pos);
+          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+        }
       }
 
       // 3. Hitung Floating PnL
@@ -975,33 +986,119 @@ export class WickSniperEngine {
    * Rekonsiliasi berkala posisi live dengan Binance matching engine
    */
   private async syncLivePositions() {
-    if (this.config.tradingMode !== 'LIVE' || this.activePositions.size === 0) return;
+    if (this.config.tradingMode !== 'LIVE') return;
 
-    for (const [symbol, pos] of this.activePositions.entries()) {
-      try {
-        const realPos = await binanceFutures.getOpenPosition(symbol);
-        if (!realPos) continue;
+    try {
+      const allLivePositions = await binanceFutures.getAllOpenPositions();
 
-        // Jika di Binance posisinya sudah 0 dan posisi bot sudah berjalan lebih dari 5 detik,
-        // artinya posisi sudah tertutup otomatis di Binance (Limit Take Profit terisi oleh matching engine)
-        if (realPos.positionAmt === 0 && Date.now() - pos.openedAt > 5000 && pos.status === 'SNIPING') {
-          logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance! Menyinkronkan eksekusi riil...`, symbol);
-          await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
-          continue;
-        }
+      // 1. Rekonsiliasi posisi aktif yang ada di memori bot
+      for (const [symbol, pos] of this.activePositions.entries()) {
+        try {
+          const realPos = allLivePositions.find((p) => p.symbol === symbol);
 
-        // Sinkronisasi kuantitas & avg entry price jika ada layer tambahan yang terisi di Binance
-        const liveQty = Math.abs(realPos.positionAmt);
-        if (liveQty > 0 && (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6)) {
-          pos.totalQty = liveQty;
-          if (realPos.entryPrice > 0) {
-            pos.avgEntryPrice = realPos.entryPrice;
-            const exitCfg = this.config.exit;
-            pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-            pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+          // Jika posisi sudah 0 / tidak ditemukan di Binance dan posisi bot sudah berjalan > 5 detik:
+          // artinya posisi sudah tertutup otomatis di Binance (Limit Take Profit terisi oleh matching engine)
+          if ((!realPos || Math.abs(realPos.positionAmt) === 0) && Date.now() - pos.openedAt > 5000 && pos.status === 'SNIPING') {
+            logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance! Menyinkronkan eksekusi riil...`, symbol);
+            await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
+            continue;
           }
+
+          // Sinkronisasi kuantitas & avg entry price jika ada layer tambahan yang terisi di Binance
+          if (realPos && Math.abs(realPos.positionAmt) > 0) {
+            const liveQty = Math.abs(realPos.positionAmt);
+            if (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6) {
+              const oldQty = pos.totalQty;
+              pos.totalQty = liveQty;
+              if (realPos.entryPrice > 0) {
+                pos.avgEntryPrice = realPos.entryPrice;
+                const exitCfg = this.config.exit;
+                pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+                pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+                pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
+
+                // Tandai layer yang terisi secara riil di Binance
+                let accum = 0;
+                for (const layer of pos.layers) {
+                  accum += layer.qty;
+                  if (accum <= liveQty + 1e-4 && layer.status === 'PENDING') {
+                    layer.status = 'FILLED';
+                    layer.filledAt = Date.now();
+                    logger.log(
+                      'SNIPER',
+                      `🕸️ [LAYER TERISI RIIL BINANCE] ${symbol} Layer #${layer.layerIndex} terisi di Binance! Total Qty: ${liveQty} @ Avg $${pos.avgEntryPrice.toFixed(6)}`,
+                      symbol
+                    );
+                  }
+                }
+
+                // Perbarui Limit Take Profit order di Binance jika kuantitas bertambah
+                if (liveQty > oldQty) {
+                  this.syncLiveTakeProfitOrder(pos).catch(() => {});
+                }
+              }
+            }
+          }
+        } catch (posErr: any) {
+          console.warn(`[syncLivePositions] Gagal sinkron ${symbol}:`, posErr.message);
         }
-      } catch {}
+      }
+
+      // 2. ADOPSI POSISI YATIM (Orphan Positions):
+      // Jika ada posisi aktif di Binance (seperti AMCUSDT atau IRENUSDT) yang belum ada di memori bot,
+      // pulihkan kembali ke activePositions dan pasangkan Limit Take Profit agar tidak "Open Orders: 0"!
+      for (const livePos of allLivePositions) {
+        if (!this.activePositions.has(livePos.symbol) && Math.abs(livePos.positionAmt) > 0) {
+          logger.log(
+            'WARN',
+            `🔄 [RE-ADOPSI POSISI] Menemukan posisi aktif ${livePos.symbol} di Binance (Qty: ${Math.abs(livePos.positionAmt)}, Entry: $${livePos.entryPrice}). Memulihkan ke radar bot & memasang proteksi TP...`,
+            livePos.symbol
+          );
+
+          const exitCfg = this.config.exit;
+          const leverage = livePos.leverage || this.config.leverage || 10;
+          const totalQty = Math.abs(livePos.positionAmt);
+          const entryPrice = livePos.entryPrice;
+          const targetTpPrice = entryPrice * (1 - exitCfg.takeProfitPct / 100);
+          const hardSlPrice = entryPrice * (1 + exitCfg.hardStopLossPct / 100);
+
+          const adoptedPos: ActivePosition = {
+            id: `adopt_${livePos.symbol}_${Date.now()}`,
+            symbol: livePos.symbol,
+            side: 'SHORT',
+            leverage,
+            totalQty,
+            avgEntryPrice: entryPrice,
+            currentPrice: entryPrice,
+            unrealizedPnl: livePos.unRealizedProfit || 0,
+            pnlPct: 0,
+            peakPnlPct: 0,
+            totalMarginUsed: (totalQty * entryPrice) / leverage,
+            layers: [
+              {
+                layerIndex: 0,
+                price: entryPrice,
+                qty: totalQty,
+                marginUsdt: (totalQty * entryPrice) / leverage,
+                status: 'FILLED',
+                filledAt: Date.now(),
+              },
+            ],
+            openedAt: Date.now(),
+            targetTpPrice,
+            hardSlPrice,
+            status: 'SNIPING',
+          };
+
+          this.activePositions.set(livePos.symbol, adoptedPos);
+          // Langsung pasangkan Limit Take Profit di Binance agar ada open order
+          this.syncLiveTakeProfitOrder(adoptedPos).catch(() => {});
+          this.broadcastStatus();
+          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+        }
+      }
+    } catch (err: any) {
+      console.error('Gagal syncLivePositions:', err.message);
     }
   }
 
