@@ -26,6 +26,7 @@ export class BinanceFuturesClient {
   private precisions: Map<string, SymbolPrecision> = new Map();
   private isWsConnected: boolean = false;
   private wsReconnectTimer: NodeJS.Timeout | null = null;
+  private lastWsCloseLog: number = 0;
   private tickerListeners: ((tickers: any[]) => void)[] = [];
 
   constructor() {
@@ -149,6 +150,47 @@ export class BinanceFuturesClient {
     }
   }
 
+  public async fetchSymbolPrecision(symbol: string): Promise<SymbolPrecision> {
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get(`/fapi/v1/exchangeInfo?symbol=${symbol}`);
+      const symbols = res?.data?.symbols || [];
+      const s = symbols.find((item: any) => item.symbol === symbol);
+      if (s) {
+        let tickSize = 0.0001;
+        let stepSize = 1;
+        let minQty = 1;
+        let minNotional = 5;
+
+        for (const f of s.filters || []) {
+          if (f.filterType === 'PRICE_FILTER') {
+            tickSize = parseFloat(f.tickSize) || tickSize;
+          } else if (f.filterType === 'LOT_SIZE') {
+            stepSize = parseFloat(f.stepSize) || stepSize;
+            minQty = parseFloat(f.minQty) || minQty;
+          } else if (f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL') {
+            minNotional = parseFloat(f.notional || f.minNotional) || minNotional;
+          }
+        }
+
+        const precision: SymbolPrecision = {
+          symbol: s.symbol,
+          pricePrecision: typeof s.pricePrecision === 'number' ? s.pricePrecision : 4,
+          quantityPrecision: typeof s.quantityPrecision === 'number' ? s.quantityPrecision : 0,
+          tickSize,
+          stepSize,
+          minQty,
+          minNotional,
+        };
+        this.precisions.set(s.symbol, precision);
+        return precision;
+      }
+    } catch (e: any) {
+      console.warn(`Gagal memuat presisi spesifik ${symbol}:`, e.message);
+    }
+    return this.getPrecision(symbol);
+  }
+
   public async loadExchangeInfo(): Promise<Map<string, SymbolPrecision>> {
     try {
       const client = await this.getHttpClient();
@@ -156,7 +198,7 @@ export class BinanceFuturesClient {
       const symbols = res.data.symbols || [];
 
       for (const s of symbols) {
-        if (s.contractType !== 'PERPETUAL' || s.status !== 'TRADING' || !s.symbol.endsWith('USDT')) {
+        if (s.status !== 'TRADING' || !s.symbol.endsWith('USDT')) {
           continue;
         }
 
@@ -178,8 +220,8 @@ export class BinanceFuturesClient {
 
         this.precisions.set(s.symbol, {
           symbol: s.symbol,
-          pricePrecision: s.pricePrecision || 4,
-          quantityPrecision: s.quantityPrecision || 0,
+          pricePrecision: typeof s.pricePrecision === 'number' ? s.pricePrecision : 4,
+          quantityPrecision: typeof s.quantityPrecision === 'number' ? s.quantityPrecision : 0,
           tickSize,
           stepSize,
           minQty,
@@ -198,7 +240,13 @@ export class BinanceFuturesClient {
   }
 
   public getPrecision(symbol: string): SymbolPrecision {
-    return this.precisions.get(symbol) || {
+    const existing = this.precisions.get(symbol);
+    if (existing) return existing;
+
+    // Jika belum ada di cache, picu pengambilan async presisi spesifik ke Binance
+    this.fetchSymbolPrecision(symbol).catch(() => {});
+
+    return {
       symbol,
       pricePrecision: 4,
       quantityPrecision: 1,
@@ -212,21 +260,56 @@ export class BinanceFuturesClient {
   public formatPrice(symbol: string, price: number): string {
     if (price <= 0) return '0';
     const prec = this.getPrecision(symbol);
-    let tickSize = prec.tickSize;
-    if (price < tickSize && price > 0) {
-      const exp = Math.floor(Math.log10(price));
-      tickSize = Math.pow(10, exp - 1);
+    const tickSize = prec.tickSize > 0 ? prec.tickSize : 0.0001;
+
+    let decimals = 4;
+    const tickStr = tickSize.toString();
+    if (tickStr.includes('e-')) {
+      decimals = parseInt(tickStr.split('e-')[1], 10);
+    } else if (tickStr.includes('.')) {
+      decimals = tickStr.split('.')[1].replace(/0+$/, '').length;
+    } else {
+      decimals = 0;
     }
-    const decimals = Math.max(0, Math.round(-Math.log10(tickSize)));
-    const rounded = Math.floor(price / tickSize + 1e-8) * tickSize;
+    if (typeof prec.pricePrecision === 'number' && prec.pricePrecision < decimals) {
+      decimals = prec.pricePrecision;
+    }
+
+    const factor = Math.round(1 / tickSize);
+    let rounded: number;
+    if (factor >= 1 && Math.abs(1 / factor - tickSize) < 1e-9) {
+      rounded = Math.floor(price * factor + 1e-8) / factor;
+    } else {
+      rounded = Math.floor(price / tickSize + 1e-8) * tickSize;
+    }
+
     return rounded.toFixed(decimals);
   }
 
   public formatQty(symbol: string, qty: number): string {
     if (qty <= 0) return '0';
     const prec = this.getPrecision(symbol);
-    const decimals = Math.max(0, Math.round(-Math.log10(prec.stepSize)));
-    const rounded = Math.floor(qty / prec.stepSize + 1e-8) * prec.stepSize;
+    const stepSize = prec.stepSize > 0 ? prec.stepSize : 0.1;
+
+    let decimals = 0;
+    const stepStr = stepSize.toString();
+    if (stepStr.includes('e-')) {
+      decimals = parseInt(stepStr.split('e-')[1], 10);
+    } else if (stepStr.includes('.')) {
+      decimals = stepStr.split('.')[1].replace(/0+$/, '').length;
+    }
+    if (typeof prec.quantityPrecision === 'number' && prec.quantityPrecision > decimals) {
+      decimals = prec.quantityPrecision;
+    }
+
+    const factor = Math.round(1 / stepSize);
+    let rounded: number;
+    if (factor >= 1 && Math.abs(1 / factor - stepSize) < 1e-9) {
+      rounded = Math.floor(qty * factor + 1e-8) / factor;
+    } else {
+      rounded = Math.floor(qty / stepSize + 1e-8) * stepSize;
+    }
+
     return Math.max(prec.minQty, rounded).toFixed(decimals);
   }
 
@@ -741,6 +824,39 @@ export class BinanceFuturesClient {
         }
       }
 
+      // AUTO-RECOVERY 3: Error -4014 atau -1111 (Price not increased by tick size / filter failure)
+      if (errCode === -4014 || errCode === -1111 || String(errMsg).toLowerCase().includes('tick size')) {
+        try {
+          console.log(`🔄 [Auto-Recovery -4014] Memuat presisi live dari Binance untuk ${symbol} dan menyesuaikan tick size...`);
+          await this.fetchSymbolPrecision(symbol);
+          const client = await this.getHttpClient();
+          const retryFormattedQty = this.formatQty(symbol, qty);
+          const retryFormattedPrice = this.formatPrice(symbol, price);
+          const retryParams: Record<string, any> = {
+            symbol,
+            side,
+            type: 'LIMIT',
+            timeInForce: 'GTC',
+            quantity: retryFormattedQty,
+            price: retryFormattedPrice,
+          };
+          if (this.isDualSidePosition) {
+            retryParams.positionSide = side === 'BUY' ? 'SHORT' : 'LONG';
+          } else {
+            retryParams.positionSide = 'BOTH';
+            if (reduceOnly) retryParams.reduceOnly = 'true';
+          }
+          const retryData = this.signParams(retryParams);
+          const retryRes = await client.post('/fapi/v1/order', retryData);
+          return retryRes?.data || null;
+        } catch (retryErr: any) {
+          const rCode = retryErr.response?.data?.code;
+          const rMsg = retryErr.response?.data?.msg || retryErr.message;
+          console.error(`Gagal retry auto-recovery -4014 untuk ${symbol} [Code ${rCode}]:`, rMsg);
+          return { error: true, code: rCode, msg: rMsg };
+        }
+      }
+
       return { error: true, code: errCode, msg: errMsg };
     }
   }
@@ -803,11 +919,15 @@ export class BinanceFuturesClient {
 
     try {
       const agent = await this.getOrCreateDohAgent();
-      this.wsClient = new WebSocket(this.wsUrl, { agent });
+      this.wsClient = new WebSocket(this.wsUrl, {
+        agent,
+        servername: 'fstream.binance.com',
+        handshakeTimeout: 10000,
+      });
 
       this.wsClient.on('open', () => {
         this.isWsConnected = true;
-        console.log(`⚡ [WEBSOCKET CONNECTED] Terhubung ke Binance Futures All-Market Stream (${this.wsUrl}) via DoH`);
+        console.log(`⚡ [WEBSOCKET CONNECTED] Terhubung ke Binance Futures All-Market Stream (${this.wsUrl})`);
       });
 
       this.wsClient.on('message', (raw: WebSocket.Data) => {
@@ -825,11 +945,15 @@ export class BinanceFuturesClient {
         console.error('WebSocket Error:', err.message);
       });
 
-      this.wsClient.on('close', () => {
+      this.wsClient.on('close', (code: number) => {
         this.isWsConnected = false;
-        console.log('⚠️ WebSocket terputus. Mencoba rekoneksi dalam 3 detik...');
+        const now = Date.now();
+        if (code !== 1000 && now - this.lastWsCloseLog > 30000) {
+          this.lastWsCloseLog = now;
+          console.log(`⚠️ WebSocket terputus (Code: ${code}). Mencoba rekoneksi...`);
+        }
         if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
-        this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 3000);
+        this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 5000);
       });
     } catch (e: any) {
       console.error('Gagal inisialisasi WebSocket:', e.message);
