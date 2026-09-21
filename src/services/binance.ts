@@ -255,16 +255,25 @@ export class BinanceFuturesClient {
     }
   }
 
+  public lastBalanceError: string = '';
+
   /**
    * Mengambil saldo dompet Binance Futures (USDT)
    */
   public async getFuturesAccountBalance(): Promise<{ asset: string; balance: number; availableBalance: number }[]> {
-    if (!this.apiKey || !this.apiSecret) return [];
+    if (!this.apiKey || !this.apiSecret) {
+      this.lastBalanceError = 'API Key dan API Secret Binance belum diisi.';
+      return [];
+    }
     try {
+      if (this.timeOffset === 0) {
+        await this.syncTime();
+      }
       const client = await this.getHttpClient();
       const data = this.signParams({});
       const res = await client.get(`/fapi/v2/balance?${data}`);
       if (Array.isArray(res?.data)) {
+        this.lastBalanceError = '';
         return res.data.map((item: any) => ({
           asset: item.asset,
           balance: parseFloat(item.balance || '0'),
@@ -273,7 +282,9 @@ export class BinanceFuturesClient {
       }
       return [];
     } catch (err: any) {
-      console.error('Gagal mengambil saldo futures:', err.response?.data || err.message);
+      const errMsg = err.response?.data?.msg || err.message;
+      this.lastBalanceError = errMsg;
+      console.error('Gagal mengambil saldo futures:', errMsg);
       return [];
     }
   }

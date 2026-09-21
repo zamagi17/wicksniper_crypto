@@ -1,9 +1,6 @@
-const CACHE_NAME = 'wicksniper-pwa-v3';
+const CACHE_NAME = 'wicksniper-pwa-v6';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/style.css',
-  '/app.js',
   '/manifest.json',
   '/icons/icon.svg',
   '/icons/icon-192.png',
@@ -23,7 +20,11 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
       );
     })
   );
@@ -33,13 +34,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Jangan cache request API dan WebSocket - selalu ambil langsung dari server
-  if (url.pathname.startsWith('/api') || event.request.method !== 'GET') {
+  // Jangan pernah cache file logika aplikasi (JS), halaman HTML, API, atau WebSocket
+  if (
+    url.pathname.startsWith('/api') ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html') ||
+    url.pathname.endsWith('.js') ||
+    event.request.method !== 'GET'
+  ) {
     event.respondWith(fetch(event.request));
     return;
   }
 
-  // Network-first dengan fallback ke Cache untuk assets statis
+  // Fallback cache hanya untuk static assets (icons, manifest)
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
@@ -49,13 +56,6 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       })
-      .catch(() => {
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) return cachedResponse;
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
-          }
-        });
-      })
+      .catch(() => caches.match(event.request))
   );
 });

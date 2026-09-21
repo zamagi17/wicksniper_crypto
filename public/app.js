@@ -1470,16 +1470,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cfg-whitelist-enabled')?.addEventListener('change', toggleWhitelistInput);
 });
 
-// PWA Service Worker Registration
+// PWA Service Worker Registration & Cache Busting
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js')
+      .register('/sw.js?v=2.2.0')
       .then((reg) => {
-        console.log('✅ PWA Service Worker registered:', reg.scope);
+        reg.update();
       })
       .catch((err) => {
-        console.warn('⚠️ PWA Service Worker registration skipped/failed:', err.message);
+        console.warn('⚠️ PWA Service Worker registration skipped:', err.message);
       });
   });
 }

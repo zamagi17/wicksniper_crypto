@@ -750,18 +750,39 @@ export class WickSniperEngine {
     return true;
   }
 
+  private lastLoggedBalanceError: string = '';
+
   public async syncLiveBalance() {
-    if (this.config.tradingMode !== 'LIVE' || !this.config.apiKey || !this.config.apiSecret) {
+    if (this.config.tradingMode !== 'LIVE') {
+      return;
+    }
+    if (!this.config.apiKey || !this.config.apiSecret) {
+      if (this.lastLoggedBalanceError !== 'NO_KEYS') {
+        logger.log('WARN', '⚠️ [SINKRONISASI SALDO] API Key & Secret Binance belum diisi di Pengaturan.');
+        this.lastLoggedBalanceError = 'NO_KEYS';
+      }
       return;
     }
     try {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
       const balances = await binanceFutures.getFuturesAccountBalance();
-      const usdt = balances.find((b) => b.asset === 'USDT') || balances.find((b) => b.asset === 'USDC');
-      if (usdt) {
-        this.realBalance = usdt.balance;
-        this.liveAvailableBalance = usdt.availableBalance;
-        this.broadcastStatus();
+      if (balances.length > 0) {
+        const usdt = balances.find((b) => b.asset === 'USDT') || balances.find((b) => b.asset === 'USDC');
+        if (usdt) {
+          const wasZero = this.realBalance === 0;
+          this.realBalance = usdt.balance;
+          this.liveAvailableBalance = usdt.availableBalance;
+          this.broadcastStatus();
+          this.lastLoggedBalanceError = '';
+          if (wasZero && this.realBalance >= 0) {
+            logger.log('SUCCESS', `💰 [SALDO BINANCE LIVE TERHUBUNG] Total Saldo: $${this.realBalance.toFixed(2)} USDT | Tersedia: $${this.liveAvailableBalance.toFixed(2)} USDT`);
+          }
+        }
+      } else if (binanceFutures.lastBalanceError) {
+        if (this.lastLoggedBalanceError !== binanceFutures.lastBalanceError) {
+          logger.log('WARN', `⚠️ [SINKRONISASI SALDO GAGAL] Binance: ${binanceFutures.lastBalanceError}`);
+          this.lastLoggedBalanceError = binanceFutures.lastBalanceError;
+        }
       }
     } catch (e: any) {
       console.error('Gagal mengambil saldo riil Binance:', e.message);
