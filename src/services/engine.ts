@@ -717,17 +717,25 @@ export class WickSniperEngine {
         }
 
         // Tunggu sejenak agar matching engine Binance selesai membukukan userTrades
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        await new Promise((resolve) => setTimeout(resolve, 800));
 
         // Ambil riwayat trade terakhir dari Binance untuk sinkronisasi Realized PnL & Fee 100% presisi
         try {
-          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 5);
+          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 10);
           if (recentTrades.length > 0) {
-            // Filter trade BUY (penutupan short) yang terjadi dalam rentang 15 detik terakhir
-            const nowTs = Date.now();
-            const closingTrades = recentTrades.filter(
-              (tr: any) => tr.side === 'BUY' && (nowTs - tr.time) < 15000
+            // Ambil trade BUY (penutupan short) yang terjadi sejak posisi dibuka (pos.openedAt) atau trade BUY terbaru
+            const minTime = pos.openedAt - 10000;
+            let closingTrades = recentTrades.filter(
+              (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
             );
+
+            // Fallback: jika filter waktu tidak menangkap, ambil trade BUY terbaru yang memiliki realizedPnl
+            if (closingTrades.length === 0) {
+              const latestBuy = recentTrades.find((tr: any) => tr.side === 'BUY' && Math.abs(parseFloat(tr.realizedPnl || '0')) > 0);
+              if (latestBuy) {
+                closingTrades = [latestBuy];
+              }
+            }
 
             if (closingTrades.length > 0) {
               let binancePnlSum = 0;
@@ -881,11 +889,11 @@ export class WickSniperEngine {
         const realPos = await binanceFutures.getOpenPosition(symbol);
         if (!realPos) continue;
 
-        // Jika di Binance posisinya sudah 0 dan posisi bot sudah berjalan lebih dari 10 detik,
-        // artinya posisi tertutup di bursa (likuidasi / stop-out / user tutup di Binance app)
-        if (realPos.positionAmt === 0 && Date.now() - pos.openedAt > 10000 && pos.status === 'SNIPING') {
-          logger.log('WARN', `⚠️ [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance. Menandai selesai di bot...`, symbol);
-          await this.closePosition(pos, 'MANUAL_CLOSE', pos.currentPrice || pos.avgEntryPrice);
+        // Jika di Binance posisinya sudah 0 dan posisi bot sudah berjalan lebih dari 5 detik,
+        // artinya posisi sudah tertutup otomatis di Binance (Limit Take Profit terisi oleh matching engine)
+        if (realPos.positionAmt === 0 && Date.now() - pos.openedAt > 5000 && pos.status === 'SNIPING') {
+          logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Limit Order TP ${symbol} telah dieksekusi oleh Binance! Menandai profit di bot...`, symbol);
+          await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
           continue;
         }
 

@@ -57,6 +57,10 @@ export class BinanceFuturesClient {
     }
   }
 
+  public getTimeOffset(): number {
+    return this.timeOffset;
+  }
+
   private dohAgent: https.Agent | null = null;
   private dohCache: Map<string, string> = new Map();
 
