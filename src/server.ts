@@ -6,6 +6,8 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { WickSniperEngine } from './services/engine';
 import { logger } from './services/logger';
 import { backtester } from './services/backtester';
+import { binanceFutures } from './services/binance';
+import { telegram } from './services/telegram';
 
 const app = express();
 const server = http.createServer(app);
@@ -63,6 +65,29 @@ app.post('/api/close-position', async (req, res) => {
     res.json({ success: closed, status: engine.getStatus() });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/check-binance', async (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet } = req.body || {};
+    if (apiKey && apiSecret) {
+      binanceFutures.configure(apiKey, apiSecret, !!isTestnet);
+    }
+    const result = await binanceFutures.testConnection();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/check-telegram', async (req, res) => {
+  try {
+    const { botToken, chatId } = req.body || {};
+    const result = await telegram.testConnection(botToken, chatId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -623,6 +623,15 @@ function populateSettingsForm(cfg) {
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
+
+  // Partial Take Profit
+  const ptCheckbox = document.getElementById('cfg-partial-tp-enabled');
+  if (ptCheckbox) {
+    ptCheckbox.checked = !!cfg.exit?.partialTpEnabled;
+    togglePartialTpInput();
+  }
+  setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 50);
+
   setVal('cfg-margin-layer', cfg.grid?.marginPerLayerUsdt || 3);
   setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 50);
   setVal('cfg-total-layers', cfg.grid?.totalLayers || 25);
@@ -632,6 +641,23 @@ function populateSettingsForm(cfg) {
   setVal('cfg-cooldown', cfg.scanner?.cooldownMinutes || 20);
   setVal('cfg-api-key', cfg.apiKey || '');
   setVal('cfg-api-secret', cfg.apiSecret || '');
+
+  // Telegram Notifications
+  const tg = cfg.telegram || {};
+  const tgCheckbox = document.getElementById('cfg-tg-enabled');
+  if (tgCheckbox) {
+    tgCheckbox.checked = !!tg.enabled;
+    toggleTelegramInputs();
+  }
+  setVal('cfg-tg-token', tg.botToken || '');
+  setVal('cfg-tg-chatid', tg.chatId || '');
+  const setChecked = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = val !== undefined ? !!val : true;
+  };
+  setChecked('cfg-tg-on-new', tg.notifyOnNewOrder);
+  setChecked('cfg-tg-on-layer', tg.notifyOnLayerFill);
+  setChecked('cfg-tg-on-close', tg.notifyOnClose);
 
   // Whitelist
   const wlCheckbox = document.getElementById('cfg-whitelist-enabled');
@@ -667,6 +693,8 @@ function getSettingsFormData() {
       takeProfitPct: parseFloat(getVal('cfg-tp-pct', '1.2')) || 1.2,
       hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
       maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
+      partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
+      partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '50')) || 50) / 100,
     },
     grid: {
       ...(currentConfig?.grid || {}),
@@ -679,6 +707,14 @@ function getSettingsFormData() {
     },
     apiKey: (getVal('cfg-api-key', '') || '').trim(),
     apiSecret: (getVal('cfg-api-secret', '') || '').trim(),
+    telegram: {
+      enabled: !!document.getElementById('cfg-tg-enabled')?.checked,
+      botToken: (getVal('cfg-tg-token', '') || '').trim(),
+      chatId: (getVal('cfg-tg-chatid', '') || '').trim(),
+      notifyOnNewOrder: !!document.getElementById('cfg-tg-on-new')?.checked,
+      notifyOnLayerFill: !!document.getElementById('cfg-tg-on-layer')?.checked,
+      notifyOnClose: !!document.getElementById('cfg-tg-on-close')?.checked,
+    },
   };
 }
 
@@ -767,6 +803,84 @@ async function saveSettings() {
   }
 }
 
+async function testBinanceConnection() {
+  const apiKey = (document.getElementById('cfg-api-key')?.value || '').trim();
+  const apiSecret = (document.getElementById('cfg-api-secret')?.value || '').trim();
+  const btn = document.getElementById('btn-test-binance');
+  const resultBox = document.getElementById('binance-test-result');
+
+  if (!apiKey || !apiSecret) {
+    if (resultBox) {
+      resultBox.style.display = 'block';
+      resultBox.style.background = 'rgba(255, 68, 68, 0.1)';
+      resultBox.style.border = '1px solid rgba(255, 68, 68, 0.3)';
+      resultBox.style.color = 'var(--color-red)';
+      resultBox.innerHTML = '⚠️ Harap isi Binance API Key dan API Secret terlebih dahulu.';
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Menguji Koneksi...';
+  }
+  if (resultBox) {
+    resultBox.style.display = 'block';
+    resultBox.style.background = 'rgba(0, 240, 255, 0.08)';
+    resultBox.style.border = '1px solid rgba(0, 240, 255, 0.3)';
+    resultBox.style.color = 'var(--color-cyan)';
+    resultBox.innerHTML = '🔄 Menghubungkan ke Binance Futures REST API & sinkronisasi waktu...';
+  }
+
+  try {
+    const res = await fetch('/api/check-binance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey, apiSecret }),
+    }).then((r) => r.json());
+
+    if (resultBox) {
+      if (res.success) {
+        resultBox.style.background = 'rgba(0, 255, 136, 0.1)';
+        resultBox.style.border = '1px solid rgba(0, 255, 136, 0.4)';
+        resultBox.style.color = 'var(--color-green)';
+        resultBox.innerHTML = `
+          <div style="font-weight: 700; margin-bottom: 4px;">✅ TERHUBUNG KE BINANCE FUTURES!</div>
+          <div>⚡ <b>Latensi:</b> ${res.latencyMs}ms</div>
+          <div>💰 <b>Saldo Futures Tersedia:</b> $${res.availableUsdt.toFixed(2)} USDT</div>
+          <div>🛡️ <b>Mode Posisi Akun:</b> ${res.dualSidePosition ? 'Hedge Mode (Dual Position)' : 'One-Way Mode (Normal)'}</div>
+          <div style="font-size: 11px; margin-top: 6px; color: var(--text-muted);">
+            ${res.availableUsdt < 20 ? '⚠️ Saldo USDT minim. Disarankan memiliki saldo minimal $50 - $245 USDT.' : '✅ Saldo siap untuk trading live.'}
+          </div>
+        `;
+      } else {
+        resultBox.style.background = 'rgba(255, 68, 68, 0.1)';
+        resultBox.style.border = '1px solid rgba(255, 68, 68, 0.4)';
+        resultBox.style.color = 'var(--color-red)';
+        resultBox.innerHTML = `
+          <div style="font-weight: 700; margin-bottom: 4px;">❌ KONEKSI GAGAL</div>
+          <div>${res.error || 'Periksa API Key, Secret, atau koneksi jaringan Anda.'}</div>
+          <div style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">
+            Pastikan opsi <b>"Enable Reading"</b> dan <b>"Enable Futures"</b> telah dicentang di manajemen API Binance Anda.
+          </div>
+        `;
+      }
+    }
+  } catch (err) {
+    if (resultBox) {
+      resultBox.style.background = 'rgba(255, 68, 68, 0.1)';
+      resultBox.style.border = '1px solid rgba(255, 68, 68, 0.4)';
+      resultBox.style.color = 'var(--color-red)';
+      resultBox.innerHTML = `❌ Error pengujian: ${err.message}`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🔍 Uji Koneksi & Saldo Binance Futures';
+    }
+  }
+}
+
 // ==========================================
 // WHITELIST TOGGLE
 // ==========================================
@@ -780,6 +894,116 @@ function toggleWhitelistInput() {
     } else {
       inputGroup.style.opacity = '0.4';
       inputGroup.style.pointerEvents = 'none';
+    }
+  }
+}
+
+// ==========================================
+// PARTIAL TAKE PROFIT TOGGLE
+// ==========================================
+function togglePartialTpInput() {
+  const checkbox = document.getElementById('cfg-partial-tp-enabled');
+  const group = document.getElementById('partial-tp-ratio-group');
+  if (group) {
+    if (checkbox && checkbox.checked) {
+      group.style.opacity = '1';
+      group.style.pointerEvents = 'auto';
+    } else {
+      group.style.opacity = '0.4';
+      group.style.pointerEvents = 'none';
+    }
+  }
+}
+
+// ==========================================
+// TELEGRAM NOTIFICATIONS CONTROLLER
+// ==========================================
+function toggleTelegramInputs() {
+  const checkbox = document.getElementById('cfg-tg-enabled');
+  const group = document.getElementById('telegram-input-group');
+  if (group) {
+    if (checkbox && checkbox.checked) {
+      group.style.opacity = '1';
+      group.style.pointerEvents = 'auto';
+    } else {
+      group.style.opacity = '0.4';
+      group.style.pointerEvents = 'none';
+    }
+  }
+}
+
+async function testTelegramConnection() {
+  const botToken = (document.getElementById('cfg-tg-token')?.value || '').trim();
+  const chatId = (document.getElementById('cfg-tg-chatid')?.value || '').trim();
+  const btn = document.getElementById('btn-test-telegram');
+  const resultBox = document.getElementById('telegram-test-result');
+
+  if (!botToken || !chatId) {
+    if (resultBox) {
+      resultBox.style.display = 'block';
+      resultBox.style.background = 'rgba(255, 68, 68, 0.1)';
+      resultBox.style.border = '1px solid rgba(255, 68, 68, 0.3)';
+      resultBox.style.color = 'var(--color-red)';
+      resultBox.innerHTML = '⚠️ Harap isi Telegram Bot Token dan Chat ID terlebih dahulu.';
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Mengirim Pesan Tes...';
+  }
+  if (resultBox) {
+    resultBox.style.display = 'block';
+    resultBox.style.background = 'rgba(0, 240, 255, 0.08)';
+    resultBox.style.border = '1px solid rgba(0, 240, 255, 0.3)';
+    resultBox.style.color = 'var(--color-cyan)';
+    resultBox.innerHTML = '🔄 Menghubungkan ke Telegram Bot API & mengirim pesan uji coba...';
+  }
+
+  try {
+    const res = await fetch('/api/check-telegram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botToken, chatId }),
+    }).then((r) => r.json());
+
+    if (resultBox) {
+      if (res.success) {
+        resultBox.style.background = 'rgba(0, 255, 136, 0.1)';
+        resultBox.style.border = '1px solid rgba(0, 255, 136, 0.4)';
+        resultBox.style.color = 'var(--color-green)';
+        resultBox.innerHTML = `
+          <div style="font-weight: 700; margin-bottom: 4px;">✅ PESAN TELEGRAM BERHASIL TERKIRIM!</div>
+          <div>🤖 <b>Bot Terhubung:</b> @${res.botName}</div>
+          <div style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">
+            Silakan periksa aplikasi Telegram Anda. Pesan uji coba telah masuk ke Chat ID yang Anda tuju!
+          </div>
+        `;
+      } else {
+        resultBox.style.background = 'rgba(255, 68, 68, 0.1)';
+        resultBox.style.border = '1px solid rgba(255, 68, 68, 0.4)';
+        resultBox.style.color = 'var(--color-red)';
+        resultBox.innerHTML = `
+          <div style="font-weight: 700; margin-bottom: 4px;">❌ GAGAL MENGIRIM KE TELEGRAM</div>
+          <div>${res.error || 'Token bot tidak valid atau Chat ID belum memulai percakapan (/start) dengan bot.'}</div>
+          <div style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">
+            <b>Tips:</b> Pastikan Anda sudah membuka chat dengan bot Anda di Telegram dan menekan tombol <b>/start</b> terlebih dahulu.
+          </div>
+        `;
+      }
+    }
+  } catch (err) {
+    if (resultBox) {
+      resultBox.style.background = 'rgba(255, 68, 68, 0.1)';
+      resultBox.style.border = '1px solid rgba(255, 68, 68, 0.4)';
+      resultBox.style.color = 'var(--color-red)';
+      resultBox.innerHTML = `❌ Error pengujian: ${err.message}`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '📱 Kirim Pesan Uji Coba Telegram';
     }
   }
 }

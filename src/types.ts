@@ -37,6 +37,14 @@ export interface BotConfig {
   paperTrading: {
     initialVirtualBalance: number;
   };
+  telegram?: {
+    enabled?: boolean;
+    botToken?: string;
+    chatId?: string;
+    notifyOnNewOrder?: boolean;
+    notifyOnLayerFill?: boolean;
+    notifyOnClose?: boolean;
+  };
   server: {
     port: number;
   };

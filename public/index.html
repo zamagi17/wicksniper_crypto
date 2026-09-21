@@ -265,6 +265,23 @@
           </div>
         </div>
 
+        <!-- PARTIAL TAKE PROFIT & BEP PROTECTION -->
+        <div class="form-row" style="background: rgba(0, 240, 255, 0.03); border: 1px dashed rgba(0, 240, 255, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
+              <input type="checkbox" id="cfg-partial-tp-enabled" onchange="togglePartialTpInput()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
+              🎯 Aktifkan Stage 1 Partial TP (Amankan Cuan + BEP Protection)
+            </label>
+            <small class="form-hint">Saat TP awal tercapai, cairkan sebagian posisi untuk mengunci profit, lalu otomatis geser Stop-Loss sisa posisi ke titik BEP (bebas risiko 100%).</small>
+          </div>
+
+          <div class="form-group" id="partial-tp-ratio-group" style="grid-column: span 2; opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease;">
+            <label>Porsi Pencairan TP Tahap 1 (%)</label>
+            <input type="number" id="cfg-partial-tp-ratio" min="10" max="90" step="5" class="form-control" placeholder="50">
+            <small class="form-hint">Rekomendasi: 50% (cairkan 50% saat TP awal, sisa 50% memburu cuan lebih besar di bawahnya).</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Modal Per Layer (USDT)</label>
@@ -339,6 +356,61 @@
         <div class="form-group">
           <label>Binance API Secret (Opsional untuk Live)</label>
           <input type="password" id="cfg-api-secret" class="form-control" placeholder="Masukkan API Secret Binance">
+          <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-warning" id="btn-test-binance" onclick="testBinanceConnection()">
+              🔍 Uji Koneksi & Saldo Binance Futures
+            </button>
+            <small class="form-hint" style="margin: 0;">Memvalidasi API Key, izin Futures, dan saldo USDT sebelum go-live.</small>
+          </div>
+          <div id="binance-test-result" style="display: none; margin-top: 10px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;"></div>
+        </div>
+
+        <!-- TELEGRAM NOTIFICATIONS SECTION -->
+        <div class="form-row" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+          <div class="form-group" style="grid-column: span 2;">
+            <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; color: var(--color-cyan);">
+              <input type="checkbox" id="cfg-tg-enabled" onchange="toggleTelegramInputs()" style="width: 18px; height: 18px; accent-color: var(--color-cyan);">
+              📱 Aktifkan Notifikasi Telegram Bot
+            </label>
+            <small class="form-hint">Menerima alert instan saat ada order baru, averaging layer terisi, take profit, dan stop-loss.</small>
+          </div>
+        </div>
+
+        <div id="telegram-input-group" style="opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease;">
+          <div class="form-group">
+            <label>Telegram Bot Token</label>
+            <input type="password" id="cfg-tg-token" class="form-control" placeholder="Contoh: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+            <small class="form-hint">Didapatkan dari <b>@BotFather</b> di Telegram.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Telegram Chat ID (Pribadi atau ID Grup)</label>
+            <input type="text" id="cfg-tg-chatid" class="form-control" placeholder="Contoh: 123456789 atau -100123456789">
+            <small class="form-hint">ID chat atau grup Anda (bisa dicek via bot <b>@userinfobot</b> di Telegram).</small>
+          </div>
+
+          <div class="form-group">
+            <label style="margin-bottom: 8px;">Pilihan Jenis Notifikasi:</label>
+            <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="cfg-tg-on-new" checked style="accent-color: var(--color-cyan);"> Order Baru Diterbitkan
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="cfg-tg-on-layer" checked style="accent-color: var(--color-cyan);"> Layer Jaring Terisi
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="cfg-tg-on-close" checked style="accent-color: var(--color-cyan);"> Posisi Ditutup (TP / SL)
+              </label>
+            </div>
+          </div>
+
+          <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-warning" id="btn-test-telegram" onclick="testTelegramConnection()">
+              📱 Kirim Pesan Uji Coba Telegram
+            </button>
+            <small class="form-hint" style="margin: 0;">Menguji token bot dan mengirimkan pesan tes ke Chat ID Anda.</small>
+          </div>
+          <div id="telegram-test-result" style="display: none; margin-top: 10px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;"></div>
         </div>
       </div>
 
@@ -374,10 +446,10 @@
             <label>Pilihan Cepat Rentang Waktu:</label>
             <div class="preset-buttons-row">
               <button type="button" class="btn-preset" onclick="setBtPreset(1)">⚡ 24 Jam</button>
-              <button type="button" class="btn-preset active" onclick="setBtPreset(3)">📅 3 Hari</button>
+              <button type="button" class="btn-preset" onclick="setBtPreset(3)">📅 3 Hari</button>
               <button type="button" class="btn-preset" onclick="setBtPreset(7)">📅 7 Hari</button>
               <button type="button" class="btn-preset" onclick="setBtPreset(14)">📅 14 Hari</button>
-              <button type="button" class="btn-preset" onclick="setBtPreset(30)">📅 30 Hari</button>
+              <button type="button" class="btn-preset active" onclick="setBtPreset(30)">📅 30 Hari</button>
             </div>
           </div>
 
@@ -400,7 +472,7 @@
 
           <div class="form-group">
             <label>Ambang Pemicu Spike (%):</label>
-            <input type="number" id="bt-spike" class="form-control" value="3.2" step="0.1" min="1.0" />
+            <input type="number" id="bt-spike" class="form-control" value="2.0" step="0.1" min="1.0" />
           </div>
 
           <div class="form-group">
@@ -420,32 +492,32 @@
 
           <div class="form-group">
             <label>Jarak Antar Layer (%):</label>
-            <input type="number" id="bt-spacing" class="form-control" value="1.0" step="0.1" min="0.2" />
+            <input type="number" id="bt-spacing" class="form-control" value="1.2" step="0.1" min="0.2" />
           </div>
 
           <div class="form-group">
             <label>Jumlah Layer Jaring:</label>
-            <input type="number" id="bt-total-layers" class="form-control" value="6" min="1" max="25" step="1" />
+            <input type="number" id="bt-total-layers" class="form-control" value="25" min="1" max="25" step="1" />
           </div>
 
           <div class="form-group">
             <label>Maksimal Margin Per Koin (USDT):</label>
-            <input type="number" id="bt-max-margin" class="form-control" value="80" min="5" step="1" />
+            <input type="number" id="bt-max-margin" class="form-control" value="50" min="5" step="1" />
           </div>
 
           <div class="form-group">
             <label>Pengali Martingale (x):</label>
-            <input type="number" id="bt-martingale" class="form-control" value="1.15" min="1.0" max="2.5" step="0.05" />
+            <input type="number" id="bt-martingale" class="form-control" value="1.1" min="1.0" max="2.5" step="0.05" />
           </div>
 
           <div class="form-group">
             <label>Maks. Waktu Tahan Posisi (menit):</label>
-            <input type="number" id="bt-max-hold" class="form-control" value="10" min="1" max="120" step="1" />
+            <input type="number" id="bt-max-hold" class="form-control" value="60" min="1" max="120" step="1" />
           </div>
 
           <div class="form-group">
             <label>Cooldown Antar Trade (menit):</label>
-            <input type="number" id="bt-cooldown" class="form-control" value="10" min="1" max="60" step="1" />
+            <input type="number" id="bt-cooldown" class="form-control" value="20" min="1" max="60" step="1" />
           </div>
 
           <div class="form-group">

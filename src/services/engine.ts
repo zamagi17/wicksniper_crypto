@@ -5,6 +5,7 @@ import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { logger } from './logger';
 import { db } from './db';
+import { telegram } from './telegram';
 
 export class WickSniperEngine {
   private config: BotConfig;
@@ -25,6 +26,7 @@ export class WickSniperEngine {
     this.config = this.loadConfig();
     this.virtualBalance = this.config.paperTrading?.initialVirtualBalance || 1000;
     this.scanner = new SpikeScanner(this.config.scanner);
+    telegram.updateConfig(this.config.telegram);
     this.initListeners();
   }
 
@@ -68,9 +70,19 @@ export class WickSniperEngine {
         trailingCallbackPct: 0.4,
         hardStopLossPct: 4.5,
         maxHoldMinutes: 60,
+        partialTpEnabled: false,
+        partialTpRatio: 0.5,
       },
       paperTrading: {
         initialVirtualBalance: 245.0,
+      },
+      telegram: {
+        enabled: false,
+        botToken: '',
+        chatId: '',
+        notifyOnNewOrder: true,
+        notifyOnLayerFill: true,
+        notifyOnClose: true,
       },
       server: {
         port: 3005,
@@ -80,8 +92,18 @@ export class WickSniperEngine {
 
   public async saveConfig(newConfig: Partial<BotConfig>): Promise<BotConfig> {
     const oldBalance = this.config.paperTrading?.initialVirtualBalance;
-    this.config = { ...this.config, ...newConfig };
+    this.config = {
+      ...this.config,
+      ...newConfig,
+      exit: { ...this.config.exit, ...(newConfig.exit || {}) },
+      scanner: { ...this.config.scanner, ...(newConfig.scanner || {}) },
+      grid: { ...this.config.grid, ...(newConfig.grid || {}) },
+      telegram: { ...this.config.telegram, ...(newConfig.telegram || {}) },
+    };
     this.scanner.updateConfig(this.config.scanner);
+    if (this.config.telegram) {
+      telegram.updateConfig(this.config.telegram);
+    }
     if (this.config.apiKey && this.config.apiSecret) {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
     }
@@ -128,9 +150,22 @@ export class WickSniperEngine {
     if (db.isConnected) {
       const dbCfg = await db.loadConfig();
       if (dbCfg) {
-        this.config = { ...this.config, ...dbCfg };
+        this.config = {
+          ...this.config,
+          ...dbCfg,
+          exit: { ...this.config.exit, ...(dbCfg.exit || {}) },
+          scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
+          grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
+          telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+        };
         this.scanner.updateConfig(this.config.scanner);
+        if (this.config.telegram) {
+          telegram.updateConfig(this.config.telegram);
+        }
         this.lastSyncedConfigJson = JSON.stringify(dbCfg);
+        if (this.config.apiKey && this.config.apiSecret) {
+          binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+        }
       } else {
         await db.saveConfig(this.config);
         this.lastSyncedConfigJson = JSON.stringify(this.config);
@@ -160,25 +195,39 @@ export class WickSniperEngine {
     await binanceFutures.startTickerWebSocket();
     this.scanner.start();
 
-    // Heartbeat ticker, time-limit check tiap 1 detik, & sinkronisasi DB tiap 5 detik
+    // Heartbeat ticker, time-limit check tiap 1 detik, sync live position tiap 3s, & sinkronisasi DB tiap 5 detik
     let tickCount = 0;
-    this.tickInterval = setInterval(async () => {
-      this.checkTimeLimitsAndTrailing();
-      this.broadcastStatus();
-      tickCount++;
-      if (tickCount % 5 === 0) {
-        await this.syncConfigFromDb();
-      }
-    }, 1000);
+    if (!this.tickInterval) {
+      this.tickInterval = setInterval(async () => {
+        this.checkTimeLimitsAndTrailing();
+        this.broadcastStatus();
+        tickCount++;
+        if (tickCount % 3 === 0 && this.config.tradingMode === 'LIVE') {
+          await this.syncLivePositions();
+        }
+        if (tickCount % 5 === 0) {
+          await this.syncConfigFromDb();
+        }
+        // Jika bot dihentikan dan semua posisi sudah tertutup, bersihkan interval
+        if (!this.isRunning && this.activePositions.size === 0 && this.tickInterval) {
+          clearInterval(this.tickInterval);
+          this.tickInterval = null;
+        }
+      }, 1000);
+    }
   }
 
   public stop() {
     this.isRunning = false;
-    if (this.tickInterval) {
-      clearInterval(this.tickInterval);
-      this.tickInterval = null;
+    logger.log('WARN', '🛑 Wick Sniper Engine dinonaktifkan (Tidak akan membuka trade baru).');
+    if (this.activePositions.size > 0) {
+      logger.log('INFO', `🛡️ Masih terdapat ${this.activePositions.size} posisi aktif. Bot tetap mengawal TP/SL hingga semua posisi selesai ditutup.`);
+    } else {
+      if (this.tickInterval) {
+        clearInterval(this.tickInterval);
+        this.tickInterval = null;
+      }
     }
-    logger.log('WARN', '🛑 Wick Sniper Engine dinonaktifkan.');
     this.broadcastStatus();
   }
 
@@ -207,23 +256,33 @@ export class WickSniperEngine {
     alert.status = 'EXECUTING';
     logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
 
-    await this.deployGridLadder(symbol, alert.currentPrice);
+    await this.deployGridLadder(symbol, alert.currentPrice, alert.surgePct, alert.lookbackSeconds);
   }
 
   /**
    * Membuat dan menembakkan Jaring Order SHORT bertingkat
    */
-  private async deployGridLadder(symbol: string, currentPrice: number) {
+  private async deployGridLadder(
+    symbol: string,
+    currentPrice: number,
+    surgePct: number = 0,
+    lookbackSeconds: number = 20
+  ) {
     const gridCfg = this.config.grid;
     const exitCfg = this.config.exit;
     const leverage = this.config.leverage || 5;
+    const prec = binanceFutures.getPrecision(symbol);
 
     const layers: GridLayer[] = [];
     let currentMargin = gridCfg.marginPerLayerUsdt;
     let totalPlannedMargin = 0;
 
     // Layer 0: Langsung terisi di harga pasar saat spike (Market / Immediate entry)
-    const layer0Qty = parseFloat(binanceFutures.formatQty(symbol, (currentMargin * leverage) / currentPrice));
+    let layer0Planned = (currentMargin * leverage) / currentPrice;
+    if (layer0Planned * currentPrice < prec.minNotional) {
+      layer0Planned = (prec.minNotional * 1.05) / currentPrice;
+    }
+    const layer0Qty = parseFloat(binanceFutures.formatQty(symbol, layer0Planned));
     layers.push({
       layerIndex: 0,
       price: currentPrice,
@@ -242,7 +301,11 @@ export class WickSniperEngine {
       }
 
       const layerPrice = currentPrice * (1 + (i * gridCfg.layerSpacingPct) / 100);
-      const layerQty = parseFloat(binanceFutures.formatQty(symbol, (currentMargin * leverage) / layerPrice));
+      let layerPlanned = (currentMargin * leverage) / layerPrice;
+      if (layerPlanned * layerPrice < prec.minNotional) {
+        layerPlanned = (prec.minNotional * 1.05) / layerPrice;
+      }
+      const layerQty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
 
       layers.push({
         layerIndex: i,
@@ -273,19 +336,22 @@ export class WickSniperEngine {
       status: 'SNIPING',
     };
 
-    this.activePositions.set(symbol, initialPos);
-    db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
-
     if (this.config.tradingMode === 'LIVE') {
       // Live Trading: Kirim batch orders ke Binance Futures
       await binanceFutures.setLeverage(symbol, leverage);
       await binanceFutures.setMarginType(symbol, this.config.marginType || 'CROSSED');
 
-      // 1. Eksekusi market order untuk layer 0 (Tanpa reduceOnly)
+      // 1. Eksekusi market order untuk layer 0 (Mendukung One-Way & Hedge Mode)
       const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
-      if (res0?.orderId) {
-        layers[0].orderId = String(res0.orderId);
+      if (!res0?.orderId) {
+        logger.log(
+          'ERROR',
+          `❌ [ORDER GAGAL] Gagal membuka Layer 0 SHORT untuk ${symbol} di Binance! Membatalkan penempatan jaring. Cek saldo USDT atau izin Futures API Key.`,
+          symbol
+        );
+        return;
       }
+      layers[0].orderId = String(res0.orderId);
 
       // 2. Kirim limit orders untuk layer 1 ke atas via batchOrders
       const batchPayload = layers.slice(1).map((l) => ({
@@ -307,6 +373,19 @@ export class WickSniperEngine {
       }
     }
 
+    this.activePositions.set(symbol, initialPos);
+    db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+
+    telegram.notifyNewOrder(
+      initialPos,
+      this.config.tradingMode,
+      surgePct,
+      lookbackSeconds,
+      gridCfg.layerSpacingPct,
+      exitCfg.takeProfitPct,
+      exitCfg.hardStopLossPct
+    );
+
     logger.log(
       'SUCCESS',
       `🎯 [JARING SHORT DITERBITKAN] ${symbol}: ${layers.length} Layer terpasang. Layer #0 terisi di $${currentPrice}. Target TP: $${initialPos.targetTpPrice.toFixed(4)} (-${exitCfg.takeProfitPct}%)`,
@@ -318,7 +397,7 @@ export class WickSniperEngine {
    * Pembaruan live harga dari WebSocket untuk mengecek trigger jaring dan TP/SL
    */
   private onPriceTick(tickers: any[]) {
-    if (!this.isRunning || this.activePositions.size === 0) return;
+    if (this.activePositions.size === 0) return;
 
     for (const t of tickers) {
       const symbol = t.s;
@@ -341,6 +420,12 @@ export class WickSniperEngine {
             'SNIPER',
             `🕸️ [LAYER TERISI] ${symbol} Layer #${layer.layerIndex} terisi @ $${layer.price} (Qty: ${layer.qty}, Margin: $${layer.marginUsdt.toFixed(2)})`,
             symbol
+          );
+          telegram.notifyLayerFill(
+            pos,
+            layer,
+            pos.layers.filter((l) => l.status === 'FILLED').length,
+            pos.layers.length
           );
         }
       }
@@ -391,6 +476,13 @@ export class WickSniperEngine {
               'SUCCESS',
               `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Stop-Loss digeser ke BEP ($${pos.avgEntryPrice.toFixed(4)}). Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
               pos.symbol
+            );
+            telegram.notifyPartialTp(
+              pos.symbol,
+              partialPnl,
+              pos.totalQty,
+              pos.avgEntryPrice,
+              pos.targetTpPrice
             );
             this.broadcastStatus();
             db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
@@ -472,7 +564,14 @@ export class WickSniperEngine {
     if (this.config.tradingMode === 'LIVE') {
       // Live Trading: Batalkan order limit pending lalu tutup posisi market
       await binanceFutures.cancelAllOrders(pos.symbol);
-      await binanceFutures.closePositionMarket(pos.symbol, 'BUY', pos.totalQty);
+
+      // Ambil ukuran posisi riil langsung dari Binance matching engine agar kuantitas 100% presisi dan tidak kena reject -2022
+      const realPos = await binanceFutures.getOpenPosition(pos.symbol);
+      const closeQty = realPos && Math.abs(realPos.positionAmt) > 0 ? Math.abs(realPos.positionAmt) : pos.totalQty;
+
+      if (closeQty > 0) {
+        await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+      }
     } else {
       // Paper Trading: Sesuaikan saldo virtual untuk sisa posisi
       this.virtualBalance += Math.round(pnl * 100) / 100;
@@ -527,6 +626,11 @@ export class WickSniperEngine {
     db.saveTrade(trade).catch(() => {});
     db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
+    telegram.notifyTradeClosed(
+      trade,
+      this.config.tradingMode === 'PAPER' ? this.virtualBalance : undefined
+    );
+
     // Berikan cooldown pada koin yang baru ditutup agar tidak re-enter pucuk yang sama
     this.scanner.setCooldown(pos.symbol, this.config.scanner.cooldownMinutes || 10);
 
@@ -563,6 +667,40 @@ export class WickSniperEngine {
         logger.log('WARN', `⏰ [TIME LIMIT] ${pos.symbol} telah ditahan lebih dari ${this.config.exit.maxHoldMinutes} menit. Menutup posisi secara paksa...`, pos.symbol);
         this.closePosition(pos, 'TIME_LIMIT_EXIT', pos.currentPrice);
       }
+    }
+  }
+
+  /**
+   * Rekonsiliasi berkala posisi live dengan Binance matching engine
+   */
+  private async syncLivePositions() {
+    if (this.config.tradingMode !== 'LIVE' || this.activePositions.size === 0) return;
+
+    for (const [symbol, pos] of this.activePositions.entries()) {
+      try {
+        const realPos = await binanceFutures.getOpenPosition(symbol);
+        if (!realPos) continue;
+
+        // Jika di Binance posisinya sudah 0 dan posisi bot sudah berjalan lebih dari 10 detik,
+        // artinya posisi tertutup di bursa (likuidasi / stop-out / user tutup di Binance app)
+        if (realPos.positionAmt === 0 && Date.now() - pos.openedAt > 10000 && pos.status === 'SNIPING') {
+          logger.log('WARN', `⚠️ [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance. Menandai selesai di bot...`, symbol);
+          await this.closePosition(pos, 'MANUAL_CLOSE', pos.currentPrice || pos.avgEntryPrice);
+          continue;
+        }
+
+        // Sinkronisasi kuantitas & avg entry price jika ada layer tambahan yang terisi di Binance
+        const liveQty = Math.abs(realPos.positionAmt);
+        if (liveQty > 0 && (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6)) {
+          pos.totalQty = liveQty;
+          if (realPos.entryPrice > 0) {
+            pos.avgEntryPrice = realPos.entryPrice;
+            const exitCfg = this.config.exit;
+            pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+            pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+          }
+        }
+      } catch {}
     }
   }
 
@@ -625,8 +763,18 @@ export class WickSniperEngine {
       if (raw !== this.lastSyncedConfigJson) {
         const oldBalance = this.config.paperTrading?.initialVirtualBalance;
         this.lastSyncedConfigJson = raw;
-        this.config = { ...this.config, ...dbCfg };
+        this.config = {
+          ...this.config,
+          ...dbCfg,
+          exit: { ...this.config.exit, ...(dbCfg.exit || {}) },
+          scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
+          grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
+          telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+        };
         this.scanner.updateConfig(this.config.scanner);
+        if (this.config.telegram) {
+          telegram.updateConfig(this.config.telegram);
+        }
         if (this.config.apiKey && this.config.apiSecret) {
           binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
         }
