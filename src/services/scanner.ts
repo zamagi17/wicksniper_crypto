@@ -17,6 +17,9 @@ export class SpikeScanner {
   }
 
   public getTotalMonitoredSymbols(): number {
+    if (this.config.whitelistEnabled && this.config.whitelistSymbols && this.config.whitelistSymbols.length > 0) {
+      return this.config.whitelistSymbols.length;
+    }
     return this.lastPrices.size;
   }
 
@@ -26,6 +29,16 @@ export class SpikeScanner {
 
   public updateConfig(newConfig: BotConfig['scanner']) {
     this.config = newConfig;
+    if (this.config.whitelistEnabled && this.config.whitelistSymbols && this.config.whitelistSymbols.length > 0) {
+      // Bersihkan koin yang tidak lagi ada di whitelist agar tidak tertinggal di cache scanner
+      const allowed = new Set(this.config.whitelistSymbols);
+      for (const sym of this.lastPrices.keys()) {
+        if (!allowed.has(sym)) {
+          this.lastPrices.delete(sym);
+          this.priceHistory.delete(sym);
+        }
+      }
+    }
   }
 
   public setCooldown(symbol: string, minutes: number) {
