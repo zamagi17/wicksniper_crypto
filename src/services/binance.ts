@@ -230,24 +230,53 @@ export class BinanceFuturesClient {
   }
 
   /**
-   * Menembakkan hingga 5 order sekaligus dalam 1 request (High-Frequency Batch)
+   * Menembakkan order berjenjang (High-Frequency Batch) otomatis dipecah maks 5 order per request
    */
   public async sendBatchOrders(batchOrdersList: any[]): Promise<any[]> {
-    if (!this.apiKey || !this.apiSecret) return [];
+    if (!this.apiKey || !this.apiSecret || !batchOrdersList.length) return [];
+    const allResults: any[] = [];
+    const CHUNK_SIZE = 5;
+
+    for (let i = 0; i < batchOrdersList.length; i += CHUNK_SIZE) {
+      const chunk = batchOrdersList.slice(i, i + CHUNK_SIZE);
+      try {
+        const data = this.signParams({
+          batchOrders: JSON.stringify(chunk),
+        });
+        const res = await this.httpClient?.post('/fapi/v1/batchOrders', data);
+        if (Array.isArray(res?.data)) {
+          allResults.push(...res.data);
+        }
+      } catch (err: any) {
+        console.error(`Gagal mengeksekusi batchOrders (chunk ${Math.floor(i / CHUNK_SIZE) + 1}):`, err.response?.data || err.message);
+      }
+    }
+    return allResults;
+  }
+
+  /**
+   * Membuka posisi baru seketika dengan Market Order (Tanpa reduceOnly)
+   */
+  public async openMarketOrder(symbol: string, side: 'BUY' | 'SELL', qty: number): Promise<any> {
+    if (!this.apiKey || !this.apiSecret) return null;
     try {
+      const formattedQty = this.formatQty(symbol, qty);
       const data = this.signParams({
-        batchOrders: JSON.stringify(batchOrdersList),
+        symbol,
+        side,
+        type: 'MARKET',
+        quantity: formattedQty,
       });
-      const res = await this.httpClient?.post('/fapi/v1/batchOrders', data);
-      return res?.data || [];
+      const res = await this.httpClient?.post('/fapi/v1/order', data);
+      return res?.data;
     } catch (err: any) {
-      console.error('Gagal mengeksekusi batchOrders:', err.response?.data || err.message);
-      return [];
+      console.error(`Gagal membuka posisi market ${symbol}:`, err.response?.data || err.message);
+      return null;
     }
   }
 
   /**
-   * Menutup posisi seketika dengan Market Order
+   * Menutup posisi seketika dengan Market Order (Dengan reduceOnly)
    */
   public async closePositionMarket(symbol: string, side: 'BUY' | 'SELL', qty: number): Promise<any> {
     if (!this.apiKey || !this.apiSecret) return null;

@@ -200,6 +200,13 @@ body {
   background: rgba(255, 179, 0, 0.25);
 }
 
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+}
+
 .btn-xs {
   padding: 4px 8px;
   font-size: 11px;

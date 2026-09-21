@@ -53,6 +53,19 @@ app.post('/api/reset-demo', (req, res) => {
   res.json({ success: true, status: engine.getStatus() });
 });
 
+app.post('/api/close-position', async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    if (!symbol) {
+      return res.status(400).json({ success: false, message: 'Simbol koin harus diisi' });
+    }
+    const closed = await engine.manualClosePosition(symbol);
+    res.json({ success: closed, status: engine.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.post('/api/backtest', async (req, res) => {
   try {
     const { symbols, startTime, endTime, ...customParams } = req.body;

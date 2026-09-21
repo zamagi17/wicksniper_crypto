@@ -235,9 +235,14 @@ function renderActivePositions(positions) {
               <span class="badge-side short">SHORT ${pos.leverage}x</span>
               <span class="badge-margin-tag">💰 Margin: $${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT</span>
             </div>
-            <div class="pos-pnl">
-              <div class="pos-pnl-val ${pnlColor}">${pnlSign}$${(pos.unrealizedPnl || 0).toFixed(2)}</div>
-              <div class="pos-pnl-pct ${pnlColor}">${pnlSign}${(pos.pnlPct || 0).toFixed(1)}%</div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div class="pos-pnl">
+                <div class="pos-pnl-val ${pnlColor}">${pnlSign}$${(pos.unrealizedPnl || 0).toFixed(2)}</div>
+                <div class="pos-pnl-pct ${pnlColor}">${pnlSign}${(pos.pnlPct || 0).toFixed(1)}%</div>
+              </div>
+              <button class="btn btn-sm btn-danger" onclick="manualClosePosition('${pos.symbol}')" title="Tutup posisi ini seketika di harga pasar">
+                ⚡ Tutup
+              </button>
             </div>
           </div>
 
@@ -578,6 +583,25 @@ async function resetDemo() {
   }
 }
 
+async function manualClosePosition(symbol) {
+  if (!confirm(`Yakin ingin menutup posisi SHORT ${symbol} sekarang di harga pasar?`)) return;
+  try {
+    const res = await fetch('/api/close-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol }),
+    }).then((r) => r.json());
+
+    if (res.success) {
+      if (res.status) renderStatus(res.status);
+    } else {
+      alert(`Gagal menutup posisi: ${res.message || 'Unknown error'}`);
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
 // ==========================================
 // MODAL SETTINGS (PERSISTENT & FLOATING FOOTER)
 // ==========================================
@@ -595,16 +619,17 @@ function populateSettingsForm(cfg) {
   setVal('cfg-virtual-balance', cfg.paperTrading?.initialVirtualBalance ?? currentStatus?.virtualBalance ?? 245);
   setVal('cfg-leverage', cfg.leverage || 5);
   setVal('cfg-margin-type', cfg.marginType || 'CROSSED');
-  setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 3.2);
+  setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 2.0);
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
-  setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 10);
+  setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
   setVal('cfg-margin-layer', cfg.grid?.marginPerLayerUsdt || 3);
-  setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 80);
-  setVal('cfg-total-layers', cfg.grid?.totalLayers || 6);
-  setVal('cfg-layer-spacing', cfg.grid?.layerSpacingPct || 1.0);
+  setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 50);
+  setVal('cfg-total-layers', cfg.grid?.totalLayers || 25);
+  setVal('cfg-layer-spacing', cfg.grid?.layerSpacingPct || 1.2);
   setVal('cfg-max-coins', cfg.grid?.maxConcurrentCoins || 2);
-  setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.15);
+  setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.1);
+  setVal('cfg-cooldown', cfg.scanner?.cooldownMinutes || 20);
   setVal('cfg-api-key', cfg.apiKey || '');
   setVal('cfg-api-secret', cfg.apiSecret || '');
 
@@ -632,7 +657,8 @@ function getSettingsFormData() {
     },
     scanner: {
       ...(currentConfig?.scanner || {}),
-      spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '3.2')) || 3.2,
+      spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '2.0')) || 2.0,
+      cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
     },
@@ -640,16 +666,16 @@ function getSettingsFormData() {
       ...(currentConfig?.exit || {}),
       takeProfitPct: parseFloat(getVal('cfg-tp-pct', '1.2')) || 1.2,
       hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
-      maxHoldMinutes: parseInt(getVal('cfg-max-hold', '10')) || 10,
+      maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
     },
     grid: {
       ...(currentConfig?.grid || {}),
       marginPerLayerUsdt: parseFloat(getVal('cfg-margin-layer', '3')) || 3,
-      maxTotalMarginPerCoin: parseFloat(getVal('cfg-max-margin', '80')) || 80,
-      totalLayers: parseInt(getVal('cfg-total-layers', '6')) || 6,
-      layerSpacingPct: parseFloat(getVal('cfg-layer-spacing', '1.0')) || 1.0,
+      maxTotalMarginPerCoin: parseFloat(getVal('cfg-max-margin', '50')) || 50,
+      totalLayers: parseInt(getVal('cfg-total-layers', '25')) || 25,
+      layerSpacingPct: parseFloat(getVal('cfg-layer-spacing', '1.2')) || 1.2,
       maxConcurrentCoins: parseInt(getVal('cfg-max-coins', '2')) || 2,
-      martingaleMultiplier: parseFloat(getVal('cfg-martingale', '1.15')) || 1.15,
+      martingaleMultiplier: parseFloat(getVal('cfg-martingale', '1.1')) || 1.1,
     },
     apiKey: (getVal('cfg-api-key', '') || '').trim(),
     apiSecret: (getVal('cfg-api-secret', '') || '').trim(),

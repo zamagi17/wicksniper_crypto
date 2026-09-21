@@ -47,30 +47,30 @@ export class WickSniperEngine {
       scanner: {
         enabled: true,
         spikeLookbackSeconds: 20,
-        spikeMinPercent: 2.5,
+        spikeMinPercent: 2.0,
         volumeSpikeMultiplier: 2.0,
         minPriceUsdt: 0.005,
         maxPriceUsdt: 2000,
         excludeSymbols: ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT'],
-        cooldownMinutes: 10,
+        cooldownMinutes: 20,
       },
       grid: {
         maxConcurrentCoins: 2,
-        totalLayers: 6,
-        layerSpacingPct: 0.6,
-        marginPerLayerUsdt: 10.0,
-        martingaleMultiplier: 1.15,
-        maxTotalMarginPerCoin: 80.0,
+        totalLayers: 25,
+        layerSpacingPct: 1.2,
+        marginPerLayerUsdt: 3.0,
+        martingaleMultiplier: 1.1,
+        maxTotalMarginPerCoin: 50.0,
       },
       exit: {
         takeProfitPct: 1.2,
         trailingTpEnabled: true,
         trailingCallbackPct: 0.4,
         hardStopLossPct: 4.5,
-        maxHoldMinutes: 10,
+        maxHoldMinutes: 60,
       },
       paperTrading: {
-        initialVirtualBalance: 1000.0,
+        initialVirtualBalance: 245.0,
       },
       server: {
         port: 3005,
@@ -281,8 +281,8 @@ export class WickSniperEngine {
       await binanceFutures.setLeverage(symbol, leverage);
       await binanceFutures.setMarginType(symbol, this.config.marginType || 'CROSSED');
 
-      // 1. Eksekusi market order untuk layer 0
-      const res0 = await binanceFutures.closePositionMarket(symbol, 'SELL', layer0Qty);
+      // 1. Eksekusi market order untuk layer 0 (Tanpa reduceOnly)
+      const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
       if (res0?.orderId) {
         layers[0].orderId = String(res0.orderId);
       }
@@ -441,6 +441,18 @@ export class WickSniperEngine {
         pos.symbol
       );
     }
+  }
+
+  /**
+   * Menutup posisi secara manual di harga pasar saat ini atas instruksi pengguna
+   */
+  public async manualClosePosition(symbol: string): Promise<boolean> {
+    const pos = this.activePositions.get(symbol);
+    if (!pos) return false;
+    logger.log('WARN', `⚡ [TUTUP POSISI MANUAL] Menutup posisi ${symbol} atas instruksi pengguna.`);
+    await this.closePosition(pos, 'MANUAL_CLOSE', pos.currentPrice || pos.avgEntryPrice);
+    this.broadcastStatus();
+    return true;
   }
 
   /**

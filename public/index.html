@@ -240,7 +240,7 @@
         <div class="form-row">
           <div class="form-group">
             <label>Minimal Spike Lonjakan (%)</label>
-            <input type="number" id="cfg-spike-pct" step="0.1" class="form-control" placeholder="2.5">
+            <input type="number" id="cfg-spike-pct" step="0.1" class="form-control" placeholder="2.0">
             <small class="form-hint">Memicu jika harga melonjak >= X% dalam 20 detik.</small>
           </div>
 
@@ -260,7 +260,7 @@
 
           <div class="form-group">
             <label>Maks Waktu Hold (Menit)</label>
-            <input type="number" id="cfg-max-hold" min="1" step="1" class="form-control" placeholder="10">
+            <input type="number" id="cfg-max-hold" min="1" step="1" class="form-control" placeholder="60">
             <small class="form-hint">Otomatis exit jika posisi bertahan melebihi X menit.</small>
           </div>
         </div>
@@ -274,7 +274,7 @@
 
           <div class="form-group">
             <label>Maksimal Margin Per Koin (USDT)</label>
-            <input type="number" id="cfg-max-margin" min="5" step="1" class="form-control" placeholder="80">
+            <input type="number" id="cfg-max-margin" min="5" step="1" class="form-control" placeholder="50">
             <small class="form-hint">Batas akumulasi margin maksimal untuk satu koin.</small>
           </div>
         </div>
@@ -282,13 +282,13 @@
         <div class="form-row">
           <div class="form-group">
             <label>Jumlah Layer Jaring (Maks 25)</label>
-            <input type="number" id="cfg-total-layers" min="1" max="25" step="1" class="form-control" placeholder="6">
+            <input type="number" id="cfg-total-layers" min="1" max="25" step="1" class="form-control" placeholder="25">
             <small class="form-hint">Total lapis jaring averaging.</small>
           </div>
 
           <div class="form-group">
             <label>Jarak Antar Jaring (%)</label>
-            <input type="number" id="cfg-layer-spacing" min="0.1" step="0.1" class="form-control" placeholder="1.0">
+            <input type="number" id="cfg-layer-spacing" min="0.1" step="0.1" class="form-control" placeholder="1.2">
             <small class="form-hint">Jarak kenaikan harga tiap tingkatan layer.</small>
           </div>
         </div>
@@ -301,8 +301,16 @@
           </div>
 
           <div class="form-group">
+            <label>Cooldown Antar Trade (Menit)</label>
+            <input type="number" id="cfg-cooldown" min="1" max="180" step="1" class="form-control" placeholder="20">
+            <small class="form-hint">Jeda istirahat koin setelah trade ditutup (rekomendasi: 20 menit).</small>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group" style="grid-column: span 2;">
             <label>Pengali Martingale (x)</label>
-            <input type="number" id="cfg-martingale" min="1.0" max="2.5" step="0.05" class="form-control" placeholder="1.15">
+            <input type="number" id="cfg-martingale" min="1.0" max="2.5" step="0.05" class="form-control" placeholder="1.1">
             <small class="form-hint">Faktor kelipatan modal pada layer berikutnya.</small>
           </div>
         </div>
