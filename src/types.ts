@@ -45,6 +45,9 @@ export interface BotConfig {
     notifyOnLayerFill?: boolean;
     notifyOnClose?: boolean;
   };
+  security?: {
+    password?: string;
+  };
   server: {
     port: number;
   };

@@ -2,10 +2,252 @@ let socket = null;
 let currentStatus = null;
 let currentConfig = null;
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-  connectWebSocket();
-  fetchInitialData();
+// ==========================================
+// AUTHENTICATION & SECURITY CONTROLLER
+// ==========================================
+function getAuthToken() {
+  try {
+    return localStorage.getItem('wicksniper_auth_token');
+  } catch {
+    return null;
+  }
+}
+
+function setAuthToken(token) {
+  try {
+    localStorage.setItem('wicksniper_auth_token', token);
+  } catch {}
+}
+
+function clearAuthToken() {
+  try {
+    localStorage.removeItem('wicksniper_auth_token');
+  } catch {}
+}
+
+async function authFetch(url, options = {}) {
+  const token = getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401 && !url.includes('/api/auth/')) {
+    showLoginOverlay('Sesi telah berakhir atau tidak valid. Silakan masukkan password kembali.');
+  }
+  return res;
+}
+
+function showLoginOverlay(errMsg = '') {
+  const overlay = document.getElementById('login-overlay');
+  const errBox = document.getElementById('login-error-msg');
+  const input = document.getElementById('login-password-input');
+  if (overlay) overlay.classList.remove('hidden');
+  if (errBox) {
+    if (errMsg) {
+      errBox.innerText = errMsg;
+      errBox.style.display = 'block';
+    } else {
+      errBox.style.display = 'none';
+    }
+  }
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 150);
+  }
+}
+
+function hideLoginOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  const errBox = document.getElementById('login-error-msg');
+  if (overlay) overlay.classList.add('hidden');
+  if (errBox) errBox.style.display = 'none';
+}
+
+function toggleLoginPasswordVisibility() {
+  const input = document.getElementById('login-password-input');
+  const btn = document.getElementById('login-eye-btn');
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (btn) btn.innerText = '🙈';
+  } else {
+    input.type = 'password';
+    if (btn) btn.innerText = '👁️';
+  }
+}
+window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
+
+async function handleLoginSubmit(e) {
+  if (e) e.preventDefault();
+  const input = document.getElementById('login-password-input');
+  const btn = document.getElementById('btn-submit-login');
+  const btnText = btn?.querySelector('.btn-login-text');
+  const btnSpinner = btn?.querySelector('.btn-login-spinner');
+  const errBox = document.getElementById('login-error-msg');
+
+  const password = (input?.value || '').trim();
+  if (!password) {
+    if (errBox) {
+      errBox.innerText = 'Harap masukkan password dashboard.';
+      errBox.style.display = 'block';
+    }
+    input?.focus();
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.style.display = 'none';
+  if (btnSpinner) btnSpinner.style.display = 'inline-flex';
+  if (errBox) errBox.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    }).then((r) => r.json());
+
+    if (res.success && res.token) {
+      setAuthToken(res.token);
+      hideLoginOverlay();
+      connectWebSocket();
+      fetchInitialData();
+    } else {
+      if (errBox) {
+        errBox.innerText = res.message || 'Password salah!';
+        errBox.style.display = 'block';
+      }
+      if (input) {
+        input.select();
+        input.focus();
+      }
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.innerText = `Gagal terhubung ke server: ${err.message}`;
+      errBox.style.display = 'block';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.style.display = 'inline-flex';
+    if (btnSpinner) btnSpinner.style.display = 'none';
+  }
+}
+window.handleLoginSubmit = handleLoginSubmit;
+
+async function logoutSession() {
+  if (!confirm('Kunci terminal dashboard sekarang?')) return;
+  try {
+    await authFetch('/api/auth/logout', { method: 'POST' });
+  } catch {}
+  clearAuthToken();
+  showLoginOverlay();
+}
+window.logoutSession = logoutSession;
+
+async function handlePasswordChange() {
+  const currentPassword = (document.getElementById('cfg-current-password')?.value || '').trim();
+  const newPassword = (document.getElementById('cfg-new-password')?.value || '').trim();
+  const confirmPassword = (document.getElementById('cfg-confirm-password')?.value || '').trim();
+  const statusEl = document.getElementById('password-change-status');
+  const btn = document.getElementById('btn-change-password');
+
+  const showStatus = (text, isSuccess) => {
+    if (!statusEl) return;
+    statusEl.style.display = 'block';
+    statusEl.style.background = isSuccess ? 'rgba(0, 255, 170, 0.12)' : 'rgba(255, 68, 68, 0.12)';
+    statusEl.style.border = isSuccess ? '1px solid rgba(0, 255, 170, 0.35)' : '1px solid rgba(255, 68, 68, 0.35)';
+    statusEl.style.color = isSuccess ? 'var(--color-green)' : 'var(--color-red)';
+    statusEl.innerText = text;
+  };
+
+  if (!currentPassword) {
+    showStatus('⚠️ Harap masukkan password saat ini.', false);
+    return;
+  }
+  if (!newPassword || newPassword.length < 4) {
+    showStatus('⚠️ Password baru minimal 4 karakter.', false);
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    showStatus('⚠️ Konfirmasi password baru tidak cocok!', false);
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Menyimpan Password...';
+  }
+
+  try {
+    const res = await authFetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }).then((r) => r.json());
+
+    if (res.success) {
+      showStatus('✅ ' + (res.message || 'Password berhasil diubah!'), true);
+      const curIn = document.getElementById('cfg-current-password');
+      const newIn = document.getElementById('cfg-new-password');
+      const confIn = document.getElementById('cfg-confirm-password');
+      if (curIn) curIn.value = '';
+      if (newIn) newIn.value = '';
+      if (confIn) confIn.value = '';
+    } else {
+      showStatus('❌ ' + (res.message || 'Gagal mengubah password'), false);
+    }
+  } catch (err) {
+    showStatus(`❌ Error: ${err.message}`, false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🔑 Simpan & Perbarui Password Dashboard';
+    }
+  }
+}
+window.handlePasswordChange = handlePasswordChange;
+
+// Initialize with authentication verification
+document.addEventListener('DOMContentLoaded', async () => {
+  const token = getAuthToken();
+  if (!token) {
+    showLoginOverlay();
+  } else {
+    try {
+      const checkRes = await fetch('/api/auth/check', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (checkRes.ok) {
+        hideLoginOverlay();
+        connectWebSocket();
+        fetchInitialData();
+      } else {
+        clearAuthToken();
+        showLoginOverlay('Sesi kedaluwarsa. Silakan masukkan password kembali.');
+      }
+    } catch {
+      // offline fallback
+      connectWebSocket();
+      fetchInitialData();
+    }
+  }
+
+  // CapsLock detector
+  const pwInput = document.getElementById('login-password-input');
+  const capsAlert = document.getElementById('login-caps-warning');
+  if (pwInput && capsAlert) {
+    const checkCaps = (e) => {
+      if (e.getModifierState && e.getModifierState('CapsLock')) {
+        capsAlert.style.display = 'block';
+      } else {
+        capsAlert.style.display = 'none';
+      }
+    };
+    pwInput.addEventListener('keydown', checkCaps);
+    pwInput.addEventListener('keyup', checkCaps);
+  }
 });
 
 function connectWebSocket() {
@@ -112,17 +354,19 @@ async function fetchInitialData() {
 
   try {
     const [resStatus, resConfig, resLogs] = await Promise.all([
-      fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
-      fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
-      fetch('/api/logs?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
+      authFetch('/api/status?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
+      authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
+      authFetch('/api/logs?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json()),
     ]);
-    currentConfig = resConfig;
-    try {
-      localStorage.setItem('wicksniper_config', JSON.stringify(resConfig));
-    } catch (e) {}
-    if (!settingsFormInitialized && !localStorage.getItem('wicksniper_settings_draft')) {
-      populateSettingsForm(resConfig);
-      settingsFormInitialized = true;
+    if (resConfig && !resConfig.message && resConfig.exit) {
+      currentConfig = resConfig;
+      try {
+        localStorage.setItem('wicksniper_config', JSON.stringify(resConfig));
+      } catch (e) {}
+      if (!settingsFormInitialized && !localStorage.getItem('wicksniper_settings_draft')) {
+        populateSettingsForm(resConfig);
+        settingsFormInitialized = true;
+      }
     }
     renderStatus(resStatus);
     renderLogs(resLogs);
@@ -562,7 +806,7 @@ async function toggleEngine() {
   if (!currentStatus) return;
   const endpoint = currentStatus.isRunning ? '/api/stop' : '/api/start';
   try {
-    const res = await fetch(endpoint, { method: 'POST' }).then((r) => r.json());
+    const res = await authFetch(endpoint, { method: 'POST' }).then((r) => r.json());
     if (res.status) {
       renderStatus(res.status);
     }
@@ -574,7 +818,7 @@ async function toggleEngine() {
 async function resetDemo() {
   if (!confirm('Yakin ingin mereset saldo demo dan riwayat trade?')) return;
   try {
-    const res = await fetch('/api/reset-demo', { method: 'POST' }).then((r) => r.json());
+    const res = await authFetch('/api/reset-demo', { method: 'POST' }).then((r) => r.json());
     if (res.status) {
       renderStatus(res.status);
     }
@@ -586,7 +830,7 @@ async function resetDemo() {
 async function manualClosePosition(symbol) {
   if (!confirm(`Yakin ingin menutup posisi SHORT ${symbol} sekarang di harga pasar?`)) return;
   try {
-    const res = await fetch('/api/close-position', {
+    const res = await authFetch('/api/close-position', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbol }),
@@ -720,8 +964,8 @@ function getSettingsFormData() {
 
 async function reloadConfigFromServer() {
   try {
-    const fresh = await fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
-    if (fresh) {
+    const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    if (fresh && fresh.exit) {
       currentConfig = fresh;
       try {
         localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
@@ -754,8 +998,8 @@ async function openSettingsModal() {
     } else {
       if (!currentConfig) {
         try {
-          const fresh = await fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
-          if (fresh) {
+          const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+          if (fresh && fresh.exit) {
             currentConfig = fresh;
             localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
           }
@@ -779,7 +1023,7 @@ async function saveSettings() {
   const updated = getSettingsFormData();
 
   try {
-    const res = await fetch('/api/config', {
+    const res = await authFetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
@@ -833,7 +1077,7 @@ async function testBinanceConnection() {
   }
 
   try {
-    const res = await fetch('/api/check-binance', {
+    const res = await authFetch('/api/check-binance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey, apiSecret }),
@@ -951,7 +1195,7 @@ async function testTelegramConnection() {
   }
 
   try {
-    const res = await fetch('/api/check-telegram', {
+    const res = await authFetch('/api/check-telegram', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ botToken, chatId }),
@@ -1128,7 +1372,7 @@ async function executeBacktest() {
   resultsContainer.style.display = 'none';
 
   try {
-    const res = await fetch('/api/backtest', {
+    const res = await authFetch('/api/backtest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

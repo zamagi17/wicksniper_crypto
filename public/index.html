@@ -17,9 +17,62 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.2.1">
+  <link rel="stylesheet" href="style.css?v=1.3.0">
 </head>
 <body>
+  <!-- FULLSCREEN LOGIN OVERLAY -->
+  <div id="login-overlay" class="login-backdrop">
+    <div class="login-card">
+      <div class="login-glow-aura"></div>
+      
+      <div class="login-header">
+        <div class="login-logo-container">
+          <div class="login-pulse-ring"></div>
+          <div class="login-logo">🎯</div>
+        </div>
+        <h2 class="login-title">WICK SNIPER TERMINAL</h2>
+        <div class="login-security-tag">
+          <span class="security-dot"></span>
+          <span>SISTEM TERPROTEKSI // ENCRYPTED ACCESS</span>
+        </div>
+        <p class="login-desc">Masukkan password otentikasi untuk membuka kontrol bot, saldo, & konfigurasi Binance.</p>
+      </div>
+
+      <form id="login-form" onsubmit="handleLoginSubmit(event)" class="login-form">
+        <div class="login-input-wrap">
+          <span class="login-input-icon">🔑</span>
+          <input 
+            type="password" 
+            id="login-password-input" 
+            class="login-input" 
+            placeholder="Masukkan Password..." 
+            autocomplete="current-password"
+            required
+            autofocus
+          >
+          <button type="button" class="btn-toggle-eye" id="login-eye-btn" onclick="toggleLoginPasswordVisibility()" title="Lihat Password">
+            👁️
+          </button>
+        </div>
+
+        <div id="login-caps-warning" class="login-caps-alert" style="display: none;">
+          ⚠️ Caps Lock aktif
+        </div>
+
+        <div id="login-error-msg" class="login-error-box" style="display: none;"></div>
+
+        <button type="submit" id="btn-submit-login" class="btn-login-submit">
+          <span class="btn-login-text">🔓 Buka Akses Terminal</span>
+          <span class="btn-login-spinner" style="display: none;">⏳ Memverifikasi...</span>
+        </button>
+
+        <div class="login-footer-hint">
+          <span>Password Bawaan: <code>admin123</code> (Dapat diubah di Pengaturan)</span>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- HEADER -->
   <header class="navbar">
     <div class="nav-brand">
@@ -45,6 +98,7 @@
 
       <button class="btn btn-secondary" onclick="openBacktestModal()">🧪 Backtest Lab</button>
       <button class="btn btn-secondary" onclick="openSettingsModal()">⚙️ Pengaturan</button>
+      <button class="btn btn-secondary" id="btn-lock-terminal" onclick="logoutSession()" title="Kunci Dashboard"><span class="icon">🔒</span> Kunci</button>
       <button class="btn btn-danger" onclick="resetDemo()">🧹 Reset Demo</button>
     </div>
   </header>
@@ -412,6 +466,37 @@
           </div>
           <div id="telegram-test-result" style="display: none; margin-top: 10px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;"></div>
         </div>
+
+        <!-- SECURITY & DASHBOARD PASSWORD SECTION -->
+        <div class="form-row" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+          <div class="form-group" style="grid-column: span 2;">
+            <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; color: var(--color-cyan);">
+              🔐 Keamanan Akses & Password Dashboard
+            </label>
+            <small class="form-hint">Kata sandi ini digunakan untuk melindungi terminal dan mengamankan API key Binance Anda saat membuka dashboard.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Password Saat Ini</label>
+            <input type="password" id="cfg-current-password" class="form-control" placeholder="Password lama (default: admin123)" autocomplete="current-password">
+          </div>
+
+          <div class="form-group">
+            <label>Password Baru</label>
+            <input type="password" id="cfg-new-password" class="form-control" placeholder="Minimal 4 karakter" autocomplete="new-password">
+          </div>
+
+          <div class="form-group" style="grid-column: span 2;">
+            <label>Konfirmasi Password Baru</label>
+            <input type="password" id="cfg-confirm-password" class="form-control" placeholder="Ketik ulang password baru" autocomplete="new-password">
+            <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <button type="button" class="btn btn-warning" id="btn-change-password" onclick="handlePasswordChange()">
+                🔑 Simpan & Perbarui Password Dashboard
+              </button>
+              <div id="password-change-status" style="display: none; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600;"></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="modal-footer floating-footer">
@@ -627,6 +712,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.2.1"></script>
+  <script src="app.js?v=1.3.0"></script>
 </body>
 </html>

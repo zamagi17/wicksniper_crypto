@@ -84,6 +84,9 @@ export class WickSniperEngine {
         notifyOnLayerFill: true,
         notifyOnClose: true,
       },
+      security: {
+        password: 'admin123',
+      },
       server: {
         port: 3005,
       },
@@ -99,6 +102,7 @@ export class WickSniperEngine {
       scanner: { ...this.config.scanner, ...(newConfig.scanner || {}) },
       grid: { ...this.config.grid, ...(newConfig.grid || {}) },
       telegram: { ...this.config.telegram, ...(newConfig.telegram || {}) },
+      security: { ...this.config.security, ...(newConfig.security || {}) },
     };
     this.scanner.updateConfig(this.config.scanner);
     if (this.config.telegram) {
@@ -157,6 +161,7 @@ export class WickSniperEngine {
           scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
           grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
           telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+          security: { ...this.config.security, ...(dbCfg.security || {}) },
         };
         this.scanner.updateConfig(this.config.scanner);
         if (this.config.telegram) {
@@ -704,6 +709,29 @@ export class WickSniperEngine {
     }
   }
 
+  public getHistoricalTrades(limit: number = 50): ClosedTrade[] {
+    return this.closedTrades.slice(0, limit);
+  }
+
+  public verifyPassword(password: string): boolean {
+    const configured = this.config.security?.password || 'admin123';
+    return String(password).trim() === configured;
+  }
+
+  public async changePassword(newPassword: string): Promise<boolean> {
+    const cleaned = String(newPassword || '').trim();
+    if (cleaned.length < 4) {
+      throw new Error('Password baru minimal 4 karakter');
+    }
+    await this.saveConfig({
+      security: {
+        password: cleaned,
+      },
+    });
+    logger.log('SUCCESS', '🔐 Password dashboard berhasil diperbarui.');
+    return true;
+  }
+
   public getStatus(): EngineStatus {
     const totalTrades = this.closedTrades.length;
     const wins = this.closedTrades.filter((t) => t.realizedPnl >= 0).length;
@@ -770,6 +798,7 @@ export class WickSniperEngine {
           scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
           grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
           telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+          security: { ...this.config.security, ...(dbCfg.security || {}) },
         };
         this.scanner.updateConfig(this.config.scanner);
         if (this.config.telegram) {

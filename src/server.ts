@@ -9,6 +9,8 @@ import { backtester } from './services/backtester';
 import { binanceFutures } from './services/binance';
 import { telegram } from './services/telegram';
 
+import crypto from 'crypto';
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -16,46 +18,152 @@ const wss = new WebSocketServer({ server });
 const CONFIG_PATH = path.resolve(__dirname, '../config.json');
 const engine = new WickSniperEngine(CONFIG_PATH);
 
+// Sesi Token Login (Token -> Expiry Timestamp)
+const activeSessions = new Map<string, number>();
+const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // Sesi aktif selama 7 hari
+
+function generateToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function isValidToken(token?: string | null): boolean {
+  if (!token) return false;
+  const expiresAt = activeSessions.get(token);
+  if (!expiresAt) return false;
+  if (Date.now() > expiresAt) {
+    activeSessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function extractToken(req: express.Request): string | null {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  if (req.headers['x-auth-token']) {
+    return String(req.headers['x-auth-token']).trim();
+  }
+  if (req.query.token) {
+    return String(req.query.token).trim();
+  }
+  return null;
+}
+
+// Middleware Proteksi Akses API Sensitif
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const token = extractToken(req);
+  if (isValidToken(token)) {
+    return next();
+  }
+  return res.status(401).json({
+    success: false,
+    message: 'Akses ditolak: Harap masukkan password login dashboard terlebih dahulu.',
+  });
+}
+
+function getSafeConfig(config: any) {
+  const safe = { ...config };
+  if (safe.security) {
+    safe.security = {
+      hasPassword: !!safe.security.password,
+    };
+  }
+  return safe;
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.resolve(__dirname, '../public')));
 
-// REST APIs
+// ==========================================
+// AUTHENTICATION APIs
+// ==========================================
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body || {};
+  if (!password || !engine.verifyPassword(password)) {
+    logger.log('WARN', '⚠️ Percobaan login dashboard dengan password salah.');
+    return res.status(401).json({ success: false, message: 'Password salah! Periksa kembali password Anda.' });
+  }
+
+  const token = generateToken();
+  activeSessions.set(token, Date.now() + SESSION_DURATION_MS);
+  logger.log('SUCCESS', '🔓 Login dashboard berhasil. Sesi otentikasi aktif.');
+  return res.json({
+    success: true,
+    token,
+    message: 'Login berhasil! Selamat datang di Wick Sniper Terminal.',
+  });
+});
+
+app.get('/api/auth/check', (req, res) => {
+  const token = extractToken(req);
+  if (isValidToken(token)) {
+    return res.json({ success: true, authenticated: true });
+  }
+  return res.status(401).json({ success: false, authenticated: false });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const token = extractToken(req);
+  if (token) {
+    activeSessions.delete(token);
+  }
+  return res.json({ success: true, message: 'Logout berhasil. Dashboard terkunci.' });
+});
+
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !engine.verifyPassword(currentPassword)) {
+      return res.status(400).json({ success: false, message: 'Password lama tidak sesuai!' });
+    }
+    await engine.changePassword(newPassword);
+    return res.json({ success: true, message: 'Password dashboard berhasil diubah! Simpan password baru Anda.' });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// ==========================================
+// REST APIs (PROTECTED & STATUS)
+// ==========================================
 app.get('/api/status', (req, res) => {
   res.json(engine.getStatus());
 });
 
-app.get('/api/config', async (req, res) => {
+app.get('/api/config', requireAuth, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   await engine.syncConfigFromDb();
-  res.json(engine.getConfig());
+  res.json(getSafeConfig(engine.getConfig()));
 });
 
-app.post('/api/config', async (req, res) => {
+app.post('/api/config', requireAuth, async (req, res) => {
   try {
     const updated = await engine.saveConfig(req.body);
-    res.json({ success: true, config: updated });
+    res.json({ success: true, config: getSafeConfig(updated) });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-app.post('/api/start', async (req, res) => {
+app.post('/api/start', requireAuth, async (req, res) => {
   await engine.start();
   res.json({ success: true, status: engine.getStatus() });
 });
 
-app.post('/api/stop', (req, res) => {
+app.post('/api/stop', requireAuth, (req, res) => {
   engine.stop();
   res.json({ success: true, status: engine.getStatus() });
 });
 
-app.post('/api/reset-demo', (req, res) => {
+app.post('/api/reset-demo', requireAuth, (req, res) => {
   engine.resetDemoWallet();
   res.json({ success: true, status: engine.getStatus() });
 });
 
-app.post('/api/close-position', async (req, res) => {
+app.post('/api/close-position', requireAuth, async (req, res) => {
   try {
     const { symbol } = req.body;
     if (!symbol) {
@@ -68,7 +176,7 @@ app.post('/api/close-position', async (req, res) => {
   }
 });
 
-app.post('/api/check-binance', async (req, res) => {
+app.post('/api/check-binance', requireAuth, async (req, res) => {
   try {
     const { apiKey, apiSecret, isTestnet } = req.body || {};
     if (apiKey && apiSecret) {
@@ -81,7 +189,7 @@ app.post('/api/check-binance', async (req, res) => {
   }
 });
 
-app.post('/api/check-telegram', async (req, res) => {
+app.post('/api/check-telegram', requireAuth, async (req, res) => {
   try {
     const { botToken, chatId } = req.body || {};
     const result = await telegram.testConnection(botToken, chatId);
@@ -91,7 +199,7 @@ app.post('/api/check-telegram', async (req, res) => {
   }
 });
 
-app.post('/api/backtest', async (req, res) => {
+app.post('/api/backtest', requireAuth, async (req, res) => {
   try {
     const { symbols, startTime, endTime, ...customParams } = req.body;
     const symbolList = symbols && symbols.length > 0 ? symbols : ['AKEUSDT', 'CROSSUSDT', 'BTWUSDT'];
@@ -117,9 +225,9 @@ app.get('/api/logs', (req, res) => {
 
 // WebSocket Realtime Broadcaster
 wss.on('connection', (ws) => {
-  // Kirim initial state & config
+  // Kirim initial state & safe config
   ws.send(JSON.stringify({ type: 'STATUS', data: engine.getStatus() }));
-  ws.send(JSON.stringify({ type: 'CONFIG', data: engine.getConfig() }));
+  ws.send(JSON.stringify({ type: 'CONFIG', data: getSafeConfig(engine.getConfig()) }));
   ws.send(JSON.stringify({ type: 'LOGS', data: logger.getLogs() }));
 });
 
@@ -137,7 +245,7 @@ engine.onStatus((status) => {
 });
 
 engine.onConfig((config) => {
-  broadcast('CONFIG', config);
+  broadcast('CONFIG', getSafeConfig(config));
 });
 
 logger.onLog((log) => {
