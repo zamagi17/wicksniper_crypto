@@ -380,9 +380,11 @@ export class WickSniperEngine {
     };
 
     if (this.config.tradingMode === 'LIVE') {
-      // Live Trading: Kirim batch orders ke Binance Futures
-      await binanceFutures.setLeverage(symbol, leverage);
-      await binanceFutures.setMarginType(symbol, this.config.marginType || 'CROSSED');
+      // Live Trading: Jalankan setLeverage & setMarginType secara paralel untuk memangkas latensi
+      await Promise.all([
+        binanceFutures.setLeverage(symbol, leverage),
+        binanceFutures.setMarginType(symbol, this.config.marginType || 'CROSSED'),
+      ]).catch(() => {});
 
       // 1. Eksekusi market order untuk layer 0 (Mendukung One-Way & Hedge Mode)
       const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
@@ -431,6 +433,7 @@ export class WickSniperEngine {
       if (realEntryPrice > 0) {
         layers[0].price = realEntryPrice;
         initialPos.avgEntryPrice = realEntryPrice;
+        initialPos.currentPrice = realEntryPrice;
         if (executedQty > 0) {
           layers[0].qty = executedQty;
           initialPos.totalQty = executedQty;
@@ -461,7 +464,7 @@ export class WickSniperEngine {
         );
       }
 
-      // 2. Kirim limit orders untuk layer 1 ke atas via batchOrders
+      // Siapkan payload batch order limit layer 1 ke atas
       const batchPayload = layers.slice(1).map((l) => ({
         symbol,
         side: 'SELL',
@@ -471,19 +474,25 @@ export class WickSniperEngine {
         timeInForce: 'GTC',
       }));
 
-      if (batchPayload.length > 0) {
-        const batchRes = await binanceFutures.sendBatchOrders(batchPayload);
-        for (let i = 0; i < batchRes.length; i++) {
-          if (batchRes[i]?.orderId) {
-            layers[i + 1].orderId = String(batchRes[i].orderId);
-          }
-        }
-      }
-    }
+      this.activePositions.set(symbol, initialPos);
 
-    this.activePositions.set(symbol, initialPos);
-    if (this.config.tradingMode === 'LIVE') {
-      this.syncLiveTakeProfitOrder(initialPos).catch(() => {});
+      // PRIORITAS UTAMA: Pasang Limit Take Profit SEKETIKA secara paralel (tanpa menunggu batch order selesai)
+      // Ini memangkas 200-300ms delay agar order Limit TP langsung siap menangkap pullback wick
+      const tpPromise = this.syncLiveTakeProfitOrder(initialPos).catch(() => {});
+
+      if (batchPayload.length > 0) {
+        binanceFutures.sendBatchOrders(batchPayload).then((batchRes) => {
+          for (let i = 0; i < batchRes.length; i++) {
+            if (batchRes[i]?.orderId) {
+              layers[i + 1].orderId = String(batchRes[i].orderId);
+            }
+          }
+        }).catch(() => {});
+      }
+
+      await tpPromise;
+    } else {
+      this.activePositions.set(symbol, initialPos);
     }
     db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
@@ -499,7 +508,7 @@ export class WickSniperEngine {
 
     logger.log(
       'SUCCESS',
-      `🎯 [JARING SHORT DITERBITKAN] ${symbol}: ${layers.length} Layer terpasang. Layer #0 terisi di $${currentPrice}. Target TP: $${initialPos.targetTpPrice.toFixed(4)} (-${exitCfg.takeProfitPct}%)`,
+      `🎯 [JARING SHORT DITERBITKAN] ${symbol}: ${layers.length} Layer terpasang. Layer #0 terisi di $${initialPos.avgEntryPrice.toFixed(6)}. Target TP: $${initialPos.targetTpPrice.toFixed(6)} (-${exitCfg.takeProfitPct}%)`,
       symbol
     );
   }
@@ -563,7 +572,14 @@ export class WickSniperEngine {
 
       // 4. Evaluasi Kondisi Exit:
       // A. HARD STOP LOSS (Proteksi Runaway Pump)
-      if (currentPrice >= pos.hardSlPrice) {
+      // Guard: Minimal 5 detik sejak posisi dibuka untuk menghindari false trigger akibat volatilitas awal
+      const slAgeMs = Date.now() - pos.openedAt;
+      if (currentPrice >= pos.hardSlPrice && slAgeMs >= 5000) {
+        logger.log(
+          'WARN',
+          `🛑 [HARD SL TRIGGERED] ${pos.symbol}: Harga $${currentPrice} >= Hard SL $${pos.hardSlPrice.toFixed(6)} (Avg Entry: $${pos.avgEntryPrice.toFixed(6)}, SL%: ${((pos.hardSlPrice / pos.avgEntryPrice - 1) * 100).toFixed(2)}%, Umur: ${(slAgeMs / 1000).toFixed(1)}s)`,
+          pos.symbol
+        );
         this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
         continue;
       }
@@ -586,13 +602,22 @@ export class WickSniperEngine {
             pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - partialQty));
             pos.partialTpDone = true;
             pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
-            // Geser Hard Stop Loss ke Break-Even (Avg Entry Price) -> Trade Bebas Risiko 100%!
-            pos.hardSlPrice = pos.avgEntryPrice;
+            // Geser Hard Stop Loss: jika masih ada jaring DCA pending di atas,
+            // JANGAN matikan jaring dengan menyetel SL ke BEP tepat di entry!
+            // Pertahankan hardSlPrice di atas jaring terluar agar averaging tetap bisa bekerja menyerap kenaikan harga.
+            const hasPendingLayers = pos.layers && pos.layers.some((l) => l.status === 'PENDING');
+            if (!hasPendingLayers) {
+              pos.hardSlPrice = pos.avgEntryPrice;
+            } else {
+              const highestPending = Math.max(...pos.layers.map((l) => l.price));
+              pos.hardSlPrice = Math.max(pos.hardSlPrice, highestPending * 1.01);
+            }
+
             // Target TP tahap 2 digeser lebih dalam (2.5% di bawah average entry)
             pos.targetTpPrice = pos.avgEntryPrice * (1 - (this.config.exit.takeProfitPct * 2) / 100);
             logger.log(
               'SUCCESS',
-              `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Stop-Loss digeser ke BEP ($${pos.avgEntryPrice.toFixed(4)}). Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
+              `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Hard SL: $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
               pos.symbol
             );
             telegram.notifyPartialTp(
@@ -617,6 +642,10 @@ export class WickSniperEngine {
             this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice);
             continue;
           }
+          // Jika posisi masih terbuka di Binance, biarkan Limit TP order dieksekusi oleh Binance matching engine
+          // sebagai MAKER (bebas slippage & fee jauh lebih murah 0.02%).
+          // JANGAN batalkan dan lempar Market Order terburu-buru yang memicu slippage dan rugi fee!
+          continue;
         }
 
         this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
@@ -689,12 +718,11 @@ export class WickSniperEngine {
         pos.tpOrderId = undefined;
       }
 
-      // Pastikan target TP berada di bawah harga pasar saat ini dan di bawah harga entri rata-rata (untuk posisi SHORT)
-      const curPrice = pos.currentPrice || pos.avgEntryPrice;
-      if (pos.targetTpPrice >= curPrice) {
+      // Pastikan target TP valid untuk posisi SHORT (target TP harus di bawah harga entry rata-rata)
+      if (pos.targetTpPrice >= pos.avgEntryPrice) {
         logger.log(
           'WARN',
-          `⚠️ [LIMIT TP DITUNDA] ${pos.symbol}: Target TP ($${pos.targetTpPrice.toFixed(6)}) >= Harga Pasar ($${curPrice.toFixed(6)}). Menunda order limit untuk mencegah eksekusi seketika (marketable order).`,
+          `⚠️ [TARGET TP TIDAK VALID] ${pos.symbol}: Target TP ($${pos.targetTpPrice.toFixed(6)}) >= Avg Entry ($${pos.avgEntryPrice.toFixed(6)}). Menunda order limit.`,
           pos.symbol
         );
         return;
@@ -873,8 +901,15 @@ export class WickSniperEngine {
             actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
 
             // Koreksi otomatis jika reason TAKE_PROFIT tapi PnL riil Binance justru minus
+            // Catatan: JANGAN label ulang sebagai HARD_STOP_LOSS — itu menyesatkan.
+            // Gunakan FEE_LOSS_EXIT karena TP memang tereksekusi, hanya fee > profit.
             if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
-              reason = 'HARD_STOP_LOSS';
+              reason = 'FEE_LOSS_EXIT';
+              logger.log(
+                'WARN',
+                `💸 [FEE > PROFIT] ${pos.symbol}: TP tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
+                pos.symbol
+              );
             }
 
             logger.log(
@@ -964,6 +999,8 @@ export class WickSniperEngine {
         ? '📈 Trailing Take Profit'
         : trade.exitReason === 'HARD_STOP_LOSS'
         ? '🛑 Hard Stop Loss (Cut-Off)'
+        : trade.exitReason === 'FEE_LOSS_EXIT'
+        ? '💸 TP Minus Fee (Biaya > Profit)'
         : trade.exitReason === 'TIME_LIMIT_EXIT'
         ? '⏰ Batas Waktu Hold'
         : 'Tutup Manual';

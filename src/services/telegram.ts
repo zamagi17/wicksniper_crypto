@@ -168,6 +168,8 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
         ? '📈 Trailing Take Profit'
         : trade.exitReason === 'HARD_STOP_LOSS'
         ? '🛑 Hard Stop Loss (Cut-Off)'
+        : trade.exitReason === 'FEE_LOSS_EXIT'
+        ? '💸 TP Minus Fee (Biaya > Profit)'
         : trade.exitReason === 'TIME_LIMIT_EXIT'
         ? '⏰ Batas Waktu Hold'
         : '⚡ Tutup Manual';

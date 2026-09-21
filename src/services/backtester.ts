@@ -32,7 +32,7 @@ export interface BacktestTrade {
   marginUsed: number;
   realizedPnl: number;
   pnlPct: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'TIME_LIMIT_EXIT';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'MANUAL_CLOSE';
   durationMinutes: number;
   layersFilled: number;
   partialTpTaken: boolean;

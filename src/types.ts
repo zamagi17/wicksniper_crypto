@@ -115,7 +115,7 @@ export interface ClosedTrade {
   realizedPnl: number;
   pnlPct: number;
   durationSeconds: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'TIME_LIMIT_EXIT' | 'MANUAL_CLOSE';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'MANUAL_CLOSE';
   isPaper: boolean;
   closedAt: string;
   timestamp: number;

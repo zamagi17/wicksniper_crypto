@@ -595,7 +595,15 @@ function renderClosedTradesTable(trades) {
           <td class="${pnlColor}"><b>${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</b></td>
           <td>
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-              <small>${t.exitReason}</small>
+              <small class="${t.exitReason === 'HARD_STOP_LOSS' ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
+                t.exitReason === 'TAKE_PROFIT' ? '🎯 TP' :
+                t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
+                t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard SL' :
+                t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
+                t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
+                t.exitReason === 'MANUAL_CLOSE' ? '⚡ Manual' :
+                (t.exitReason || '-')
+              }</b></small>
               <button type="button" class="btn btn-xs" onclick="event.stopPropagation(); openTradeDetailModal('${t.id}')" style="font-size: 10px; padding: 2px 7px;">🔍 Detail</button>
             </div>
           </td>
@@ -700,7 +708,20 @@ function openTradeDetailModal(tradeId) {
       </div>
       <div class="td-kpi-card">
         <div class="td-kpi-label">Alasan Selesai</div>
-        <div class="td-kpi-val text-gold" style="font-size: 12px;">${t.exitReason}</div>
+        <div class="td-kpi-val" style="font-size: 12px; color: ${
+          t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' ? 'var(--green)' :
+          t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
+          t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
+          'var(--text-muted)'
+        }">${
+          t.exitReason === 'TAKE_PROFIT' ? '🎯 Take Profit' :
+          t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
+          t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
+          t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
+          t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
+          t.exitReason === 'MANUAL_CLOSE' ? '⚡ Tutup Manual' :
+          t.exitReason
+        }</div>
       </div>
       <div class="td-kpi-card">
         <div class="td-kpi-label">Layer Terisi</div>
