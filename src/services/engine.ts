@@ -20,6 +20,8 @@ export class WickSniperEngine {
   private configListeners: ((config: BotConfig) => void)[] = [];
   private lastSyncedConfigJson: string = '';
   private tickInterval: NodeJS.Timeout | null = null;
+  private realBalance: number = 0;
+  private liveAvailableBalance: number = 0;
 
   constructor(configPath: string) {
     this.configPath = configPath;
@@ -27,7 +29,15 @@ export class WickSniperEngine {
     this.virtualBalance = this.config.paperTrading?.initialVirtualBalance || 1000;
     this.scanner = new SpikeScanner(this.config.scanner);
     telegram.updateConfig(this.config.telegram);
+    if (this.config.apiKey && this.config.apiSecret) {
+      binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+    }
     this.initListeners();
+    if (this.config.tradingMode === 'LIVE') {
+      setTimeout(() => {
+        this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => {});
+      }, 1500);
+    }
   }
 
   private loadConfig(): BotConfig {
@@ -127,6 +137,9 @@ export class WickSniperEngine {
     }
     this.lastSyncedConfigJson = JSON.stringify(this.config);
     await db.saveConfig(this.config).catch(() => {});
+    if (this.config.tradingMode === 'LIVE') {
+      this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => {});
+    }
     this.broadcastConfig();
     this.broadcastStatus();
     return this.config;
@@ -200,6 +213,10 @@ export class WickSniperEngine {
     await binanceFutures.startTickerWebSocket();
     this.scanner.start();
 
+    if (this.config.tradingMode === 'LIVE') {
+      await this.syncLiveBalance();
+    }
+
     // Heartbeat ticker, time-limit check tiap 1 detik, sync live position tiap 3s, & sinkronisasi DB tiap 5 detik
     let tickCount = 0;
     if (!this.tickInterval) {
@@ -209,6 +226,7 @@ export class WickSniperEngine {
         tickCount++;
         if (tickCount % 3 === 0 && this.config.tradingMode === 'LIVE') {
           await this.syncLivePositions();
+          await this.syncLiveBalance();
         }
         if (tickCount % 5 === 0) {
           await this.syncConfigFromDb();
@@ -732,16 +750,40 @@ export class WickSniperEngine {
     return true;
   }
 
+  public async syncLiveBalance() {
+    if (this.config.tradingMode !== 'LIVE' || !this.config.apiKey || !this.config.apiSecret) {
+      return;
+    }
+    try {
+      binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+      const balances = await binanceFutures.getFuturesAccountBalance();
+      const usdt = balances.find((b) => b.asset === 'USDT') || balances.find((b) => b.asset === 'USDC');
+      if (usdt) {
+        this.realBalance = usdt.balance;
+        this.liveAvailableBalance = usdt.availableBalance;
+        this.broadcastStatus();
+      }
+    } catch (e: any) {
+      console.error('Gagal mengambil saldo riil Binance:', e.message);
+    }
+  }
+
   public getStatus(): EngineStatus {
     const totalTrades = this.closedTrades.length;
     const wins = this.closedTrades.filter((t) => t.realizedPnl >= 0).length;
     const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 1000) / 10 : 0;
     const accumulatedPnl = Math.round(this.closedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
 
+    if (this.config.tradingMode === 'LIVE' && this.realBalance === 0 && this.config.apiKey && this.config.apiSecret) {
+      this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => {});
+    }
+
     return {
       isRunning: this.isRunning,
       tradingMode: this.config.tradingMode,
       virtualBalance: Math.round(this.virtualBalance * 100) / 100,
+      realBalance: this.config.tradingMode === 'LIVE' ? Math.round(this.realBalance * 100) / 100 : undefined,
+      liveAvailableBalance: this.config.tradingMode === 'LIVE' ? Math.round(this.liveAvailableBalance * 100) / 100 : undefined,
       activePositionsCount: this.activePositions.size,
       spikesDetectedToday: this.spikesDetectedToday,
       totalTrades,
@@ -806,6 +848,9 @@ export class WickSniperEngine {
         }
         if (this.config.apiKey && this.config.apiSecret) {
           binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+        }
+        if (this.config.tradingMode === 'LIVE') {
+          this.syncLiveBalance().catch(() => {});
         }
         if (
           this.config.paperTrading?.initialVirtualBalance !== undefined &&

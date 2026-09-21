@@ -145,6 +145,7 @@ export interface EngineStatus {
   tradingMode: 'PAPER' | 'LIVE';
   virtualBalance: number;
   realBalance?: number;
+  liveAvailableBalance?: number;
   activePositionsCount: number;
   spikesDetectedToday: number;
   totalTrades: number;

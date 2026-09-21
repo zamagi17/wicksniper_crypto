@@ -398,15 +398,25 @@ function renderStatus(status) {
   if (status.tradingMode === 'LIVE') {
     modeBadge.className = 'badge-mode live';
     modeBadge.innerText = '🟢 LIVE FUTURES';
-    document.getElementById('metric-balance-type').innerText = 'Saldo Live Binance';
+    if (typeof status.realBalance === 'number') {
+      const availBal = typeof status.liveAvailableBalance === 'number' ? status.liveAvailableBalance : status.realBalance;
+      document.getElementById('metric-balance').innerText = `$${status.realBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      document.getElementById('metric-balance-type').innerText = `Saldo Dompet Binance (Tersedia: $${availBal.toFixed(2)})`;
+    } else {
+      document.getElementById('metric-balance').innerText = `Memuat...`;
+      document.getElementById('metric-balance-type').innerText = `Sinkronisasi Saldo Binance...`;
+    }
   } else {
     modeBadge.className = 'badge-mode paper';
     modeBadge.innerText = '🧪 PAPER TRADING';
     document.getElementById('metric-balance-type').innerText = 'Mode Virtual Paper';
+    document.getElementById('metric-balance').innerText = `$${status.virtualBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
-  // 3. KPI Cards
-  document.getElementById('metric-balance').innerText = `$${status.virtualBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  const resetDemoBtn = document.getElementById('btn-reset-demo');
+  if (resetDemoBtn) {
+    resetDemoBtn.style.display = status.tradingMode === 'LIVE' ? 'none' : 'inline-flex';
+  }
 
   const pnlEl = document.getElementById('metric-pnl');
   const isPosPnl = status.accumulatedPnl >= 0;
