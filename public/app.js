@@ -933,6 +933,13 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 50);
 
+  // Trailing Stop Loss
+  const tsCheckbox = document.getElementById('cfg-trailing-sl-enabled');
+  if (tsCheckbox) {
+    tsCheckbox.checked = !!cfg.exit?.trailingSlEnabled;
+    toggleTrailingSL();
+  }
+
   setVal('cfg-margin-layer', cfg.grid?.marginPerLayerUsdt || 3);
   setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 50);
   setVal('cfg-total-layers', cfg.grid?.totalLayers || 25);
@@ -996,6 +1003,7 @@ function getSettingsFormData() {
       maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '50')) || 50) / 100,
+      trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
     },
     grid: {
       ...(currentConfig?.grid || {}),
@@ -1210,6 +1218,18 @@ function togglePartialTpInput() {
 window.togglePartialTpInput = togglePartialTpInput;
 
 // ==========================================
+// TRAILING STOP LOSS TOGGLE
+// ==========================================
+function toggleTrailingSL() {
+  const checkbox = document.getElementById('cfg-trailing-sl-enabled');
+  const group = document.getElementById('trailing-sl-info-group');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'block' : 'none';
+  }
+}
+window.toggleTrailingSL = toggleTrailingSL;
+
+// ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER
 // ==========================================
 function toggleTelegramInputs() {
@@ -1331,6 +1351,8 @@ function openBacktestModal() {
     if (currentConfig.scanner?.spikeMinPercent) document.getElementById('bt-spike').value = currentConfig.scanner.spikeMinPercent;
     if (currentConfig.exit?.takeProfitPct) document.getElementById('bt-tp').value = currentConfig.exit.takeProfitPct;
     if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
+    const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
+    if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
     if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
     if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
@@ -1354,6 +1376,8 @@ function resetBacktestParams() {
     if (currentConfig.scanner?.spikeMinPercent) document.getElementById('bt-spike').value = currentConfig.scanner.spikeMinPercent;
     if (currentConfig.exit?.takeProfitPct) document.getElementById('bt-tp').value = currentConfig.exit.takeProfitPct;
     if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
+    const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
+    if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
     if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
     if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
@@ -1402,6 +1426,7 @@ async function executeBacktest() {
     spikeMinPercent: parseFloat(document.getElementById('bt-spike').value) || 3.2,
     takeProfitPct: parseFloat(document.getElementById('bt-tp').value) || 1.2,
     hardStopLossPct: parseFloat(document.getElementById('bt-sl').value) || 4.5,
+    trailingSlEnabled: !!document.getElementById('bt-trailing-sl-enabled')?.checked,
     marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 3,
     layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.0,
     totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 6,
@@ -1514,6 +1539,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('cfg-tg-enabled')?.addEventListener('change', toggleTelegramInputs);
   document.getElementById('cfg-partial-tp-enabled')?.addEventListener('change', togglePartialTpInput);
+  document.getElementById('cfg-trailing-sl-enabled')?.addEventListener('change', toggleTrailingSL);
   document.getElementById('cfg-whitelist-enabled')?.addEventListener('change', toggleWhitelistInput);
 });
 

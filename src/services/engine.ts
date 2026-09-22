@@ -81,6 +81,14 @@ export class WickSniperEngine {
         trailingTpEnabled: true,
         trailingCallbackPct: 0.4,
         hardStopLossPct: 4.5,
+        trailingSlEnabled: false,
+        trailingSlMaxReturnRatio: 2.5,
+        trailingSlTiers: [
+          { filledLayerMin: 0, percentOfBase: 1.0 },
+          { filledLayerMin: 1, percentOfBase: 0.8 },
+          { filledLayerMin: 3, percentOfBase: 0.6 },
+          { filledLayerMin: 5, percentOfBase: 0.3 },
+        ],
         maxHoldMinutes: 60,
         partialTpEnabled: false,
         partialTpRatio: 0.5,
@@ -184,7 +192,7 @@ export class WickSniperEngine {
     logger.log('INFO', `🧾 [ORDER AUDIT] ${symbol} | ${event} | ${compactSummary || 'status=OK'}`, symbol);
   }
 
-  private auditTradeLifecycle(symbol: string, phase: 'OPEN_SHORT_REQUESTED' | 'OPEN_SHORT_CONFIRMED' | 'GRID_LAYER_PLACED' | 'TP_LIMIT_PLACED' | 'PARTIAL_CLOSE_REQUESTED' | 'PARTIAL_CLOSE_CONFIRMED' | 'FULL_CLOSE_REQUESTED' | 'FULL_CLOSE_CONFIRMED' | 'DB_TRADE_FINALIZED', details: Record<string, any> = {}) {
+  private auditTradeLifecycle(symbol: string, phase: 'OPEN_SHORT_REQUESTED' | 'OPEN_SHORT_CONFIRMED' | 'GRID_LAYER_PLACED' | 'TP_LIMIT_PLACED' | 'PARTIAL_CLOSE_REQUESTED' | 'PARTIAL_CLOSE_CONFIRMED' | 'FULL_CLOSE_REQUESTED' | 'FULL_CLOSE_CONFIRMED' | 'DB_TRADE_FINALIZED' | 'TRAILING_SL_UPDATED', details: Record<string, any> = {}) {
     this.auditOrderEvent(symbol, phase, details);
   }
 
@@ -628,6 +636,8 @@ export class WickSniperEngine {
               pos.layers.filter((l) => l.status === 'FILLED').length,
               pos.layers.length
             );
+            // Update trailing SL when layer fills
+            this.updateTrailingSL(pos);
           }
         }
 
@@ -866,6 +876,60 @@ export class WickSniperEngine {
     } catch (err: any) {
       logger.log('ERROR', `❌ [LIMIT TP ERROR] ${pos.symbol}: ${err.message}`, pos.symbol);
       console.error(`Gagal syncLiveTakeProfitOrder untuk ${pos.symbol}:`, err.message);
+    }
+  }
+
+  /**
+   * Update trailing stop loss: tighten SL as grid fills to lock profit
+   * Only tighten (lower), never relax (raise)
+   */
+  private updateTrailingSL(pos: ActivePosition) {
+    if (!this.config.exit.trailingSlEnabled || !pos.layers) return;
+
+    const exitCfg = this.config.exit;
+    const leverage = pos.leverage || this.config.leverage || 5;
+
+    // Calculate base SL from TP return (leverage-aware)
+    const tpNominal = exitCfg.takeProfitPct / 100;
+    const tpReturn = tpNominal * leverage;
+    const maxSLReturn = tpReturn * (exitCfg.trailingSlMaxReturnRatio || 2.5);
+    const baseSLNominal = maxSLReturn / leverage;
+
+    // Find tier based on filled layers
+    const filledCount = pos.layers.filter((l) => l.status === 'FILLED').length;
+    let tierPercent = 1.0;
+
+    if (exitCfg.trailingSlTiers && Array.isArray(exitCfg.trailingSlTiers)) {
+      for (let i = exitCfg.trailingSlTiers.length - 1; i >= 0; i--) {
+        const tier = exitCfg.trailingSlTiers[i];
+        if (filledCount >= tier.filledLayerMin) {
+          tierPercent = tier.percentOfBase || 1.0;
+          break;
+        }
+      }
+    }
+
+    const newSlPercent = baseSLNominal * tierPercent;
+    const newSlPrice = pos.avgEntryPrice * (1 + newSlPercent);
+
+    // Only tighten SL (lower it), never relax
+    if (newSlPrice < pos.hardSlPrice) {
+      const oldSlPrice = pos.hardSlPrice;
+      pos.hardSlPrice = newSlPrice;
+      logger.log(
+        'INFO',
+        `📉 [TRAILING SL UPDATE] ${pos.symbol}: Tightened from $${oldSlPrice.toFixed(6)} → $${newSlPrice.toFixed(6)} (Filled: ${filledCount}/${pos.layers.length} layers, SL: ${(newSlPercent * 100).toFixed(2)}%, Ratio vs TP: ${(newSlPercent / tpNominal).toFixed(2)}x)`,
+        pos.symbol
+      );
+      this.auditTradeLifecycle(pos.symbol, 'TRAILING_SL_UPDATED', {
+        filledLayers: filledCount,
+        totalLayers: pos.layers.length,
+        oldSlPrice,
+        newSlPrice,
+        newSlPercent: (newSlPercent * 100).toFixed(2),
+        slTpRatio: (newSlPercent / tpNominal).toFixed(2),
+        status: 'TIGHTENED',
+      });
     }
   }
 
@@ -1256,6 +1320,8 @@ export class WickSniperEngine {
                       `🕸️ [LAYER TERISI RIIL BINANCE] ${symbol} Layer #${layer.layerIndex} terisi di Binance! Total Qty: ${liveQty} @ Avg $${pos.avgEntryPrice.toFixed(6)}`,
                       symbol
                     );
+                    // Update trailing SL when layer fills
+                    this.updateTrailingSL(pos);
                   }
                 }
 

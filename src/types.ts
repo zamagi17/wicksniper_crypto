@@ -30,6 +30,9 @@ export interface BotConfig {
     trailingTpEnabled: boolean;
     trailingCallbackPct: number;
     hardStopLossPct: number;
+    trailingSlEnabled?: boolean;
+    trailingSlMaxReturnRatio?: number;
+    trailingSlTiers?: Array<{ filledLayerMin: number; percentOfBase: number }>;
     maxHoldMinutes: number;
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)

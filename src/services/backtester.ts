@@ -8,6 +8,7 @@ export interface BacktestParams {
   spikeMinPercent?: number;
   takeProfitPct?: number;
   hardStopLossPct?: number;
+  trailingSlEnabled?: boolean;
   marginPerLayerUsdt?: number;
   totalLayers?: number;
   layerSpacingPct?: number;
@@ -60,11 +61,47 @@ export interface BacktestResult {
 }
 
 export class WickSniperBacktester {
+  private calculateTrailingSLPrice(
+    avgPrice: number,
+    leverage: number,
+    takeProfitPct: number,
+    filledLayerCount: number,
+    maxReturnRatio: number,
+    tiers: Array<{ filledLayerMin: number; percentOfBase: number }>
+  ): number {
+    // Leverage-aware base SL calculation
+    const tpNominal = takeProfitPct / 100;
+    const tpReturn = tpNominal * leverage;
+    const maxSLReturn = tpReturn * maxReturnRatio;
+    const baseSLNominal = maxSLReturn / leverage;
+
+    // Find tier based on filled layers
+    let tierPercent = 1.0;
+    for (let i = tiers.length - 1; i >= 0; i--) {
+      const tier = tiers[i];
+      if (filledLayerCount >= tier.filledLayerMin) {
+        tierPercent = tier.percentOfBase;
+        break;
+      }
+    }
+
+    const newSlPercent = baseSLNominal * tierPercent;
+    return avgPrice * (1 + newSlPercent);
+  }
+
   public async run(params: BacktestParams): Promise<BacktestResult> {
     const leverage = params.leverage || 5;
     const spikeMinPercent = params.spikeMinPercent || 3.2;
     const takeProfitPct = params.takeProfitPct || 1.2;
     const hardStopLossPct = params.hardStopLossPct || 4.5;
+    const trailingSlEnabled = params.trailingSlEnabled === true;
+    const trailingSlMaxReturnRatio = 2.5;
+    const trailingSlTiers = [
+      { filledLayerMin: 5, percentOfBase: 0.3 },
+      { filledLayerMin: 3, percentOfBase: 0.6 },
+      { filledLayerMin: 1, percentOfBase: 0.8 },
+      { filledLayerMin: 0, percentOfBase: 1.0 },
+    ];
     const marginPerLayerUsdt = params.marginPerLayerUsdt || 5;
     const totalLayers = params.totalLayers || 6;
     const layerSpacingPct = params.layerSpacingPct || 1.0;
@@ -176,7 +213,20 @@ export class WickSniperBacktester {
 
         let { avgPrice, qty, margin: usedMargin } = calcAvg();
         let targetTpPrice = avgPrice * (1 - takeProfitPct / 100);
+        
+        // Apply initial Trailing SL if enabled
         let hardSlPrice = avgPrice * (1 + hardStopLossPct / 100);
+        if (trailingSlEnabled) {
+          const filledCount = layers.filter(l => l.status === 'FILLED').length;
+          hardSlPrice = this.calculateTrailingSLPrice(
+            avgPrice,
+            leverage,
+            takeProfitPct,
+            filledCount,
+            trailingSlMaxReturnRatio,
+            trailingSlTiers
+          );
+        }
 
         let tradeClosed = false;
         let exitPrice = 0;
@@ -205,7 +255,25 @@ export class WickSniperBacktester {
             qty = re.qty;
             usedMargin = re.margin;
             targetTpPrice = avgPrice * (1 - takeProfitPct / 100);
-            hardSlPrice = avgPrice * (1 + hardStopLossPct / 100);
+            
+            // Apply Trailing SL if enabled
+            if (trailingSlEnabled) {
+              const filledCount = layers.filter(l => l.status === 'FILLED').length;
+              const newSlPrice = this.calculateTrailingSLPrice(
+                avgPrice,
+                leverage,
+                takeProfitPct,
+                filledCount,
+                trailingSlMaxReturnRatio,
+                trailingSlTiers
+              );
+              // Only tighten (lower), never relax (raise)
+              if (newSlPrice < hardSlPrice) {
+                hardSlPrice = newSlPrice;
+              }
+            } else {
+              hardSlPrice = avgPrice * (1 + hardStopLossPct / 100);
+            }
           }
 
           // 2. Evaluasi HARD STOP LOSS (Proteksi Runaway Pump)

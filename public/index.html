@@ -319,6 +319,29 @@
           </div>
         </div>
 
+        <!-- TRAILING STOP LOSS SECTION -->
+        <div class="form-row" style="background: rgba(255, 150, 0, 0.03); border: 1px dashed rgba(255, 150, 0, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
+              <input type="checkbox" id="cfg-trailing-sl-enabled" onchange="toggleTrailingSL()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
+              📉 Aktifkan Trailing Stop Loss (Dynamic SL Protection)
+            </label>
+            <small class="form-hint">Otomatis mengencangkan SL saat jaring terisi untuk mengunci profit sambil tetap membiarkan jaring averaging bekerja. Leverage-aware: rasio SL/TP tetap konsisten di semua leverage.</small>
+          </div>
+
+          <div class="form-group" id="trailing-sl-info-group" style="grid-column: span 2; display: none; margin-top: 8px; padding: 10px; background: rgba(0, 240, 255, 0.08); border-left: 3px solid var(--color-cyan); border-radius: 4px;">
+            <small style="color: var(--color-muted); line-height: 1.5;">
+              <strong>Cara Kerja:</strong><br>
+              • Layer 0 (awal): SL = 2.5x TP return (proteksi umum)<br>
+              • Layer 1-2: SL = 2.0x TP return (mulai lock profit)<br>
+              • Layer 3-4: SL = 1.5x TP return (moderate protection)<br>
+              • Layer 5+: SL = 0.75x TP return (aggressive lock)<br>
+              <br>
+              SL hanya bisa mengencang (turun), tidak pernah relax (naik). Ini memastikan profit yang sudah terkunci tetap aman.
+            </small>
+          </div>
+        </div>
+
         <!-- PARTIAL TAKE PROFIT & BEP PROTECTION -->
         <div class="form-row" style="background: rgba(0, 240, 255, 0.03); border: 1px dashed rgba(0, 240, 255, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
@@ -569,6 +592,14 @@
           <div class="form-group">
             <label>Hard Stop-Loss (%):</label>
             <input type="number" id="bt-sl" class="form-control" value="4.5" step="0.1" min="1.0" />
+          </div>
+
+          <div class="form-group" style="grid-column: span 2;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="bt-trailing-sl-enabled" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
+              📉 Aktifkan Trailing Stop Loss
+            </label>
+            <small class="form-hint">Mengencangkan SL otomatis saat jaring terisi untuk mengunci profit (leverage-aware).</small>
           </div>
 
           <div class="form-group">
