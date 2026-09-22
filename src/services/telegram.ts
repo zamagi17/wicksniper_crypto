@@ -190,6 +190,41 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
   public async notifyPartialTp(symbol: string, partialPnl: number, remainingQty: number, bepPrice: number, tp2Price: number) {
     // Partial TP notifications are intentionally kept minimal, while the full local audit remains in logger/dashboard.
   }
+
+  /**
+   * Notifikasi saat Saldo Margin Kurang / Jaring Gagal Terpasang
+   */
+  public async notifyMarginInsufficient(
+    symbol: string,
+    action: string,
+    details: {
+      placedLayers?: number;
+      totalLayers?: number;
+      reason?: string;
+      availableBalance?: number;
+      requiredAmount?: number;
+    }
+  ) {
+    const balanceStr = details.availableBalance !== undefined ? `$${details.availableBalance.toFixed(2)} USDT` : 'Tidak diketahui';
+    const layerStr = details.placedLayers !== undefined && details.totalLayers !== undefined
+      ? `\n📊 <b>Jaring Berhasil:</b> ${details.placedLayers}/${details.totalLayers} Layer Terpasang`
+      : '';
+    const reqStr = details.requiredAmount !== undefined
+      ? `\n💵 <b>Estimasi Butuh:</b> ~$${details.requiredAmount.toFixed(2)} USDT`
+      : '';
+    const reasonStr = details.reason ? `\n❌ <b>Penyebab:</b> <code>${details.reason}</code>` : '';
+
+    const msg =
+`⚠️ <b>[PERINGATAN SALDO / MARGIN KURANG]</b> ⚠️
+
+🪙 <b>Koin:</b> <code>${symbol}</code>
+⚡ <b>Aksi:</b> ${action}${layerStr}
+💰 <b>Saldo Bebas (Available):</b> <b>${balanceStr}</b>${reqStr}${reasonStr}
+
+⚠️ <i>Perhatian: Sebagian/seluruh jaring limit tidak terpasang di Binance! Cek saldo wallet Futures Anda untuk menghindari posisi berjalan tanpa jaring pengaman.</i>`;
+
+    this.sendMessage(msg).catch(() => {});
+  }
 }
 
 export const telegram = new TelegramService();

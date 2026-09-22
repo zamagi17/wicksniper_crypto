@@ -31,6 +31,7 @@ export class BinanceFuturesClient {
   private positionCacheTime: number = 0;
   private positionCache: any[] = [];
   private readonly POSITION_CACHE_TTL = 2000; // 2 second cache
+  public lastOrderError: string = '';
 
   constructor() {
     this.initHttpClient();
@@ -156,7 +157,7 @@ export class BinanceFuturesClient {
   public async fetchSymbolPrecision(symbol: string): Promise<SymbolPrecision> {
     try {
       const client = await this.getHttpClient();
-      const res = await client.get(`/fapi/v1/exchangeInfo?symbol=${symbol}`);
+      const res = await client.get(`/fapi/v1/exchangeInfo?symbol=${encodeURIComponent(symbol)}`);
       const symbols = res?.data?.symbols || [];
       const s = symbols.find((item: any) => item.symbol === symbol);
       if (s) {
@@ -274,7 +275,7 @@ export class BinanceFuturesClient {
     } else {
       decimals = 0;
     }
-    if (typeof prec.pricePrecision === 'number' && prec.pricePrecision < decimals) {
+    if (typeof prec.pricePrecision === 'number' && prec.pricePrecision > decimals) {
       decimals = prec.pricePrecision;
     }
 
@@ -554,16 +555,31 @@ export class BinanceFuturesClient {
 
   private configuredSymbols: Set<string> = new Set();
 
-  public async setLeverage(symbol: string, leverage: number): Promise<void> {
-    if (!this.apiKey || !this.apiSecret) return;
+  public async setLeverage(symbol: string, leverage: number): Promise<number> {
+    if (!this.apiKey || !this.apiSecret) return leverage;
     const key = `${symbol}_${leverage}`;
-    if (this.configuredSymbols.has(key)) return;
+    if (this.configuredSymbols.has(key)) return leverage;
     try {
       const client = await this.getHttpClient();
       const data = this.signParams({ symbol, leverage });
-      await client.post('/fapi/v1/leverage', data);
+      const res = await client.post('/fapi/v1/leverage', data);
       this.configuredSymbols.add(key);
-    } catch {}
+      if (res?.data?.leverage) {
+        const actual = parseInt(res.data.leverage, 10);
+        return actual > 0 ? actual : leverage;
+      }
+      return leverage;
+    } catch (err: any) {
+      const errMsg = err.response?.data?.msg || err.message;
+      console.warn(`[setLeverage] ${symbol} set leverage ${leverage}x info: ${errMsg}`);
+      try {
+        const pos = await this.getOpenPosition(symbol);
+        if (pos?.leverage && pos.leverage > 0) {
+          return pos.leverage;
+        }
+      } catch { }
+      return leverage;
+    }
   }
 
   public async setMarginType(symbol: string, marginType: 'CROSSED' | 'ISOLATED'): Promise<void> {
@@ -607,7 +623,14 @@ export class BinanceFuturesClient {
           allResults.push(...res.data);
         }
       } catch (err: any) {
-        console.error(`Gagal mengeksekusi batchOrders (chunk ${Math.floor(i / CHUNK_SIZE) + 1}):`, err.response?.data || err.message);
+        const errData = err.response?.data;
+        const errMsg = errData?.msg || errData?.message || err.message;
+        const errCode = errData?.code;
+        this.lastOrderError = errMsg;
+        console.error(`Gagal mengeksekusi batchOrders (chunk ${Math.floor(i / CHUNK_SIZE) + 1}):`, errData || err.message);
+        for (let c = 0; c < chunk.length; c++) {
+          allResults.push({ code: errCode || -1, msg: errMsg, isError: true });
+        }
       }
     }
     return allResults;
@@ -638,7 +661,10 @@ export class BinanceFuturesClient {
       const res = await client.post('/fapi/v1/order', data);
       return res?.data;
     } catch (err: any) {
-      console.error(`Gagal membuka posisi market ${symbol}:`, err.response?.data || err.message);
+      const errData = err.response?.data;
+      const errMsg = errData?.msg || errData?.message || err.message;
+      this.lastOrderError = errMsg;
+      console.error(`Gagal membuka posisi market ${symbol}:`, errData || err.message);
       return null;
     }
   }
@@ -945,6 +971,10 @@ export class BinanceFuturesClient {
       this.wsClient.on('open', () => {
         this.isWsConnected = true;
         console.log(`⚡ [WEBSOCKET CONNECTED] Terhubung ke Binance Futures All-Market Stream (${this.wsUrl})`);
+        if (this.fastPollInterval) {
+          clearInterval(this.fastPollInterval);
+          this.fastPollInterval = null;
+        }
       });
 
       this.wsClient.on('message', (raw: WebSocket.Data) => {
@@ -969,11 +999,14 @@ export class BinanceFuturesClient {
           this.lastWsCloseLog = now;
           console.log(`⚠️ WebSocket terputus (Code: ${code}). Mencoba rekoneksi...`);
         }
+        // Fallback polling hanya jika WebSocket benar-benar terputus
+        this.startFastTickerStream();
         if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
         this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 5000);
       });
     } catch (e: any) {
       console.error('Gagal inisialisasi WebSocket:', e.message);
+      this.startFastTickerStream();
       if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
       this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 5000);
     }
@@ -997,6 +1030,15 @@ export class BinanceFuturesClient {
   }
 
   public startFastTickerStream() {
+    // Jika WebSocket sudah aktif, jangan jalankan REST polling agar terhindar dari IP Rate Limit (2400 weight/min)
+    if (this.isWsConnected) {
+      if (this.fastPollInterval) {
+        clearInterval(this.fastPollInterval);
+        this.fastPollInterval = null;
+      }
+      return;
+    }
+
     if (this.fastPollInterval) {
       clearInterval(this.fastPollInterval);
     }

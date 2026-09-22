@@ -15,6 +15,7 @@ export class WickSniperEngine {
   private virtualBalance: number = 1000;
   private activePositions: Map<string, ActivePosition> = new Map();
   private closingSymbols: Set<string> = new Set();
+  private syncingTpSymbols: Set<string> = new Set();
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
   private spikesDetectedToday: number = 0;
@@ -251,7 +252,6 @@ export class WickSniperEngine {
 
     await binanceFutures.syncTime();
     await binanceFutures.loadExchangeInfo();
-    binanceFutures.startFastTickerStream();
     await binanceFutures.startTickerWebSocket();
     this.scanner.start();
 
@@ -378,22 +378,30 @@ export class WickSniperEngine {
       layer0Planned = (prec.minNotional * 1.05) / currentPrice;
     }
     const layer0Qty = parseFloat(binanceFutures.formatQty(symbol, layer0Planned));
+    const layer0ActualMargin = (layer0Qty * currentPrice) / leverage;
+
+    if (layer0ActualMargin > gridCfg.maxTotalMarginPerCoin) {
+      logger.log(
+        'WARN',
+        `⚠️ [SKIP TRADE] ${symbol}: Margin minimum Layer 0 ($${layer0ActualMargin.toFixed(2)}) melebihi batas maxTotalMarginPerCoin ($${gridCfg.maxTotalMarginPerCoin}). Koin dibatalkan untuk melindungi modal.`,
+        symbol
+      );
+      return;
+    }
+
     layers.push({
       layerIndex: 0,
       price: currentPrice,
       qty: layer0Qty,
-      marginUsdt: currentMargin,
+      marginUsdt: layer0ActualMargin,
       status: 'FILLED',
       filledAt: Date.now(),
     });
-    totalPlannedMargin += currentMargin;
+    totalPlannedMargin += layer0ActualMargin;
 
     // Layer 1 hingga N: Diletakkan berjarak layerSpacingPct di atas harga pasar
     for (let i = 1; i < gridCfg.totalLayers; i++) {
       currentMargin *= gridCfg.martingaleMultiplier;
-      if (totalPlannedMargin + currentMargin > gridCfg.maxTotalMarginPerCoin) {
-        break;
-      }
 
       const layerPrice = currentPrice * (1 + (i * gridCfg.layerSpacingPct) / 100);
       let layerPlanned = (currentMargin * leverage) / layerPrice;
@@ -401,15 +409,21 @@ export class WickSniperEngine {
         layerPlanned = (prec.minNotional * 1.05) / layerPrice;
       }
       const layerQty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
+      const layerActualMargin = (layerQty * layerPrice) / leverage;
+
+      // Proteksi ketat: Pastikan akumulasi margin nyata TIDAK MELEBIHI batas maxTotalMarginPerCoin!
+      if (totalPlannedMargin + layerActualMargin > gridCfg.maxTotalMarginPerCoin) {
+        break;
+      }
 
       layers.push({
         layerIndex: i,
         price: parseFloat(binanceFutures.formatPrice(symbol, layerPrice)),
         qty: layerQty,
-        marginUsdt: currentMargin,
+        marginUsdt: layerActualMargin,
         status: 'PENDING',
       });
-      totalPlannedMargin += currentMargin;
+      totalPlannedMargin += layerActualMargin;
     }
 
     const initialPos: ActivePosition = {
@@ -443,11 +457,18 @@ export class WickSniperEngine {
         logger.log('WARN', `⚠️ [BLOCK DUPLICATE ENTRY] Gagal cek posisi live ${symbol}: ${e.message}`);
       }
 
-      // Live Trading: Jalankan setLeverage & setMarginType secara paralel untuk memangkas latensi
-      await Promise.all([
-        binanceFutures.setLeverage(symbol, leverage),
-        binanceFutures.setMarginType(symbol, this.config.marginType || 'CROSSED'),
-      ]).catch(() => { });
+      // Live Trading: Jalankan setLeverage & setMarginType
+      try {
+        const [actualLev] = await Promise.all([
+          binanceFutures.setLeverage(symbol, leverage),
+          binanceFutures.setMarginType(symbol, this.config.marginType || 'CROSSED'),
+        ]);
+        if (actualLev && actualLev > 0 && actualLev !== leverage) {
+          logger.log('INFO', `ℹ️ [LEVERAGE DISESUAIKAN] ${symbol}: Binance membatasi leverage koin ini ke ${actualLev}x (Config: ${leverage}x).`, symbol);
+          leverage = actualLev;
+          initialPos.leverage = actualLev;
+        }
+      } catch { }
 
       // 1. Eksekusi market order untuk layer 0 (Mendukung One-Way & Hedge Mode)
       this.auditTradeLifecycle(symbol, 'OPEN_SHORT_REQUESTED', {
@@ -459,11 +480,17 @@ export class WickSniperEngine {
 
       const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
       if (!res0?.orderId) {
+        const errMsg = binanceFutures.lastOrderError || 'Cek saldo USDT atau izin Futures API Key.';
         logger.log(
           'ERROR',
-          `❌ [ORDER GAGAL] Gagal membuka Layer 0 SHORT untuk ${symbol} di Binance! Membatalkan penempatan jaring. Cek saldo USDT atau izin Futures API Key.`,
+          `❌ [ORDER GAGAL] Gagal membuka Layer 0 SHORT untuk ${symbol} di Binance! Membatalkan penempatan jaring. Alasan: ${errMsg}`,
           symbol
         );
+        telegram.notifyMarginInsufficient(symbol, 'Membuka Posisi Awal (Layer #0)', {
+          reason: errMsg,
+          availableBalance: this.liveAvailableBalance > 0 ? this.liveAvailableBalance : undefined,
+          requiredAmount: (currentPrice * layer0Qty) / leverage,
+        });
         return;
       }
       layers[0].orderId = String(res0.orderId);
@@ -519,6 +546,9 @@ export class WickSniperEngine {
 
         // Sinkronkan ulang harga Limit Order layer 1 ke atas dengan jangkar harga eksekusi riil (realEntryPrice)
         let runningMargin = gridCfg.marginPerLayerUsdt;
+        let runningTotalMargin = layers[0].marginUsdt;
+        const validLayers = [layers[0]];
+
         for (let i = 1; i < layers.length; i++) {
           runningMargin *= gridCfg.martingaleMultiplier;
           const layerPrice = realEntryPrice * (1 + (i * gridCfg.layerSpacingPct) / 100);
@@ -526,9 +556,23 @@ export class WickSniperEngine {
           if (layerPlanned * layerPrice < prec.minNotional) {
             layerPlanned = (prec.minNotional * 1.05) / layerPrice;
           }
-          layers[i].price = parseFloat(binanceFutures.formatPrice(symbol, layerPrice));
-          layers[i].qty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
+          const formattedPrice = parseFloat(binanceFutures.formatPrice(symbol, layerPrice));
+          const formattedQty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
+          const actualMargin = (formattedQty * formattedPrice) / leverage;
+
+          if (runningTotalMargin + actualMargin > gridCfg.maxTotalMarginPerCoin) {
+            break;
+          }
+
+          layers[i].price = formattedPrice;
+          layers[i].qty = formattedQty;
+          layers[i].marginUsdt = actualMargin;
+          validLayers.push(layers[i]);
+          runningTotalMargin += actualMargin;
         }
+        layers.length = 0;
+        layers.push(...validLayers);
+        initialPos.layers = layers;
 
         // Hitung ulang target TP dan SL berdasarkan harga eksekusi riil Binance
         initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
@@ -568,12 +612,55 @@ export class WickSniperEngine {
         }
 
         binanceFutures.sendBatchOrders(batchPayload).then((batchRes) => {
-          for (let i = 0; i < batchRes.length; i++) {
-            if (batchRes[i]?.orderId) {
-              layers[i + 1].orderId = String(batchRes[i].orderId);
+          let placedCount = 0;
+          let failedCount = 0;
+          let failureReason = '';
+
+          for (let i = 0; i < batchRes.length && (i + 1) < layers.length; i++) {
+            const item = batchRes[i];
+            if (item?.orderId) {
+              layers[i + 1].orderId = String(item.orderId);
+              placedCount++;
+            } else {
+              failedCount++;
+              layers[i + 1].status = 'CANCELLED';
+              const code = item?.code || item?.error?.code;
+              const msg = item?.msg || item?.error?.msg || (typeof item === 'string' ? item : '');
+              if (!failureReason && (code || msg)) {
+                failureReason = code ? `[${code}] ${msg}` : msg;
+              }
             }
           }
-        }).catch(() => { });
+
+          const totalRequested = layers.length - 1;
+          if (failedCount > 0 || placedCount < totalRequested) {
+            const isMarginError = failureReason.toLowerCase().includes('margin') || failureReason.includes('-2019');
+            const reasonText = isMarginError
+              ? `Margin Insufficient (Saldo USDT tidak cukup)`
+              : (failureReason || 'Order ditolak Binance');
+
+            logger.log(
+              'WARN',
+              `⚠️ [GRID KURANG SALDO / DITOLAK] ${symbol}: Hanya ${placedCount}/${totalRequested} jaring terpasang. Alasan: ${reasonText}`,
+              symbol
+            );
+
+            telegram.notifyMarginInsufficient(symbol, 'Penempatan Jaring Averaging (Layer 1+)', {
+              placedLayers: placedCount,
+              totalLayers: totalRequested,
+              reason: reasonText,
+              availableBalance: this.liveAvailableBalance > 0 ? this.liveAvailableBalance : undefined,
+            });
+          }
+        }).catch((err: any) => {
+          logger.log('ERROR', `❌ [BATCH GRID ERROR] ${symbol}: ${err.message}`, symbol);
+          telegram.notifyMarginInsufficient(symbol, 'Penempatan Jaring Averaging (Layer 1+)', {
+            placedLayers: 0,
+            totalLayers: layers.length - 1,
+            reason: err.message,
+            availableBalance: this.liveAvailableBalance > 0 ? this.liveAvailableBalance : undefined,
+          });
+        });
       }
 
       await tpPromise;
@@ -926,16 +1013,22 @@ export class WickSniperEngine {
    */
   public async syncLiveTakeProfitOrder(pos: ActivePosition) {
     if (this.config.tradingMode !== 'LIVE' || !pos.targetTpPrice || pos.totalQty <= 0) return;
+    if (this.syncingTpSymbols.has(pos.symbol)) return;
+    this.syncingTpSymbols.add(pos.symbol);
+
     try {
-      // 1. Batalkan order TP lama jika ada
-      if (pos.tpOrderId) {
-        await binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => { });
-        pos.tpOrderId = undefined;
-      }
-      if (pos.tp2OrderId) {
-        await binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => { });
-        pos.tp2OrderId = undefined;
-      }
+      // 1. Batalkan SELURUH order BUY Take Profit lama yang ada di Binance untuk koin ini
+      // Ini mencegah duplikasi order ganda dan error "ReduceOnly Order Failed" akibat sisa order di Binance
+      try {
+        const openOrders = await binanceFutures.getOpenOrders(pos.symbol);
+        const existingBuyOrders = openOrders.filter((o: any) => o.side === 'BUY');
+        for (const bo of existingBuyOrders) {
+          await binanceFutures.cancelOrder(pos.symbol, bo.orderId).catch(() => {});
+        }
+      } catch { }
+
+      pos.tpOrderId = undefined;
+      pos.tp2OrderId = undefined;
 
       // Pastikan target TP valid untuk posisi SHORT (target TP harus di bawah harga entry rata-rata)
       if (pos.targetTpPrice >= pos.avgEntryPrice) {
@@ -961,7 +1054,12 @@ export class WickSniperEngine {
         pos.targetTpPrice = tp1Price;
         pos.targetTp2Price = tp2Price;
 
-        if (tp1Qty > 0 && tp2Qty > 0) {
+        const prec = binanceFutures.getPrecision(pos.symbol);
+        const tp1Notional = tp1Qty * tp1Price;
+        const tp2Notional = tp2Qty * tp2Price;
+        const canSplit = tp1Qty > 0 && tp2Qty > 0 && tp1Notional >= prec.minNotional && tp2Notional >= prec.minNotional;
+
+        if (canSplit) {
           const [tp1Res, tp2Res] = await Promise.all([
             binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp1Qty, tp1Price, true),
             binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp2Qty, tp2Price, true),
@@ -1006,7 +1104,7 @@ export class WickSniperEngine {
         } else {
           logger.log(
             'INFO',
-            `ℹ️ [PARTIAL TP MIN-QTY] ${pos.symbol}: Volume (${pos.totalQty}) terlalu kecil untuk dipecah 50/50. Memasang 100% Single Limit TP.`,
+            `ℹ️ [PARTIAL TP MIN-NOTIONAL] ${pos.symbol}: Volume/nosional pecahan ($${tp1Notional.toFixed(2)} / $${tp2Notional.toFixed(2)}) < minNotional Binance ($${prec.minNotional}). Memasang 100% Single Limit TP.`,
             pos.symbol
           );
         }
@@ -1075,6 +1173,8 @@ export class WickSniperEngine {
     } catch (err: any) {
       logger.log('ERROR', `❌ [LIMIT TP ERROR] ${pos.symbol}: ${err.message}`, pos.symbol);
       console.error(`Gagal syncLiveTakeProfitOrder untuk ${pos.symbol}:`, err.message);
+    } finally {
+      this.syncingTpSymbols.delete(pos.symbol);
     }
   }
 
@@ -1348,7 +1448,18 @@ export class WickSniperEngine {
               const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
               actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
 
-              if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
+              const isTpOrderMatch = pos.tpOrderId || pos.tp2OrderId
+                ? closingTrades.some(
+                    (tr: any) =>
+                      (pos.tpOrderId && String(tr.orderId) === String(pos.tpOrderId)) ||
+                      (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId))
+                  )
+                : false;
+
+              if (reason === 'TAKE_PROFIT' && isPositionAlreadyClosed && !isTpOrderMatch) {
+                reason = 'MANUAL_CLOSE';
+                logger.log('INFO', `⚡ [MANUAL CLOSE TERDETEKSI] ${pos.symbol}: Posisi ditutup secara manual di Binance.`, pos.symbol);
+              } else if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
                 reason = 'FEE_LOSS_EXIT';
                 logger.log(
                   'WARN',
@@ -1369,6 +1480,9 @@ export class WickSniperEngine {
               const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
               actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
             }
+
+            // Final sweep: Batalkan seluruh sisa order di Binance agar tidak ada order liar tertinggal
+            await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
           }
         } catch (e: any) {
           console.warn(`[Sync PnL] Menggunakan kalkulasi lokal: ${e.message}`);
@@ -1547,7 +1661,7 @@ export class WickSniperEngine {
 
                   // Perbarui Limit Take Profit order di Binance jika kuantitas bertambah
                   if (liveQty > oldQty) {
-                    this.syncLiveTakeProfitOrder(pos).catch(() => { });
+                    await this.syncLiveTakeProfitOrder(pos);
                   }
                 }
               }
@@ -1555,7 +1669,7 @@ export class WickSniperEngine {
           }
 
           // Pastikan posisi aktif SELALU memiliki order Limit Take Profit di Binance
-          if (realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING') {
+          if (realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol)) {
             try {
               const openOrders = await binanceFutures.getOpenOrders(symbol);
               const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
