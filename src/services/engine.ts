@@ -365,7 +365,7 @@ export class WickSniperEngine {
   ) {
     const gridCfg = this.config.grid;
     const exitCfg = this.config.exit;
-    const leverage = this.config.leverage || 5;
+    let leverage = this.config.leverage || 5;
     const prec = binanceFutures.getPrecision(symbol);
 
     const layers: GridLayer[] = [];
