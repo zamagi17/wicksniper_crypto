@@ -99,12 +99,16 @@ export interface ActivePosition {
   layers: GridLayer[];
   openedAt: number;
   targetTpPrice: number;
+  targetTp2Price?: number;
   hardSlPrice: number;
   breakEvenPrice?: number;
   status: 'SNIPING' | 'HOLDING' | 'CLOSING' | 'CLOSED';
   partialTpDone?: boolean;
   partialRealizedPnl?: number;
+  trailingTpActive?: boolean;
+  lowestPrice?: number;
   tpOrderId?: string;
+  tp2OrderId?: string;
   lastTpAttempt?: number;
 }
 

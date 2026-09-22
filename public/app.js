@@ -940,6 +940,14 @@ function populateSettingsForm(cfg) {
     toggleTrailingSL();
   }
 
+  // Trailing Take Profit (Trailing Callback)
+  const ttpCheckbox = document.getElementById('cfg-trailing-tp-enabled');
+  if (ttpCheckbox) {
+    ttpCheckbox.checked = !!cfg.exit?.trailingTpEnabled;
+    toggleTrailingTpInput();
+  }
+  setVal('cfg-trailing-tp-callback', cfg.exit?.trailingCallbackPct || 0.4);
+
   setVal('cfg-margin-layer', cfg.grid?.marginPerLayerUsdt || 3);
   setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 50);
   setVal('cfg-total-layers', cfg.grid?.totalLayers || 25);
@@ -1004,6 +1012,8 @@ function getSettingsFormData() {
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '50')) || 50) / 100,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
+      trailingTpEnabled: !!document.getElementById('cfg-trailing-tp-enabled')?.checked,
+      trailingCallbackPct: parseFloat(getVal('cfg-trailing-tp-callback', '0.4')) || 0.4,
     },
     grid: {
       ...(currentConfig?.grid || {}),
@@ -1229,6 +1239,15 @@ function toggleTrailingSL() {
 }
 window.toggleTrailingSL = toggleTrailingSL;
 
+function toggleTrailingTpInput() {
+  const checkbox = document.getElementById('cfg-trailing-tp-enabled');
+  const group = document.getElementById('trailing-tp-callback-group');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'block' : 'none';
+  }
+}
+window.toggleTrailingTpInput = toggleTrailingTpInput;
+
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER
 // ==========================================
@@ -1360,6 +1379,14 @@ function openBacktestModal() {
       btptRatio.value = Math.round(currentConfig.exit.partialTpRatio * 100);
     }
     toggleBtPartialTp();
+
+    const btttpCheckbox = document.getElementById('bt-trailing-tp-enabled');
+    if (btttpCheckbox) btttpCheckbox.checked = !!currentConfig.exit?.trailingTpEnabled;
+    const btttpCallback = document.getElementById('bt-trailing-tp-callback');
+    if (btttpCallback && currentConfig.exit?.trailingCallbackPct) {
+      btttpCallback.value = currentConfig.exit.trailingCallbackPct;
+    }
+    toggleBtTrailingTp();
     if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
     if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
@@ -1392,6 +1419,14 @@ function resetBacktestParams() {
       btptRatio.value = Math.round(currentConfig.exit.partialTpRatio * 100);
     }
     toggleBtPartialTp();
+
+    const btttpCheckbox = document.getElementById('bt-trailing-tp-enabled');
+    if (btttpCheckbox) btttpCheckbox.checked = !!currentConfig.exit?.trailingTpEnabled;
+    const btttpCallback = document.getElementById('bt-trailing-tp-callback');
+    if (btttpCallback && currentConfig.exit?.trailingCallbackPct) {
+      btttpCallback.value = currentConfig.exit.trailingCallbackPct;
+    }
+    toggleBtTrailingTp();
     if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
     if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
@@ -1410,6 +1445,15 @@ function toggleBtPartialTp() {
   }
 }
 window.toggleBtPartialTp = toggleBtPartialTp;
+
+function toggleBtTrailingTp() {
+  const isChecked = document.getElementById('bt-trailing-tp-enabled')?.checked;
+  const container = document.getElementById('bt-trailing-tp-callback-container');
+  if (container) {
+    container.style.display = isChecked ? 'inline-flex' : 'none';
+  }
+}
+window.toggleBtTrailingTp = toggleBtTrailingTp;
 
 function closeBacktestModal() {
   document.getElementById('backtest-modal').style.display = 'none';
@@ -1452,6 +1496,8 @@ async function executeBacktest() {
     trailingSlEnabled: !!document.getElementById('bt-trailing-sl-enabled')?.checked,
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
     partialTpRatio: (parseFloat(document.getElementById('bt-partial-tp-ratio')?.value) || 50) / 100,
+    trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,
+    trailingCallbackPct: parseFloat(document.getElementById('bt-trailing-tp-callback')?.value) || 0.4,
     marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 3,
     layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.0,
     totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 6,

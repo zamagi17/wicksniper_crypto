@@ -44,7 +44,7 @@ export class HistoricalDataFetcher {
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
-      } catch {}
+      } catch { }
     }
 
     const client = await binanceFutures.getHttpClient();

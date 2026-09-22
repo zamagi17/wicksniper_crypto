@@ -18,6 +18,8 @@ export interface BacktestParams {
   maxHoldMinutes?: number;
   partialTpEnabled?: boolean;
   partialTpRatio?: number;
+  trailingTpEnabled?: boolean;
+  trailingCallbackPct?: number;
   initialBalance?: number;
 }
 
@@ -112,6 +114,8 @@ export class WickSniperBacktester {
     const maxHoldMinutes = params.maxHoldMinutes || 10;
     const partialTpEnabled = params.partialTpEnabled === true;
     const partialTpRatio = params.partialTpRatio !== undefined ? params.partialTpRatio : 0.5;
+    const trailingTpEnabled = params.trailingTpEnabled === true;
+    const trailingCallbackPct = params.trailingCallbackPct !== undefined ? params.trailingCallbackPct : 0.4;
     const initialBalance = params.initialBalance || 1000;
 
     let balance = initialBalance;
@@ -235,6 +239,8 @@ export class WickSniperBacktester {
         let exitTime = c.openTime;
         let partialDone = false;
         let partialRealizedPnl = 0;
+        let trailingTpActive = false;
+        let lowestPriceSeen = avgPrice;
 
         // Periksa pergerakan lilin-lilin berikutnya (hingga maxHoldMinutes)
         const maxIndex = Math.min(candles.length - 1, i + maxHoldMinutes);
@@ -289,6 +295,21 @@ export class WickSniperBacktester {
           }
 
           // 3. Evaluasi TAKE PROFIT (Ekor Jarum / Pullback Wick)
+          // Jika Trailing TP sudah aktif, periksa apakah harga memantul naik dari titik terendah (callback)
+          if (trailingTpActive) {
+            if (evalCandle.low < lowestPriceSeen) {
+              lowestPriceSeen = evalCandle.low;
+            }
+            const callbackTriggerPrice = lowestPriceSeen * (1 + trailingCallbackPct / 100);
+            if (evalCandle.high >= callbackTriggerPrice) {
+              tradeClosed = true;
+              exitPrice = callbackTriggerPrice;
+              exitReason = 'TRAILING_TP';
+              exitTime = evalCandle.openTime;
+              break;
+            }
+          }
+
           // REALISTIC SEQUENCE MODEL (Anti-Lookahead Bias):
           // Pada lilin ke-i (lilin saat lonjakan spike terjadi), titik Low biasanya terjadi SEBELUM pompa menuju High.
           // Oleh karena itu, jika k === i: TP hanya boleh dieksekusi jika lilin tersebut benar-benar ditutup
@@ -317,6 +338,13 @@ export class WickSniperBacktester {
                 }
               }
 
+              // Jika Trailing TP aktif, aktifkan trailing untuk sisa posisi
+              if (trailingTpEnabled) {
+                trailingTpActive = true;
+                lowestPriceSeen = evalCandle.low;
+                continue;
+              }
+
               // Jika candle ini juga menembus TP tahap 2
               const canStage2 = k === i ? evalCandle.close <= targetTpPrice : evalCandle.low <= targetTpPrice;
               if (canStage2) {
@@ -326,6 +354,13 @@ export class WickSniperBacktester {
                 exitTime = evalCandle.openTime;
                 break;
               }
+              continue;
+            }
+
+            // Jika Trailing TP aktif dan bukan partial TP:
+            if (trailingTpEnabled && !trailingTpActive) {
+              trailingTpActive = true;
+              lowestPriceSeen = evalCandle.low;
               continue;
             }
 

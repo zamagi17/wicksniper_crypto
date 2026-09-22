@@ -359,6 +359,23 @@
           </div>
         </div>
 
+        <!-- TRAILING TAKE PROFIT (TRAILING CALLBACK) SECTION -->
+        <div class="form-row" style="background: rgba(191, 90, 242, 0.03); border: 1px dashed rgba(191, 90, 242, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-purple, #bf5af2);">
+              <input type="checkbox" id="cfg-trailing-tp-enabled" onchange="toggleTrailingTpInput()" style="width: 16px; height: 16px; accent-color: var(--color-purple, #bf5af2);">
+              📈 Aktifkan Trailing Take Profit (Trailing Callback)
+            </label>
+            <small class="form-hint">Saat harga menyentuh Target TP awal (sebagai pemicu aktivasi), bot tidak langsung keluar melainkan membiarkan cuan bertambah lebih dalam. Posisi baru ditutup saat harga memantul naik sebesar Callback %.</small>
+          </div>
+
+          <div class="form-group" id="trailing-tp-callback-group" style="grid-column: span 2; display: none;">
+            <label>Jarak Callback (%)</label>
+            <input type="number" id="cfg-trailing-tp-callback" min="0.1" max="2.0" step="0.05" class="form-control" placeholder="0.4">
+            <small class="form-hint">Rekomendasi: 0.4%. Jika harga memantul 0.4% dari titik cuan terdalam, posisi ditutup untuk mengunci profit maksimal.</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Modal Per Layer (USDT)</label>
@@ -619,6 +636,26 @@
             </div>
             <small class="form-hint" style="margin-top: 4px; display: block;">
               Saat TP awal tercapai, cairkan sebagian posisi untuk kunci cuan, lalu otomatis pindahkan SL sisa posisi ke titik BEP (0% risiko). Sisa koin mengejar Stage 2 TP.
+            </small>
+          </div>
+
+          <!-- TRAILING TAKE PROFIT SECTION DI BACKTEST LAB -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(191, 90, 242, 0.03); border: 1px dashed rgba(191, 90, 242, 0.25); border-radius: var(--radius-sm); padding: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-purple, #bf5af2); margin: 0;">
+                <input type="checkbox" id="bt-trailing-tp-enabled" onchange="toggleBtTrailingTp()" style="width: 16px; height: 16px; accent-color: var(--color-purple, #bf5af2);">
+                📈 Aktifkan Trailing Take Profit (Trailing Callback)
+              </label>
+              <div id="bt-trailing-tp-callback-container" style="display: none; align-items: center; gap: 6px;">
+                <label style="font-size: 12px; margin: 0; color: var(--color-muted);">Callback:</label>
+                <div style="display: inline-flex; align-items: center; gap: 4px;">
+                  <input type="number" id="bt-trailing-tp-callback" value="0.4" min="0.1" max="2.0" step="0.05" style="width: 65px; padding: 4px 8px; height: 28px;" class="form-control" />
+                  <span style="font-size: 12px; color: var(--color-muted);">%</span>
+                </div>
+              </div>
+            </div>
+            <small class="form-hint" style="margin-top: 4px; display: block;">
+              Begitu TP awal tersentuh (aktivasi), biarkan cuan berlari lebih dalam dan hanya tutup posisi saat harga memantul naik sebesar Callback %.
             </small>
           </div>
 
