@@ -28,6 +28,9 @@ export class BinanceFuturesClient {
   private wsReconnectTimer: NodeJS.Timeout | null = null;
   private lastWsCloseLog: number = 0;
   private tickerListeners: ((tickers: any[]) => void)[] = [];
+  private positionCacheTime: number = 0;
+  private positionCache: any[] = [];
+  private readonly POSITION_CACHE_TTL = 2000; // 2 second cache
 
   constructor() {
     this.initHttpClient();
@@ -452,6 +455,13 @@ export class BinanceFuturesClient {
     positionSide: string;
   }[]> {
     if (!this.apiKey || !this.apiSecret) return [];
+    
+    // Check cache (2 second TTL)
+    const now = Date.now();
+    if (now - this.positionCacheTime < this.POSITION_CACHE_TTL) {
+      return this.positionCache;
+    }
+    
     try {
       const client = await this.getHttpClient();
       const data = this.signParams({});
@@ -460,7 +470,7 @@ export class BinanceFuturesClient {
         if (res.data.some((p: any) => p.positionSide === 'SHORT' || p.positionSide === 'LONG')) {
           this.isDualSidePosition = true;
         }
-        return res.data
+        const result = res.data
           .filter((p: any) => Math.abs(parseFloat(p.positionAmt || '0')) > 1e-8)
           .map((item: any) => ({
             symbol: item.symbol,
@@ -470,6 +480,10 @@ export class BinanceFuturesClient {
             leverage: parseInt(item.leverage || '5'),
             positionSide: item.positionSide || 'BOTH',
           }));
+        // Cache the result
+        this.positionCache = result;
+        this.positionCacheTime = now;
+        return result;
       }
       return [];
     } catch (err: any) {

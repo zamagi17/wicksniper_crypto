@@ -8,6 +8,9 @@ export class DatabaseService {
   private pool: Pool | null = null;
   public isConnected: boolean = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private stateWriteQueue: any = null;
+  private stateWriteTimer: NodeJS.Timeout | null = null;
+  private readonly STATE_WRITE_INTERVAL = 5000; // Flush every 5s
 
   constructor() {
     this.initPool();
@@ -194,6 +197,23 @@ export class DatabaseService {
 
   public async saveState(virtualBalance: number, activePositions: ActivePosition[], spikesToday: number): Promise<void> {
     if (!this.isConnected || !this.pool) return;
+    
+    // Queue the state write instead of executing immediately
+    this.stateWriteQueue = { virtualBalance, activePositions, spikesToday };
+    
+    // Schedule flush if not already scheduled
+    if (!this.stateWriteTimer) {
+      this.stateWriteTimer = setTimeout(() => this.flushStateWrite(), this.STATE_WRITE_INTERVAL);
+    }
+  }
+
+  private async flushStateWrite(): Promise<void> {
+    this.stateWriteTimer = null;
+    if (!this.stateWriteQueue || !this.isConnected || !this.pool) return;
+    
+    const { virtualBalance, activePositions, spikesToday } = this.stateWriteQueue;
+    this.stateWriteQueue = null;
+    
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_state (id, virtual_balance, active_positions, spikes_today, updated_at)
