@@ -17,7 +17,7 @@ export class TelegramService {
     botToken: '',
     chatId: '',
     notifyOnNewOrder: true,
-    notifyOnLayerFill: true,
+    notifyOnLayerFill: false,
     notifyOnClose: true,
   };
 
@@ -134,19 +134,7 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
    */
   public async notifyLayerFill(pos: ActivePosition, layer: GridLayer, filledCount: number, totalCount: number) {
     if (!this.config.notifyOnLayerFill) return;
-
-    const msg =
-`🕸️ <b>[LAYER JARING TERISI]</b> ⚡
-
-🪙 <b>Koin:</b> <code>${pos.symbol}</code> SHORT
-📍 <b>Layer Terisi:</b> <b>Layer #${layer.layerIndex}</b> @ <code>$${layer.price.toFixed(4)}</code>
-📦 <b>Volume Layer:</b> ${layer.qty} ($${layer.marginUsdt.toFixed(2)} USDT)
-📊 <b>Rata-rata Entry Baru:</b> <code>$${pos.avgEntryPrice.toFixed(4)}</code>
-🎯 <b>Target TP Baru:</b> <code>$${pos.targetTpPrice.toFixed(4)}</code>
-💰 <b>Total Margin Terpakai:</b> $${pos.totalMarginUsed.toFixed(2)} USDT
-📈 <b>Progres Jaring:</b> ${filledCount}/${totalCount} Layer terisi`;
-
-    this.sendMessage(msg).catch(() => {});
+    // Layer-fill notifications are intentionally muted by default because they are noisy and better kept in local logs/audit trails.
   }
 
   /**
@@ -200,15 +188,7 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
    * Notifikasi Stage 1 Partial Take Profit 50%
    */
   public async notifyPartialTp(symbol: string, partialPnl: number, remainingQty: number, bepPrice: number, tp2Price: number) {
-    const msg =
-`🎯 <b>[STAGE 1 PARTIAL TP 50%]</b> 💰
-
-🪙 <b>Koin:</b> <code>${symbol}</code> SHORT
-💵 <b>Cuan Diamankan:</b> <b>+$${partialPnl.toFixed(2)} USDT</b>
-🛡️ <b>Proteksi BEP:</b> Stop-Loss otomatis digeser ke <code>$${bepPrice.toFixed(4)}</code> (Bebas Risiko)
-🎯 <b>Stage 2 TP:</b> <code>$${tp2Price.toFixed(4)}</code> (Sisa ${remainingQty} koin)`;
-
-    this.sendMessage(msg).catch(() => {});
+    // Partial TP notifications are intentionally kept minimal, while the full local audit remains in logger/dashboard.
   }
 }
 

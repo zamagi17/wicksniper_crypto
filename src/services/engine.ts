@@ -14,6 +14,8 @@ export class WickSniperEngine {
   private scanner: SpikeScanner;
   private virtualBalance: number = 1000;
   private activePositions: Map<string, ActivePosition> = new Map();
+  private closingSymbols: Set<string> = new Set();
+  private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
   private spikesDetectedToday: number = 0;
   private statusListeners: ((status: EngineStatus) => void)[] = [];
@@ -91,7 +93,7 @@ export class WickSniperEngine {
         botToken: '',
         chatId: '',
         notifyOnNewOrder: true,
-        notifyOnLayerFill: true,
+        notifyOnLayerFill: false,
         notifyOnClose: true,
       },
       security: {
@@ -157,6 +159,33 @@ export class WickSniperEngine {
     binanceFutures.onTickers((tickers: any[]) => {
       this.onPriceTick(tickers);
     });
+  }
+
+  private auditOrderEvent(symbol: string, event: string, details: Record<string, any> = {}) {
+    const payload = {
+      event,
+      ts: Date.now(),
+      ...details,
+    };
+    this.orderAudit.set(symbol, {
+      lastEvent: event,
+      lastTs: payload.ts,
+      status: details.status || 'OK',
+    });
+
+    const compactSummary = Object.entries(payload)
+      .filter(([key]) => key !== 'event' && key !== 'ts')
+      .map(([key, value]) => {
+        const rendered = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        return `${key}=${rendered}`;
+      })
+      .join(' | ');
+
+    logger.log('INFO', `🧾 [ORDER AUDIT] ${symbol} | ${event} | ${compactSummary || 'status=OK'}`, symbol);
+  }
+
+  private auditTradeLifecycle(symbol: string, phase: 'OPEN_SHORT_REQUESTED' | 'OPEN_SHORT_CONFIRMED' | 'GRID_LAYER_PLACED' | 'TP_LIMIT_PLACED' | 'PARTIAL_CLOSE_REQUESTED' | 'PARTIAL_CLOSE_CONFIRMED' | 'FULL_CLOSE_REQUESTED' | 'FULL_CLOSE_CONFIRMED' | 'DB_TRADE_FINALIZED', details: Record<string, any> = {}) {
+    this.auditOrderEvent(symbol, phase, details);
   }
 
   public async start() {
@@ -287,12 +316,27 @@ export class WickSniperEngine {
       return;
     }
 
-    // Cek apakah koin ini sudah memiliki posisi aktif
+    // Cek apakah koin ini sudah memiliki posisi aktif di memori atau di Binance riil
     if (this.activePositions.has(symbol)) {
       alert.status = 'SKIPPED';
       alert.skipReason = `Sudah ada posisi aktif pada ${symbol}`;
       db.saveSpike(alert).catch(() => {});
       return;
+    }
+
+    if (this.config.tradingMode === 'LIVE') {
+      try {
+        const livePos = await binanceFutures.getOpenPosition(symbol);
+        if (livePos && Math.abs(livePos.positionAmt) > 0) {
+          alert.status = 'SKIPPED';
+          alert.skipReason = `Posisi aktif sudah ada di Binance pada ${symbol} (Qty: ${Math.abs(livePos.positionAmt)})`;
+          logger.log('WARN', `⚠️ [SKIP ORDER BARU] ${symbol} sudah punya posisi aktif di Binance. Bot menahan order baru agar tidak avg down/duplicate.`);
+          db.saveSpike(alert).catch(() => {});
+          return;
+        }
+      } catch (e: any) {
+        logger.log('WARN', `⚠️ [CHECK LIVE POSISI] Gagal mengecek posisi aktif Binance ${symbol}: ${e.message}`);
+      }
     }
 
     alert.status = 'EXECUTING';
@@ -380,6 +424,17 @@ export class WickSniperEngine {
     };
 
     if (this.config.tradingMode === 'LIVE') {
+      // Defensive double-check: jangan pernah menaruh order baru jika Binance sudah aktif di symbol yang sama
+      try {
+        const existingLivePos = await binanceFutures.getOpenPosition(symbol);
+        if (existingLivePos && Math.abs(existingLivePos.positionAmt) > 0) {
+          logger.log('WARN', `⚠️ [BLOCK DUPLICATE ENTRY] ${symbol} sudah punya posisi aktif di Binance (${Math.abs(existingLivePos.positionAmt)}). Membatalkan order tambahan agar tidak avg down.`);
+          return;
+        }
+      } catch (e: any) {
+        logger.log('WARN', `⚠️ [BLOCK DUPLICATE ENTRY] Gagal cek posisi live ${symbol}: ${e.message}`);
+      }
+
       // Live Trading: Jalankan setLeverage & setMarginType secara paralel untuk memangkas latensi
       await Promise.all([
         binanceFutures.setLeverage(symbol, leverage),
@@ -387,6 +442,13 @@ export class WickSniperEngine {
       ]).catch(() => {});
 
       // 1. Eksekusi market order untuk layer 0 (Mendukung One-Way & Hedge Mode)
+      this.auditTradeLifecycle(symbol, 'OPEN_SHORT_REQUESTED', {
+        side: 'SELL',
+        qty: layer0Qty,
+        price: currentPrice,
+        status: 'SENT',
+      });
+
       const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
       if (!res0?.orderId) {
         logger.log(
@@ -434,6 +496,12 @@ export class WickSniperEngine {
         layers[0].price = realEntryPrice;
         initialPos.avgEntryPrice = realEntryPrice;
         initialPos.currentPrice = realEntryPrice;
+        this.auditTradeLifecycle(symbol, 'OPEN_SHORT_CONFIRMED', {
+          side: 'SELL',
+          qty: executedQty || layer0Qty,
+          entryPrice: realEntryPrice,
+          status: 'CONFIRMED',
+        });
         if (executedQty > 0) {
           layers[0].qty = executedQty;
           initialPos.totalQty = executedQty;
@@ -481,6 +549,16 @@ export class WickSniperEngine {
       const tpPromise = this.syncLiveTakeProfitOrder(initialPos).catch(() => {});
 
       if (batchPayload.length > 0) {
+        for (const layer of layers.slice(1)) {
+          this.auditTradeLifecycle(symbol, 'GRID_LAYER_PLACED', {
+            layerIndex: layer.layerIndex,
+            side: 'SELL',
+            price: layer.price,
+            qty: layer.qty,
+            status: 'SENT',
+          });
+        }
+
         binanceFutures.sendBatchOrders(batchPayload).then((batchRes) => {
           for (let i = 0; i < batchRes.length; i++) {
             if (batchRes[i]?.orderId) {
@@ -591,17 +669,43 @@ export class WickSniperEngine {
       if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
         if (this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.totalQty > 0) {
           const ratio = this.config.exit.partialTpRatio || 0.5;
-          const partialQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty * ratio));
-          if (partialQty > 0 && partialQty < pos.totalQty) {
-            const partialPnl = Math.round((pos.avgEntryPrice - currentPrice) * partialQty * 100) / 100;
+          const desiredPartialQty = pos.totalQty * ratio;
+          let safePartialQty = parseFloat(binanceFutures.formatQty(pos.symbol, desiredPartialQty));
+
+          if (this.config.tradingMode === 'LIVE') {
+            try {
+              const livePos = await binanceFutures.getOpenPosition(pos.symbol);
+              const liveOpenQty = livePos ? Math.abs(livePos.positionAmt) : pos.totalQty;
+              if (liveOpenQty > 0) {
+                safePartialQty = Math.min(safePartialQty, liveOpenQty);
+              }
+            } catch {}
+          }
+
+          if (safePartialQty > 0 && safePartialQty < pos.totalQty) {
+            const partialPnl = Math.round((pos.avgEntryPrice - currentPrice) * safePartialQty * 100) / 100;
+            this.auditTradeLifecycle(pos.symbol, 'PARTIAL_CLOSE_REQUESTED', {
+              side: 'BUY',
+              qty: safePartialQty,
+              reason: 'PARTIAL_TP',
+              closePrice: currentPrice,
+              status: 'SENT',
+            });
             if (this.config.tradingMode === 'LIVE') {
-              binanceFutures.closePositionMarket(pos.symbol, 'BUY', partialQty).catch(() => {});
+              binanceFutures.closePositionMarket(pos.symbol, 'BUY', safePartialQty).catch(() => {});
             } else {
               this.virtualBalance += partialPnl;
             }
-            pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - partialQty));
+            pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - safePartialQty));
             pos.partialTpDone = true;
             pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
+            this.auditTradeLifecycle(pos.symbol, 'PARTIAL_CLOSE_CONFIRMED', {
+              side: 'BUY',
+              qty: safePartialQty,
+              realizedPnl: partialPnl,
+              remainingQty: pos.totalQty,
+              status: 'CLOSED_PARTIAL',
+            });
             // Geser Hard Stop Loss: jika masih ada jaring DCA pending di atas,
             // JANGAN matikan jaring dengan menyetel SL ke BEP tepat di entry!
             // Pertahankan hardSlPrice di atas jaring terluar agar averaging tetap bisa bekerja menyerap kenaikan harga.
@@ -739,6 +843,13 @@ export class WickSniperEngine {
 
       if (tpRes?.orderId) {
         pos.tpOrderId = String(tpRes.orderId);
+        this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
+          side: 'BUY',
+          targetTpPrice: pos.targetTpPrice,
+          qty: pos.totalQty,
+          orderId: pos.tpOrderId,
+          status: 'ACTIVE',
+        });
         logger.log(
           'SUCCESS',
           `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Order Limit Take Profit terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`,
@@ -778,240 +889,309 @@ export class WickSniperEngine {
     reason: ClosedTrade['exitReason'],
     closePrice: number
   ) {
+    if (this.closingSymbols.has(pos.symbol)) {
+      logger.log('WARN', `⚠️ [DUPLIKAT DIHINDARI] Posisi ${pos.symbol} sudah dalam proses penutupan.`, pos.symbol);
+      return;
+    }
     if (pos.status === 'CLOSING' || pos.status === 'CLOSED') {
       logger.log('WARN', `⚠️ [DUPLIKAT DIHINDARI] Posisi ${pos.symbol} sudah dalam proses penutupan (status: ${pos.status}).`, pos.symbol);
       return;
     }
+
+    this.closingSymbols.add(pos.symbol);
     pos.status = 'CLOSING';
 
-    const durationSeconds = Math.round((Date.now() - pos.openedAt) / 1000);
-    const pnl = (pos.avgEntryPrice - closePrice) * pos.totalQty;
-    const finalRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0)) * 100) / 100;
-    const pnlPct = Math.round(((pos.avgEntryPrice - closePrice) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
+    try {
+      const durationSeconds = Math.round((Date.now() - pos.openedAt) / 1000);
+      const pnl = (pos.avgEntryPrice - closePrice) * pos.totalQty;
+      const finalRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0)) * 100) / 100;
+      const pnlPct = Math.round(((pos.avgEntryPrice - closePrice) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
 
-    let actualExitPrice = closePrice;
-    let actualRealizedPnl = finalRealizedPnl;
-    let actualPnlPct = pnlPct;
-    let closeResOrderId: string | undefined = undefined;
+      let actualExitPrice = closePrice;
+      let actualRealizedPnl = finalRealizedPnl;
+      let actualPnlPct = pnlPct;
+      let closeResOrderId: string | undefined = undefined;
 
-    if (this.config.tradingMode === 'LIVE') {
-      // 1. Cek status posisi aktual di Binance matching engine
-      let realPos: any = null;
-      try {
-        realPos = await binanceFutures.getOpenPosition(pos.symbol);
-      } catch (e: any) {
-        console.warn(`[closePosition] Gagal cek posisi riil ${pos.symbol}:`, e.message);
-      }
+      if (this.config.tradingMode === 'LIVE') {
+        let realPos: any = null;
+        try {
+          realPos = await binanceFutures.getOpenPosition(pos.symbol);
+        } catch (e: any) {
+          console.warn(`[closePosition] Gagal cek posisi riil ${pos.symbol}:`, e.message);
+        }
 
-      const isPositionAlreadyClosed = !realPos || Math.abs(realPos.positionAmt) === 0;
+        this.auditTradeLifecycle(pos.symbol, 'FULL_CLOSE_REQUESTED', {
+          side: 'BUY',
+          qty: realPos ? Math.abs(realPos.positionAmt) : pos.totalQty,
+          reason,
+          closePrice,
+          status: 'SENT',
+        });
 
-      // 2. Batalkan order limit pending (layer grid belum terisi & limit TP jika ada)
-      await binanceFutures.cancelAllOrders(pos.symbol).catch(() => {});
+        const isPositionAlreadyClosed = !realPos || Math.abs(realPos.positionAmt) === 0;
 
-      let fillExitPrice = 0;
-      let execQty = 0;
+        await binanceFutures.cancelAllOrders(pos.symbol).catch(() => {});
 
-      // 3. HANYA kirim Market Order penutupan jika posisi di Binance benar-benar masih terbuka (> 0)
-      if (!isPositionAlreadyClosed) {
-        const closeQty = Math.abs(realPos.positionAmt);
-        if (closeQty > 0) {
-          const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
-          if (closeRes?.orderId) {
-            closeResOrderId = String(closeRes.orderId);
-          }
-          execQty = parseFloat(closeRes?.executedQty || '0');
-          const cumQuote = parseFloat(closeRes?.cumQuote || '0');
-          fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
-          if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
-            fillExitPrice = cumQuote / execQty;
-          }
+        let fillExitPrice = 0;
+        let execQty = 0;
 
-          if (fillExitPrice > 0) {
-            actualExitPrice = fillExitPrice;
+        if (!isPositionAlreadyClosed) {
+          const closeQty = Math.min(Math.abs(realPos.positionAmt), pos.totalQty || Math.abs(realPos.positionAmt));
+          if (closeQty > 0) {
+            this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_REQUESTED', {
+              side: 'BUY',
+              qty: closeQty,
+              reason,
+              closePrice,
+              status: 'SENT',
+            });
+            const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+            if (closeRes?.orderId) {
+              closeResOrderId = String(closeRes.orderId);
+            }
+            execQty = parseFloat(closeRes?.executedQty || '0');
+            const cumQuote = parseFloat(closeRes?.cumQuote || '0');
+            fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
+            if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
+              fillExitPrice = cumQuote / execQty;
+            }
+
+            if (fillExitPrice > 0) {
+              actualExitPrice = fillExitPrice;
+            }
           }
         }
-      }
 
-      // Tunggu sejenak agar matching engine Binance selesai membukukan userTrades
-      await new Promise((resolve) => setTimeout(resolve, 800));
+        await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Ambil riwayat trade terakhir dari Binance untuk sinkronisasi Realized PnL, Entry Price, Exit Price & Fee 100% presisi
-      try {
-        const minTime = pos.openedAt - 10000;
-        const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 20, minTime);
-        if (recentTrades.length > 0) {
-          // Cari trade BUY (penutupan short):
-          // Prioritas 1: Cocokkan dengan pos.tpOrderId (jika Limit TP terisi di Binance)
-          // Prioritas 2: Cocokkan dengan closeResOrderId (jika Market Close baru saja tereksekusi)
-          // Prioritas 3: Trade BUY yang waktu eksekusinya >= minTime
-          let closingTrades: any[] = [];
+        let confirmedClose = false;
+        try {
+          const minTime = pos.openedAt - 10000;
+          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 20, minTime);
+          const freshBuyTrades = recentTrades.filter((tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime));
+
           if (pos.tpOrderId) {
-            closingTrades = recentTrades.filter((tr: any) => String(tr.orderId) === String(pos.tpOrderId));
+            const tpMatches = recentTrades.filter((tr: any) => String(tr.orderId) === String(pos.tpOrderId));
+            if (tpMatches.length > 0) {
+              confirmedClose = true;
+            }
           }
-          if (closingTrades.length === 0 && closeResOrderId) {
-            closingTrades = recentTrades.filter((tr: any) => String(tr.orderId) === String(closeResOrderId));
+
+          if (!confirmedClose && closeResOrderId) {
+            const orderMatches = recentTrades.filter((tr: any) => String(tr.orderId) === String(closeResOrderId));
+            if (orderMatches.length > 0) {
+              confirmedClose = true;
+            }
           }
-          if (closingTrades.length === 0) {
-            closingTrades = recentTrades.filter(
-              (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
+
+          if (!confirmedClose && freshBuyTrades.length > 0) {
+            confirmedClose = true;
+          }
+
+          const realPosAfterClose = await binanceFutures.getOpenPosition(pos.symbol);
+          if (realPosAfterClose && Math.abs(realPosAfterClose.positionAmt) === 0) {
+            confirmedClose = true;
+          }
+
+          if (!confirmedClose) {
+            logger.log(
+              'WARN',
+              `⚠️ [CLOSE NOT CONFIRMED] Posisi ${pos.symbol} belum terkonfirmasi tertutup di Binance. Local state tidak dihapus untuk mencegah desync log DB.`,
+              pos.symbol
             );
+            this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_NOT_CONFIRMED', {
+              reason,
+              closePrice,
+              status: 'PENDING',
+            });
+            pos.status = 'SNIPING';
+            return;
           }
 
-          // Fallback ekstra jika closingTrades belum terbaca tetapi ada pos.tpOrderId
-          if (closingTrades.length === 0 && pos.tpOrderId) {
-            try {
-              const tpOrder = await binanceFutures.getOrder(pos.symbol, pos.tpOrderId);
-              if (tpOrder && parseFloat(tpOrder.avgPrice || '0') > 0) {
-                actualExitPrice = parseFloat(tpOrder.avgPrice);
-              }
-            } catch {}
-          }
+          this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_CONFIRMED', {
+            reason,
+            closePrice,
+            actualExitPrice,
+            status: 'CONFIRMED',
+          });
+          this.auditTradeLifecycle(pos.symbol, 'FULL_CLOSE_CONFIRMED', {
+            side: 'BUY',
+            reason,
+            actualExitPrice,
+            realizedPnl: actualRealizedPnl,
+            status: 'CONFIRMED',
+          });
 
-          if (closingTrades.length > 0) {
-            let binancePnlSum = 0;
-            let binanceFeeSum = 0;
-            let totalTradedQty = 0;
-            let totalTradedQuote = 0;
-
-            for (const tr of closingTrades) {
-              binancePnlSum += parseFloat(tr.realizedPnl || '0');
-              binanceFeeSum += parseFloat(tr.commission || '0');
-              const tQty = parseFloat(tr.qty || '0');
-              const tPrice = parseFloat(tr.price || '0');
-              totalTradedQty += tQty;
-              totalTradedQuote += tQty * tPrice;
+          if (recentTrades.length > 0) {
+            let closingTrades: any[] = [];
+            if (pos.tpOrderId) {
+              closingTrades = recentTrades.filter((tr: any) => String(tr.orderId) === String(pos.tpOrderId));
             }
-
-            // Tambahkan fee pembukaan (SELL) dalam rentang waktu posisi ini (openedAt - 10000)
-            const openingTrades = recentTrades.filter(
-              (tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime)
-            );
-            for (const otr of openingTrades) {
-              binanceFeeSum += parseFloat(otr.commission || '0');
+            if (closingTrades.length === 0 && closeResOrderId) {
+              closingTrades = recentTrades.filter((tr: any) => String(tr.orderId) === String(closeResOrderId));
             }
-
-            if (totalTradedQty > 0) {
-              actualExitPrice = totalTradedQuote / totalTradedQty;
-            }
-
-            // Realized PnL bersih (dikurangi total biaya transaksi roundtrip)
-            const netBinancePnl = binancePnlSum - binanceFeeSum;
-            actualRealizedPnl = Math.round(netBinancePnl * 100) / 100;
-            const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
-            actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
-
-            // Koreksi otomatis jika reason TAKE_PROFIT tapi PnL riil Binance justru minus
-            // Catatan: JANGAN label ulang sebagai HARD_STOP_LOSS — itu menyesatkan.
-            // Gunakan FEE_LOSS_EXIT karena TP memang tereksekusi, hanya fee > profit.
-            if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
-              reason = 'FEE_LOSS_EXIT';
-              logger.log(
-                'WARN',
-                `💸 [FEE > PROFIT] ${pos.symbol}: TP tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
-                pos.symbol
+            if (closingTrades.length === 0) {
+              closingTrades = recentTrades.filter(
+                (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
               );
             }
 
-            logger.log(
-              actualRealizedPnl >= 0 ? 'SUCCESS' : 'WARN',
-              `📊 [BINANCE PNL SYNC] ${pos.symbol}: Entry Riil: $${pos.avgEntryPrice.toFixed(6)} | Exit Riil: $${actualExitPrice.toFixed(6)} | Gross: $${binancePnlSum.toFixed(4)} | Fee: $${binanceFeeSum.toFixed(4)} | Net PnL: ${actualRealizedPnl >= 0 ? '+' : ''}$${actualRealizedPnl.toFixed(2)} USDT`,
-              pos.symbol
-            );
-          } else if (fillExitPrice > 0) {
-            const grossPnl = (pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
-            const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.0005;
-            actualRealizedPnl = Math.round((grossPnl - estFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
-            const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
-            actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+            if (closingTrades.length === 0 && pos.tpOrderId) {
+              try {
+                const tpOrder = await binanceFutures.getOrder(pos.symbol, pos.tpOrderId);
+                if (tpOrder && parseFloat(tpOrder.avgPrice || '0') > 0) {
+                  actualExitPrice = parseFloat(tpOrder.avgPrice);
+                }
+              } catch {}
+            }
+
+            if (closingTrades.length > 0) {
+              let binancePnlSum = 0;
+              let binanceFeeSum = 0;
+              let totalTradedQty = 0;
+              let totalTradedQuote = 0;
+
+              for (const tr of closingTrades) {
+                binancePnlSum += parseFloat(tr.realizedPnl || '0');
+                binanceFeeSum += parseFloat(tr.commission || '0');
+                const tQty = parseFloat(tr.qty || '0');
+                const tPrice = parseFloat(tr.price || '0');
+                totalTradedQty += tQty;
+                totalTradedQuote += tQty * tPrice;
+              }
+
+              const openingTrades = recentTrades.filter(
+                (tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime)
+              );
+              for (const otr of openingTrades) {
+                binanceFeeSum += parseFloat(otr.commission || '0');
+              }
+
+              if (totalTradedQty > 0) {
+                actualExitPrice = totalTradedQuote / totalTradedQty;
+              }
+
+              const netBinancePnl = binancePnlSum - binanceFeeSum;
+              actualRealizedPnl = Math.round(netBinancePnl * 100) / 100;
+              const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+              actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+
+              if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
+                reason = 'FEE_LOSS_EXIT';
+                logger.log(
+                  'WARN',
+                  `💸 [FEE > PROFIT] ${pos.symbol}: TP tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
+                  pos.symbol
+                );
+              }
+
+              logger.log(
+                actualRealizedPnl >= 0 ? 'SUCCESS' : 'WARN',
+                `📊 [BINANCE PNL SYNC] ${pos.symbol}: Entry Riil: $${pos.avgEntryPrice.toFixed(6)} | Exit Riil: $${actualExitPrice.toFixed(6)} | Gross: $${binancePnlSum.toFixed(4)} | Fee: $${binanceFeeSum.toFixed(4)} | Net PnL: ${actualRealizedPnl >= 0 ? '+' : ''}$${actualRealizedPnl.toFixed(2)} USDT`,
+                pos.symbol
+              );
+            } else if (fillExitPrice > 0) {
+              const grossPnl = (pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
+              const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.0005;
+              actualRealizedPnl = Math.round((grossPnl - estFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
+              const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+              actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+            }
           }
+        } catch (e: any) {
+          console.warn(`[Sync PnL] Menggunakan kalkulasi lokal: ${e.message}`);
         }
-      } catch (e: any) {
-        console.warn(`[Sync PnL] Menggunakan kalkulasi lokal: ${e.message}`);
+      } else {
+        this.virtualBalance += Math.round(pnl * 100) / 100;
       }
-    } else {
-      // Paper Trading: Sesuaikan saldo virtual untuk sisa posisi
-      this.virtualBalance += Math.round(pnl * 100) / 100;
+
+      const filledLayersCount = (pos.layers || []).filter((l) => l.status === 'FILLED').length;
+      const totalLayersCount = (pos.layers || []).length;
+
+      const trade: ClosedTrade = {
+        id: Math.random().toString(36).substring(2, 9),
+        symbol: pos.symbol,
+        side: 'SHORT',
+        entryPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, pos.avgEntryPrice)),
+        exitPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, actualExitPrice)),
+        qty: pos.totalQty,
+        marginUsed: pos.totalMarginUsed,
+        realizedPnl: actualRealizedPnl,
+        pnlPct: actualPnlPct,
+        durationSeconds,
+        exitReason: reason,
+        isPaper: this.config.tradingMode === 'PAPER',
+        closedAt: new Date().toLocaleTimeString('id-ID'),
+        timestamp: Date.now(),
+        layersFilled: `${filledLayersCount}/${totalLayersCount}`,
+        layersDetail: (pos.layers || []).map((l) => ({
+          layerIndex: l.layerIndex,
+          price: l.price,
+          qty: l.qty,
+          marginUsdt: l.marginUsdt,
+          status: l.status,
+        })),
+        paramsSnapshot: {
+          marginPerLayerUsdt: this.config.grid.marginPerLayerUsdt,
+          totalLayers: this.config.grid.totalLayers,
+          layerSpacingPct: this.config.grid.layerSpacingPct,
+          martingaleMultiplier: this.config.grid.martingaleMultiplier,
+          maxTotalMarginPerCoin: this.config.grid.maxTotalMarginPerCoin,
+          takeProfitPct: this.config.exit.takeProfitPct,
+          hardStopLossPct: this.config.exit.hardStopLossPct,
+          maxHoldMinutes: this.config.exit.maxHoldMinutes,
+          spikeMinPercent: this.config.scanner.spikeMinPercent,
+          leverage: this.config.leverage,
+          marginType: this.config.marginType,
+        },
+      };
+
+      this.closedTrades.unshift(trade);
+      if (this.closedTrades.length > 100) this.closedTrades.pop();
+
+      pos.status = 'CLOSED';
+      this.activePositions.delete(pos.symbol);
+
+      this.auditTradeLifecycle(pos.symbol, 'DB_TRADE_FINALIZED', {
+        tradeId: trade.id,
+        realizedPnl: trade.realizedPnl,
+        exitReason: trade.exitReason,
+        status: 'PERSISTED',
+      });
+      db.saveTrade(trade).catch(() => {});
+      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+
+      telegram.notifyTradeClosed(
+        trade,
+        this.config.tradingMode === 'PAPER' ? this.virtualBalance : undefined
+      );
+
+      this.scanner.setCooldown(pos.symbol, this.config.scanner.cooldownMinutes || 10);
+
+      const isProfit = trade.realizedPnl >= 0;
+      const reasonLabel =
+        trade.exitReason === 'TAKE_PROFIT'
+          ? '🎯 Take Profit (Pullback Wick)'
+          : trade.exitReason === 'TRAILING_TP'
+          ? '📈 Trailing Take Profit'
+          : trade.exitReason === 'HARD_STOP_LOSS'
+          ? '🛑 Hard Stop Loss (Cut-Off)'
+          : trade.exitReason === 'FEE_LOSS_EXIT'
+          ? '💸 TP Minus Fee (Biaya > Profit)'
+          : trade.exitReason === 'TIME_LIMIT_EXIT'
+          ? '⏰ Batas Waktu Hold'
+          : 'Tutup Manual';
+
+      logger.log(
+        isProfit ? 'SUCCESS' : 'WARN',
+        `🏁 [POSISI DITUTUP] ${pos.symbol} SHORT | Aksi: ${reasonLabel} | Entry: $${trade.entryPrice} ➜ Exit: $${trade.exitPrice} | PnL: ${trade.realizedPnl >= 0 ? '+' : ''}$${trade.realizedPnl} USDT (${trade.pnlPct >= 0 ? '+' : ''}${trade.pnlPct}%) | Durasi: ${durationSeconds} detik`,
+        pos.symbol
+      );
+
+      this.broadcastStatus();
+    } finally {
+      this.closingSymbols.delete(pos.symbol);
     }
-
-    const filledLayersCount = (pos.layers || []).filter((l) => l.status === 'FILLED').length;
-    const totalLayersCount = (pos.layers || []).length;
-
-    const trade: ClosedTrade = {
-      id: Math.random().toString(36).substring(2, 9),
-      symbol: pos.symbol,
-      side: 'SHORT',
-      entryPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, pos.avgEntryPrice)),
-      exitPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, actualExitPrice)),
-      qty: pos.totalQty,
-      marginUsed: pos.totalMarginUsed,
-      realizedPnl: actualRealizedPnl,
-      pnlPct: actualPnlPct,
-      durationSeconds,
-      exitReason: reason,
-      isPaper: this.config.tradingMode === 'PAPER',
-      closedAt: new Date().toLocaleTimeString('id-ID'),
-      timestamp: Date.now(),
-      layersFilled: `${filledLayersCount}/${totalLayersCount}`,
-      layersDetail: (pos.layers || []).map((l) => ({
-        layerIndex: l.layerIndex,
-        price: l.price,
-        qty: l.qty,
-        marginUsdt: l.marginUsdt,
-        status: l.status,
-      })),
-      paramsSnapshot: {
-        marginPerLayerUsdt: this.config.grid.marginPerLayerUsdt,
-        totalLayers: this.config.grid.totalLayers,
-        layerSpacingPct: this.config.grid.layerSpacingPct,
-        martingaleMultiplier: this.config.grid.martingaleMultiplier,
-        maxTotalMarginPerCoin: this.config.grid.maxTotalMarginPerCoin,
-        takeProfitPct: this.config.exit.takeProfitPct,
-        hardStopLossPct: this.config.exit.hardStopLossPct,
-        maxHoldMinutes: this.config.exit.maxHoldMinutes,
-        spikeMinPercent: this.config.scanner.spikeMinPercent,
-        leverage: this.config.leverage,
-        marginType: this.config.marginType,
-      },
-    };
-
-    this.closedTrades.unshift(trade);
-    if (this.closedTrades.length > 100) this.closedTrades.pop();
-
-    pos.status = 'CLOSED';
-    this.activePositions.delete(pos.symbol);
-
-    db.saveTrade(trade).catch(() => {});
-    db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
-
-    telegram.notifyTradeClosed(
-      trade,
-      this.config.tradingMode === 'PAPER' ? this.virtualBalance : undefined
-    );
-
-    // Berikan cooldown pada koin yang baru ditutup agar tidak re-enter pucuk yang sama
-    this.scanner.setCooldown(pos.symbol, this.config.scanner.cooldownMinutes || 10);
-
-    const isProfit = trade.realizedPnl >= 0;
-    const reasonLabel =
-      trade.exitReason === 'TAKE_PROFIT'
-        ? '🎯 Take Profit (Pullback Wick)'
-        : trade.exitReason === 'TRAILING_TP'
-        ? '📈 Trailing Take Profit'
-        : trade.exitReason === 'HARD_STOP_LOSS'
-        ? '🛑 Hard Stop Loss (Cut-Off)'
-        : trade.exitReason === 'FEE_LOSS_EXIT'
-        ? '💸 TP Minus Fee (Biaya > Profit)'
-        : trade.exitReason === 'TIME_LIMIT_EXIT'
-        ? '⏰ Batas Waktu Hold'
-        : 'Tutup Manual';
-
-    logger.log(
-      isProfit ? 'SUCCESS' : 'WARN',
-      `🏁 [POSISI DITUTUP] ${pos.symbol} SHORT | Aksi: ${reasonLabel} | Entry: $${trade.entryPrice} ➜ Exit: $${trade.exitPrice} | PnL: ${trade.realizedPnl >= 0 ? '+' : ''}$${trade.realizedPnl} USDT (${trade.pnlPct >= 0 ? '+' : ''}${trade.pnlPct}%) | Durasi: ${durationSeconds} detik`,
-      pos.symbol
-    );
-
-    this.broadcastStatus();
   }
 
   /**

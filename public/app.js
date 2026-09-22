@@ -816,11 +816,37 @@ function renderLogs(logs) {
   logs.forEach((l) => appendLog(l));
 }
 
+function formatLogMessage(message) {
+  if (!message) return '';
+
+  const labelMap = {
+    OPEN_SHORT_REQUESTED: 'OPEN SHORT',
+    OPEN_SHORT_CONFIRMED: 'OPEN SHORT CONFIRMED',
+    GRID_LAYER_PLACED: 'GRID LAYER',
+    TP_LIMIT_PLACED: 'TP LIMIT',
+    PARTIAL_CLOSE_REQUESTED: 'PARTIAL CLOSE',
+    PARTIAL_CLOSE_CONFIRMED: 'PARTIAL CLOSE CONFIRMED',
+    FULL_CLOSE_REQUESTED: 'FULL CLOSE',
+    FULL_CLOSE_CONFIRMED: 'FULL CLOSE CONFIRMED',
+    DB_TRADE_FINALIZED: 'DB FINALIZED',
+    CLOSE_SHORT_REQUESTED: 'CLOSE SHORT',
+    CLOSE_SHORT_CONFIRMED: 'CLOSE SHORT CONFIRMED',
+    CLOSE_SHORT_NOT_CONFIRMED: 'CLOSE SHORT PENDING',
+  };
+
+  const normalized = String(message).replace(/\[ORDER AUDIT\] ([^|]+) \| ([A-Z_]+) \| (.*)/, (_, symbol, event, rest) => {
+    const label = labelMap[event] || event.replace(/_/g, ' ');
+    return `[AUDIT] ${symbol} • ${label}${rest ? ` • ${rest.replace(/\s*\|\s*/g, ' • ')}` : ''}`;
+  });
+
+  return normalized;
+}
+
 function appendLog(log) {
   const terminal = document.getElementById('terminal-logs');
   const div = document.createElement('div');
   div.className = `log-entry ${log.level.toLowerCase()}`;
-  div.innerText = `[${log.timestamp}] [${log.level}] ${log.message}`;
+  div.innerText = `[${log.timestamp}] [${log.level}] ${formatLogMessage(log.message)}`;
   terminal.insertBefore(div, terminal.firstChild);
 
   // Batasi 100 baris DOM

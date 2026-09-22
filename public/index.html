@@ -426,7 +426,7 @@
               <input type="checkbox" id="cfg-tg-enabled" onchange="toggleTelegramInputs()" style="width: 18px; height: 18px; accent-color: var(--color-cyan);">
               📱 Aktifkan Notifikasi Telegram Bot
             </label>
-            <small class="form-hint">Menerima alert instan saat ada order baru, averaging layer terisi, take profit, dan stop-loss.</small>
+            <small class="form-hint">Telegram berfungsi sebagai alert penting. Log lokal dan dashboard tetap menjadi audit utama untuk detail order, layer, dan close.</small>
           </div>
         </div>
 
@@ -452,6 +452,7 @@
               <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
                 <input type="checkbox" id="cfg-tg-on-layer" checked style="accent-color: var(--color-cyan);"> Layer Jaring Terisi
               </label>
+              <small class="form-hint" style="display: block; width: 100%; margin-top: 6px; color: var(--color-muted);">Catatan: Layer fill biasanya dimatikan agar Telegram tidak spam; detail tetap tersedia di log lokal.</small>
               <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
                 <input type="checkbox" id="cfg-tg-on-close" checked style="accent-color: var(--color-cyan);"> Posisi Ditutup (TP / SL)
               </label>
