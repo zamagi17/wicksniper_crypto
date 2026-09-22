@@ -386,6 +386,7 @@ export class BinanceFuturesClient {
     symbol: string;
     positionAmt: number;
     entryPrice: number;
+    breakEvenPrice?: number;
     unRealizedProfit: number;
     leverage: number;
     positionSide?: string;
@@ -430,6 +431,7 @@ export class BinanceFuturesClient {
             symbol: item.symbol,
             positionAmt: parseFloat(item.positionAmt || '0'),
             entryPrice: parseFloat(item.entryPrice || '0'),
+            breakEvenPrice: parseFloat(item.breakEvenPrice || '0'),
             unRealizedProfit: parseFloat(item.unRealizedProfit || '0'),
             leverage: parseInt(item.leverage || '5'),
             positionSide: item.positionSide,
@@ -450,6 +452,7 @@ export class BinanceFuturesClient {
     symbol: string;
     positionAmt: number;
     entryPrice: number;
+    breakEvenPrice?: number;
     unRealizedProfit: number;
     leverage: number;
     positionSide: string;
@@ -476,6 +479,7 @@ export class BinanceFuturesClient {
             symbol: item.symbol,
             positionAmt: parseFloat(item.positionAmt || '0'),
             entryPrice: parseFloat(item.entryPrice || '0'),
+            breakEvenPrice: parseFloat(item.breakEvenPrice || '0'),
             unRealizedProfit: parseFloat(item.unRealizedProfit || '0'),
             leverage: parseInt(item.leverage || '5'),
             positionSide: item.positionSide || 'BOTH',

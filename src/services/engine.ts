@@ -663,12 +663,21 @@ export class WickSniperEngine {
       // Guard: Minimal 5 detik sejak posisi dibuka untuk menghindari false trigger akibat volatilitas awal
       const slAgeMs = Date.now() - pos.openedAt;
       if (currentPrice >= pos.hardSlPrice && slAgeMs >= 5000) {
-        logger.log(
-          'WARN',
-          `🛑 [HARD SL TRIGGERED] ${pos.symbol}: Harga $${currentPrice} >= Hard SL $${pos.hardSlPrice.toFixed(6)} (Avg Entry: $${pos.avgEntryPrice.toFixed(6)}, SL%: ${((pos.hardSlPrice / pos.avgEntryPrice - 1) * 100).toFixed(2)}%, Umur: ${(slAgeMs / 1000).toFixed(1)}s)`,
-          pos.symbol
-        );
-        this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
+        if (pos.partialTpDone) {
+          logger.log(
+            'INFO',
+            `🛡️ [BEP PROTECTION TRIGGERED] ${pos.symbol}: Harga kembali ke BEP $${pos.hardSlPrice.toFixed(6)}. Sisa posisi ditutup impas (0% rugi) setelah mengamankan Partial TP!`,
+            pos.symbol
+          );
+          this.closePosition(pos, 'TRAILING_TP', currentPrice);
+        } else {
+          logger.log(
+            'WARN',
+            `🛑 [HARD SL TRIGGERED] ${pos.symbol}: Harga $${currentPrice} >= Hard SL $${pos.hardSlPrice.toFixed(6)} (Avg Entry: $${pos.avgEntryPrice.toFixed(6)}, SL%: ${((pos.hardSlPrice / pos.avgEntryPrice - 1) * 100).toFixed(2)}%, Umur: ${(slAgeMs / 1000).toFixed(1)}s)`,
+            pos.symbol
+          );
+          this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
+        }
         continue;
       }
 
@@ -716,22 +725,49 @@ export class WickSniperEngine {
               remainingQty: pos.totalQty,
               status: 'CLOSED_PARTIAL',
             });
-            // Geser Hard Stop Loss: jika masih ada jaring DCA pending di atas,
-            // JANGAN matikan jaring dengan menyetel SL ke BEP tepat di entry!
-            // Pertahankan hardSlPrice di atas jaring terluar agar averaging tetap bisa bekerja menyerap kenaikan harga.
-            const hasPendingLayers = pos.layers && pos.layers.some((l) => l.status === 'PENDING');
-            if (!hasPendingLayers) {
-              pos.hardSlPrice = pos.avgEntryPrice;
-            } else {
-              const highestPending = Math.max(...pos.layers.map((l) => l.price));
-              pos.hardSlPrice = Math.max(pos.hardSlPrice, highestPending * 1.01);
+            // 1. Batalkan semua jaring pending di Binance & tandai CANCELLED (hentikan averaging setelah TP1)
+            if (this.config.tradingMode === 'LIVE') {
+              await binanceFutures.cancelAllOrders(pos.symbol).catch(() => {});
+            }
+            if (pos.layers) {
+              for (const l of pos.layers) {
+                if (l.status === 'PENDING') {
+                  l.status = 'CANCELLED';
+                }
+              }
             }
 
-            // Target TP tahap 2 digeser lebih dalam (2.5% di bawah average entry)
+            // 2. Geser Hard Stop Loss ke titik BEP RIIL BINANCE (sudah include seluruh biaya fee transaksi!)
+            let bepPrice = 0;
+            if (this.config.tradingMode === 'LIVE') {
+              try {
+                const livePos = await binanceFutures.getOpenPosition(pos.symbol);
+                if (livePos?.breakEvenPrice && livePos.breakEvenPrice > 0) {
+                  bepPrice = livePos.breakEvenPrice;
+                  pos.breakEvenPrice = livePos.breakEvenPrice;
+                }
+              } catch {}
+            }
+            // Fallback (Paper trading atau jika Binance API delay):
+            // Untuk SHORT, agar benar-benar BEP bersih setelah fee (est. 0.08% roundtrip),
+            // harga BEP berada di bawah harga entry:
+            if (!bepPrice || bepPrice <= 0) {
+              const feeRoundtripRate = 0.0008;
+              bepPrice = pos.avgEntryPrice * (1 - feeRoundtripRate);
+            }
+            pos.hardSlPrice = bepPrice;
+
+            // 3. Target TP tahap 2 digeser lebih dalam (2x takeProfitPct di bawah average entry)
             pos.targetTpPrice = pos.avgEntryPrice * (1 - (this.config.exit.takeProfitPct * 2) / 100);
+
+            // 4. Jika mode LIVE, pasang limit order Take Profit baru untuk sisa volume di Stage 2
+            if (this.config.tradingMode === 'LIVE') {
+              this.syncLiveTakeProfitOrder(pos).catch(() => {});
+            }
+
             logger.log(
               'SUCCESS',
-              `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Hard SL: $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
+              `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke BEP (Include Fee): $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
               pos.symbol
             );
             telegram.notifyPartialTp(
@@ -1303,9 +1339,16 @@ export class WickSniperEngine {
               pos.totalQty = liveQty;
               if (realPos.entryPrice > 0) {
                 pos.avgEntryPrice = realPos.entryPrice;
+                if (realPos.breakEvenPrice && realPos.breakEvenPrice > 0) {
+                  pos.breakEvenPrice = realPos.breakEvenPrice;
+                }
                 const exitCfg = this.config.exit;
                 pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-                pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+                if (!pos.partialTpDone) {
+                  pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+                } else {
+                  pos.hardSlPrice = pos.breakEvenPrice && pos.breakEvenPrice > 0 ? pos.breakEvenPrice : pos.avgEntryPrice * 0.9992;
+                }
                 pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
 
                 // Tandai layer yang terisi secara riil di Binance

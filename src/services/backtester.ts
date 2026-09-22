@@ -56,6 +56,7 @@ export interface BacktestResult {
   maxDrawdownPct: number;
   profitFactor: number;
   avgTradeDurationMinutes: number;
+  partialTpTrades: number;
   trades: BacktestTrade[];
   equityCurve: { time: string; balance: number }[];
 }
@@ -109,8 +110,8 @@ export class WickSniperBacktester {
     const maxTotalMarginPerCoin = params.maxTotalMarginPerCoin || 35;
     const cooldownMinutes = params.cooldownMinutes || 10;
     const maxHoldMinutes = params.maxHoldMinutes || 10;
-    const partialTpEnabled = params.partialTpEnabled !== false;
-    const partialTpRatio = params.partialTpRatio || 0.5;
+    const partialTpEnabled = params.partialTpEnabled === true;
+    const partialTpRatio = params.partialTpRatio !== undefined ? params.partialTpRatio : 0.5;
     const initialBalance = params.initialBalance || 1000;
 
     let balance = initialBalance;
@@ -154,7 +155,7 @@ export class WickSniperBacktester {
           price: number;
           qty: number;
           marginUsdt: number;
-          status: 'FILLED' | 'PENDING';
+          status: 'FILLED' | 'PENDING' | 'CANCELLED';
         }
 
         const layers: SimLayer[] = [];
@@ -243,10 +244,12 @@ export class WickSniperBacktester {
 
           // 1. Cek apakah ada layer pending yang tertabrak harga atas (Layer Fill)
           let newLayersFilled = false;
-          for (const l of layers) {
-            if (l.status === 'PENDING' && evalCandle.high >= l.price) {
-              l.status = 'FILLED';
-              newLayersFilled = true;
+          if (!partialDone) {
+            for (const l of layers) {
+              if (l.status === 'PENDING' && evalCandle.high >= l.price) {
+                l.status = 'FILLED';
+                newLayersFilled = true;
+              }
             }
           }
           if (newLayersFilled) {
@@ -276,11 +279,11 @@ export class WickSniperBacktester {
             }
           }
 
-          // 2. Evaluasi HARD STOP LOSS (Proteksi Runaway Pump)
+          // 2. Evaluasi HARD STOP LOSS atau BEP EXIT
           if (evalCandle.high >= hardSlPrice) {
             tradeClosed = true;
             exitPrice = hardSlPrice;
-            exitReason = 'HARD_STOP_LOSS';
+            exitReason = partialDone ? 'TRAILING_TP' : 'HARD_STOP_LOSS';
             exitTime = evalCandle.openTime;
             break;
           }
@@ -301,10 +304,18 @@ export class WickSniperBacktester {
               qty -= partQty;
               partialDone = true;
 
-              // Geser SL ke Breakeven (Avg Entry) -> Zero Risk!
-              hardSlPrice = avgPrice;
+              // Geser SL ke Breakeven (Fee-Inclusive: 0.08% roundtrip fee di bawah Avg Entry untuk SHORT)
+              const feeRoundtripRate = 0.0008;
+              hardSlPrice = avgPrice * (1 - feeRoundtripRate);
               // Target TP tahap 2 digeser lebih dalam
               targetTpPrice = avgPrice * (1 - (takeProfitPct * 2) / 100);
+
+              // Batalkan layer pending yang tersisa
+              for (const l of layers) {
+                if (l.status === 'PENDING') {
+                  l.status = 'CANCELLED';
+                }
+              }
 
               // Jika candle ini juga menembus TP tahap 2
               const canStage2 = k === i ? evalCandle.close <= targetTpPrice : evalCandle.low <= targetTpPrice;
@@ -338,7 +349,7 @@ export class WickSniperBacktester {
         if (tradeClosed) {
           const remainingPnl = (avgPrice - exitPrice) * qty;
           const totalRealizedPnl = Math.round((remainingPnl + partialRealizedPnl) * 100) / 100;
-          const pnlPct = Math.round(((avgPrice - exitPrice) / avgPrice) * leverage * 1000) / 10;
+          const pnlPct = usedMargin > 0 ? Math.round((totalRealizedPnl / usedMargin) * 1000) / 10 : 0;
           const durationMinutes = Math.max(1, Math.round((exitTime - entryTime) / 60000));
 
           balance += totalRealizedPnl;
@@ -397,6 +408,8 @@ export class WickSniperBacktester {
     const avgDuration =
       totalTrades > 0 ? Math.round((allTrades.reduce((sum, t) => sum + t.durationMinutes, 0) / totalTrades) * 10) / 10 : 0;
 
+    const partialTpTrades = allTrades.filter((t) => t.partialTpTaken).length;
+
     return {
       symbols: params.symbols,
       startDate: new Date(params.startTime).toLocaleDateString('id-ID'),
@@ -414,6 +427,7 @@ export class WickSniperBacktester {
       maxDrawdownPct: Math.round(maxDrawdownPct * 10) / 10,
       profitFactor,
       avgTradeDurationMinutes: avgDuration,
+      partialTpTrades,
       trades: allTrades,
       equityCurve,
     };

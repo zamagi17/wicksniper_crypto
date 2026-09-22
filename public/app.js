@@ -1353,6 +1353,13 @@ function openBacktestModal() {
     if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
     const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
     if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
+    const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
+    if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
+    const btptRatio = document.getElementById('bt-partial-tp-ratio');
+    if (btptRatio && currentConfig.exit?.partialTpRatio) {
+      btptRatio.value = Math.round(currentConfig.exit.partialTpRatio * 100);
+    }
+    toggleBtPartialTp();
     if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
     if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
@@ -1378,6 +1385,13 @@ function resetBacktestParams() {
     if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
     const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
     if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
+    const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
+    if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
+    const btptRatio = document.getElementById('bt-partial-tp-ratio');
+    if (btptRatio && currentConfig.exit?.partialTpRatio) {
+      btptRatio.value = Math.round(currentConfig.exit.partialTpRatio * 100);
+    }
+    toggleBtPartialTp();
     if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
     if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
     if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
@@ -1387,6 +1401,15 @@ function resetBacktestParams() {
     if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
   }
 }
+
+function toggleBtPartialTp() {
+  const isChecked = document.getElementById('bt-partial-tp-enabled')?.checked;
+  const container = document.getElementById('bt-partial-tp-ratio-container');
+  if (container) {
+    container.style.display = isChecked ? 'inline-flex' : 'none';
+  }
+}
+window.toggleBtPartialTp = toggleBtPartialTp;
 
 function closeBacktestModal() {
   document.getElementById('backtest-modal').style.display = 'none';
@@ -1427,6 +1450,8 @@ async function executeBacktest() {
     takeProfitPct: parseFloat(document.getElementById('bt-tp').value) || 1.2,
     hardStopLossPct: parseFloat(document.getElementById('bt-sl').value) || 4.5,
     trailingSlEnabled: !!document.getElementById('bt-trailing-sl-enabled')?.checked,
+    partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
+    partialTpRatio: (parseFloat(document.getElementById('bt-partial-tp-ratio')?.value) || 50) / 100,
     marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 3,
     layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.0,
     totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 6,
@@ -1435,7 +1460,6 @@ async function executeBacktest() {
     maxHoldMinutes: parseInt(document.getElementById('bt-max-hold').value) || 10,
     cooldownMinutes: parseInt(document.getElementById('bt-cooldown').value) || 10,
     initialBalance: parseFloat(document.getElementById('bt-init-balance').value) || 245,
-    partialTpEnabled: false,
   };
 
   // Debug log untuk memastikan params terkirim dengan benar
@@ -1476,7 +1500,11 @@ async function executeBacktest() {
     document.getElementById('bt-res-pnl-sub').innerText = `${sign}${r.netProfitPct.toFixed(1)}% dari modal $${r.initialBalance}`;
 
     document.getElementById('bt-res-trades').innerText = r.totalTrades;
-    document.getElementById('bt-res-candles').innerText = `${r.totalCandlesAnalyzed.toLocaleString()} Lilin 1m`;
+    let candleSub = `${r.totalCandlesAnalyzed.toLocaleString()} Lilin 1m`;
+    if (r.partialTpTrades > 0) {
+      candleSub += ` • 🎯 ${r.partialTpTrades} Partial TP`;
+    }
+    document.getElementById('bt-res-candles').innerText = candleSub;
 
     document.getElementById('bt-res-pf').innerText = r.profitFactor;
     document.getElementById('bt-res-mdd').innerText = `Max Drawdown: -$${r.maxDrawdownUsdt.toFixed(2)} (-${r.maxDrawdownPct.toFixed(1)}%)`;
@@ -1491,15 +1519,25 @@ async function executeBacktest() {
           const isWin = t.realizedPnl >= 0;
           const tColor = isWin ? 'text-green' : 'text-red';
           const tSign = isWin ? '+' : '';
+          const partialBadge = t.partialTpTaken
+            ? `<span class="badge" style="background: rgba(0, 240, 255, 0.15); color: var(--color-cyan); font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; border: 1px solid rgba(0, 240, 255, 0.3);" title="Stage 1 Partial TP terealisasi & SL dipindah ke BEP">🎯 Partial TP</span>`
+            : '';
+          let exitReasonLabel = t.exitReason;
+          if (t.exitReason === 'TAKE_PROFIT') exitReasonLabel = '🎯 Take Profit';
+          else if (t.exitReason === 'TRAILING_TP') exitReasonLabel = t.partialTpTaken ? '🎯 Stage 2 TP / BEP' : '📈 Trailing TP';
+          else if (t.exitReason === 'HARD_STOP_LOSS') exitReasonLabel = '🛑 Hard SL';
+          else if (t.exitReason === 'TIME_LIMIT_EXIT') exitReasonLabel = '⏰ Batas Waktu';
+          else if (t.exitReason === 'FEE_LOSS_EXIT') exitReasonLabel = '💸 TP Minus Fee';
+
           return `
             <tr>
               <td>${t.entryTime}</td>
-              <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span></td>
+              <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span>${partialBadge}</td>
               <td><span class="text-cyan font-mono"><b>$${t.marginUsed.toFixed(2)}</b></span></td>
               <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
               <td><b>${t.durationMinutes}m</b></td>
               <td class="${tColor}"><b>${tSign}$${t.realizedPnl.toFixed(2)} (${tSign}${t.pnlPct.toFixed(1)}%)</b></td>
-              <td><small>${t.exitReason}</small></td>
+              <td><small>${exitReasonLabel}</small></td>
             </tr>
           `;
         })

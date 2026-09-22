@@ -602,6 +602,26 @@
             <small class="form-hint">Mengencangkan SL otomatis saat jaring terisi untuk mengunci profit (leverage-aware).</small>
           </div>
 
+          <!-- PARTIAL TAKE PROFIT SECTION DI BACKTEST LAB -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(0, 240, 255, 0.03); border: 1px dashed rgba(0, 240, 255, 0.25); border-radius: var(--radius-sm); padding: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan); margin: 0;">
+                <input type="checkbox" id="bt-partial-tp-enabled" onchange="toggleBtPartialTp()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
+                🎯 Aktifkan Stage 1 Partial TP & BEP Protection
+              </label>
+              <div id="bt-partial-tp-ratio-container" style="display: none; align-items: center; gap: 6px;">
+                <label style="font-size: 12px; margin: 0; color: var(--color-muted);">Porsi Cair:</label>
+                <div style="display: inline-flex; align-items: center; gap: 4px;">
+                  <input type="number" id="bt-partial-tp-ratio" value="50" min="10" max="90" step="5" style="width: 65px; padding: 4px 8px; height: 28px;" class="form-control" />
+                  <span style="font-size: 12px; color: var(--color-muted);">%</span>
+                </div>
+              </div>
+            </div>
+            <small class="form-hint" style="margin-top: 4px; display: block;">
+              Saat TP awal tercapai, cairkan sebagian posisi untuk kunci cuan, lalu otomatis pindahkan SL sisa posisi ke titik BEP (0% risiko). Sisa koin mengejar Stage 2 TP.
+            </small>
+          </div>
+
           <div class="form-group">
             <label>Modal Per Layer (USDT):</label>
             <input type="number" id="bt-margin" class="form-control" value="3" step="1" min="1" />

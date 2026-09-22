@@ -100,6 +100,7 @@ export interface ActivePosition {
   openedAt: number;
   targetTpPrice: number;
   hardSlPrice: number;
+  breakEvenPrice?: number;
   status: 'SNIPING' | 'HOLDING' | 'CLOSING' | 'CLOSED';
   partialTpDone?: boolean;
   partialRealizedPnl?: number;
