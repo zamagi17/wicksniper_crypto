@@ -135,6 +135,9 @@ export class WickSniperEngine {
     if (this.config.telegram) {
       telegram.updateConfig(this.config.telegram);
     }
+    if (this.isRunning) {
+      binanceFutures.startTickerWebSocket(this.config.scanner.dataSource).catch(() => {});
+    }
     if (this.config.apiKey && this.config.apiSecret) {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
     }
@@ -1938,6 +1941,9 @@ export class WickSniperEngine {
         this.scanner.updateConfig(this.config.scanner);
         if (this.config.telegram) {
           telegram.updateConfig(this.config.telegram);
+        }
+        if (this.isRunning) {
+          binanceFutures.startTickerWebSocket(this.config.scanner.dataSource).catch(() => {});
         }
         if (this.config.apiKey && this.config.apiSecret) {
           binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);

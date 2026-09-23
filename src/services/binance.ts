@@ -1087,7 +1087,16 @@ export class BinanceFuturesClient {
           p: item.price,
         }));
       }
-    } catch {}
+    } catch (err: any) {
+      if (err.response) {
+        const status = err.response.status;
+        if (status === 429) {
+          logger.log('WARN', '⚠️ [MARKET DATA] Terkena HTTP 429 Rate Limit (Terlalu banyak request API REST).');
+        } else if (status === 418) {
+          logger.log('ERROR', '❌ [MARKET DATA] IP Terkena Banned Sementara oleh API REST Binance (HTTP 418).');
+        }
+      }
+    }
     return [];
   }
 
