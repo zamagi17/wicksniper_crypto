@@ -175,6 +175,7 @@ export interface EngineStatus {
   cooldownCoins: { symbol: string; until: number }[];
   monitoredCoinsCount?: number;
   ticksPerSecond?: number;
+  marketDataAgeMs?: number;
   leverage?: number;
   marginType?: 'CROSSED' | 'ISOLATED';
 }

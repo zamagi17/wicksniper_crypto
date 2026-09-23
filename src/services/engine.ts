@@ -1887,6 +1887,7 @@ export class WickSniperEngine {
       cooldownCoins: this.scanner.getCooldowns(),
       monitoredCoinsCount: this.scanner.getTotalMonitoredSymbols(),
       ticksPerSecond: this.scanner.getTicksPerSecond(),
+      marketDataAgeMs: this.scanner.getDataAgeMs(),
       leverage: this.config.leverage || 5,
       marginType: this.config.marginType || 'CROSSED',
     };

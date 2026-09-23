@@ -433,7 +433,10 @@ function renderStatus(status) {
   const totalActiveMargin = (status.activePositions || []).reduce((sum, p) => sum + (p.totalMarginUsed || 0), 0);
   document.getElementById('metric-positions-count').innerText = `${status.activePositionsCount} / ${currentConfig?.grid?.maxConcurrentCoins || 2} Koin Aktif ${status.activePositionsCount > 0 ? `($${totalActiveMargin.toFixed(2)})` : ''}`;
   document.getElementById('metric-leverage').innerText = `${status.leverage || 5}x ${status.marginType === 'ISOLATED' ? 'Iso' : 'Cross'}`;
-  document.getElementById('radar-pulse-tag').innerText = `Memindai ${status.monitoredCoinsCount || 0} Koin (${status.ticksPerSecond || 0} tick/s)`;
+  const marketDataAgeMs = Number(status.marketDataAgeMs ?? -1);
+  const marketDataStale = marketDataAgeMs >= 3000 || marketDataAgeMs < 0;
+  const marketDataLabel = marketDataStale ? '⚠️ Data stale' : `${status.ticksPerSecond || 0} tick/s`;
+  document.getElementById('radar-pulse-tag').innerText = `Memindai ${status.monitoredCoinsCount || 0} Koin (${marketDataLabel})`;
   document.getElementById('active-count-tag').innerText = `${status.activePositionsCount} Posisi`;
   
   const activeMarginEl = document.getElementById('active-margin-tag');

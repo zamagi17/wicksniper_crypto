@@ -11,6 +11,7 @@ export class SpikeScanner {
   private tickCount: number = 0;
   private lastTickReset: number = Date.now();
   private ticksPerSecond: number = 0;
+  private lastDataAt: number = 0;
 
   constructor(config: BotConfig['scanner']) {
     this.config = config;
@@ -24,7 +25,11 @@ export class SpikeScanner {
   }
 
   public getTicksPerSecond(): number {
-    return this.ticksPerSecond;
+    return this.lastDataAt > 0 && Date.now() - this.lastDataAt > 3000 ? 0 : this.ticksPerSecond;
+  }
+
+  public getDataAgeMs(): number {
+    return this.lastDataAt > 0 ? Date.now() - this.lastDataAt : -1;
   }
 
   public updateConfig(newConfig: BotConfig['scanner']) {
@@ -90,6 +95,7 @@ export class SpikeScanner {
   private processTickers(tickers: any[]) {
     if (!this.config.enabled) return;
     const now = Date.now();
+    if (tickers.length > 0) this.lastDataAt = now;
     this.tickCount += tickers.length;
     if (now - this.lastTickReset >= 1000) {
       this.ticksPerSecond = this.tickCount;
