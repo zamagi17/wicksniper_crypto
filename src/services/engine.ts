@@ -291,7 +291,7 @@ export class WickSniperEngine {
         if (tickCount % 15 === 0) {
           const weight = binanceFutures.lastUsedWeight;
           if (weight > 0) {
-            const ord10s = binanceFutures.lastOrderCount10s;
+            const ord10s = binanceFutures.getOrderCount10s();
             const pct = Math.round((weight / 2400) * 100);
             const level = pct >= 80 ? 'WARN' : 'INFO';
             logger.log(
@@ -1964,7 +1964,7 @@ export class WickSniperEngine {
       leverage: this.config.leverage || 5,
       marginType: this.config.marginType || 'CROSSED',
       usedWeight1m: binanceFutures.lastUsedWeight,
-      orderCount10s: binanceFutures.lastOrderCount10s,
+      orderCount10s: binanceFutures.getOrderCount10s(),
     };
   }
 

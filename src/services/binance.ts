@@ -41,6 +41,15 @@ export class BinanceFuturesClient {
   public lastUsedWeight: number = 0;
   public lastOrderCount10s: number = 0;
   public lastOrderCount1m: number = 0;
+  public lastOrderCountTs: number = 0;
+
+  public getOrderCount10s(): number {
+    if (Date.now() - this.lastOrderCountTs > 10000) {
+      this.lastOrderCount10s = 0;
+      return 0;
+    }
+    return this.lastOrderCount10s;
+  }
 
   constructor() {
     this.initHttpClient();
@@ -158,6 +167,7 @@ export class BinanceFuturesClient {
           const parsed = parseInt(ord10s, 10);
           if (!isNaN(parsed)) {
             this.lastOrderCount10s = parsed;
+            this.lastOrderCountTs = Date.now();
           }
         }
         const ord1m = response.headers['x-mbx-order-count-1m'];
