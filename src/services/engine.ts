@@ -258,7 +258,7 @@ export class WickSniperEngine {
 
     await binanceFutures.syncTime();
     await binanceFutures.loadExchangeInfo();
-    await binanceFutures.startTickerWebSocket();
+    await binanceFutures.startTickerWebSocket(this.config.scanner.dataSource);
     this.scanner.start();
 
     if (this.config.tradingMode === 'LIVE') {

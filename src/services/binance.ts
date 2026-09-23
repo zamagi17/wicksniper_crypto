@@ -23,6 +23,7 @@ export class BinanceFuturesClient {
   private wsDomainIndex: number = 0;
   private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me', 'fstream.binance.je'];
   private wsUrl: string = `wss://${this.wsDomains[0]}/ws/!ticker@arr`;
+  private currentDataSource: 'WEBSOCKET' | 'POLLING' = 'WEBSOCKET';
   private wsClient: WebSocket | null = null;
   private httpClient: AxiosInstance | null = null;
   private timeOffset: number = 0;
@@ -973,7 +974,26 @@ export class BinanceFuturesClient {
   /**
    * Menghubungkan ke All-Market Ticker WebSocket Stream (!ticker@arr)
    */
-  public async startTickerWebSocket() {
+  public async startTickerWebSocket(dataSource?: 'WEBSOCKET' | 'POLLING') {
+    if (dataSource) this.currentDataSource = dataSource;
+
+    if (this.currentDataSource === 'POLLING') {
+      logger.log('INFO', '✅ Mode POLLING diaktifkan. Menghentikan WebSocket dan beralih ke REST API 500ms.');
+      this.isWsConnected = false;
+      if (this.wsClient) {
+        try {
+          this.wsClient.terminate();
+        } catch {}
+        this.wsClient = null;
+      }
+      if (this.wsReconnectTimer) {
+        clearTimeout(this.wsReconnectTimer);
+        this.wsReconnectTimer = null;
+      }
+      this.startFastTickerStream(500);
+      return;
+    }
+
     if (this.wsClient) {
       try {
         this.wsClient.terminate();
@@ -1071,9 +1091,9 @@ export class BinanceFuturesClient {
     return [];
   }
 
-  public startFastTickerStream() {
-    // Jika WebSocket sudah aktif, jangan jalankan REST polling agar terhindar dari IP Rate Limit (2400 weight/min)
-    if (this.isWsConnected) {
+  public startFastTickerStream(intervalMs: number = 1000) {
+    // Jika WebSocket sudah aktif dan mode bukan POLLING, jangan jalankan REST polling
+    if (this.isWsConnected && this.currentDataSource !== 'POLLING') {
       if (this.fastPollInterval) {
         clearInterval(this.fastPollInterval);
         this.fastPollInterval = null;
@@ -1100,7 +1120,7 @@ export class BinanceFuturesClient {
           listener(tickers);
         }
       }
-    }, 1000);
+    }, intervalMs);
   }
 
   public onTickers(callback: (tickers: any[]) => void) {

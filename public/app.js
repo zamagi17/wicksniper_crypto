@@ -976,6 +976,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-max-coins', cfg.grid?.maxConcurrentCoins || 2);
   setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.1);
   setVal('cfg-cooldown', cfg.scanner?.cooldownMinutes || 20);
+  setVal('cfg-data-source', cfg.scanner?.dataSource || 'WEBSOCKET');
   setVal('cfg-api-key', cfg.apiKey || '');
   setVal('cfg-api-secret', cfg.apiSecret || '');
 
@@ -1024,6 +1025,7 @@ function getSettingsFormData() {
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+      dataSource: getVal('cfg-data-source', 'WEBSOCKET'),
     },
     exit: {
       ...(currentConfig?.exit || {}),

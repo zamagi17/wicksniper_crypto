@@ -16,6 +16,7 @@ export interface BotConfig {
     cooldownMinutes: number;
     whitelistEnabled?: boolean;
     whitelistSymbols?: string[];
+    dataSource?: 'WEBSOCKET' | 'POLLING';
   };
   grid: {
     maxConcurrentCoins: number;

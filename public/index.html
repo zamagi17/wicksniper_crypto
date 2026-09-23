@@ -292,6 +292,17 @@
         </div>
 
         <div class="form-row">
+          <div class="form-group" style="grid-column: span 2;">
+            <label>Sumber Data Live Market (Kill-Switch)</label>
+            <select id="cfg-data-source" class="form-control">
+              <option value="WEBSOCKET">Real-Time WebSocket (Tercepat, latensi milidetik)</option>
+              <option value="POLLING">HTTP Polling (500ms, 100% Anti-Shadowban)</option>
+            </select>
+            <small class="form-hint">Jika IP server Anda terkena shadowban Binance, ubah ke <b>Polling</b> agar bot tetap bisa berjalan lancar tanpa error.</small>
+          </div>
+        </div>
+
+        <div class="form-row">
           <div class="form-group">
             <label>Minimal Spike Lonjakan (%)</label>
             <input type="number" id="cfg-spike-pct" step="0.1" class="form-control" placeholder="2.0">
