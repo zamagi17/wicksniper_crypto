@@ -43,6 +43,14 @@ export class BinanceFuturesClient {
   public lastOrderCount1m: number = 0;
   public lastOrderCountTs: number = 0;
 
+  private userWsClient: WebSocket | null = null;
+  private listenKey: string = '';
+  private listenKeyKeepAliveTimer: NodeJS.Timeout | null = null;
+  private isUserWsConnected: boolean = false;
+  private userWsReconnectTimer: NodeJS.Timeout | null = null;
+  private orderTradeListeners: ((order: any) => void)[] = [];
+  private accountUpdateListeners: ((account: any) => void)[] = [];
+
   public getOrderCount10s(): number {
     if (Date.now() - this.lastOrderCountTs > 10000) {
       this.lastOrderCount10s = 0;
@@ -1197,6 +1205,129 @@ export class BinanceFuturesClient {
 
   public isConnected(): boolean {
     return this.isWsConnected;
+  }
+
+  public async createListenKey(): Promise<string | null> {
+    if (!this.apiKey) return null;
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.post('/fapi/v1/listenKey');
+      if (res.data?.listenKey) {
+        this.listenKey = res.data.listenKey;
+        return this.listenKey;
+      }
+    } catch (err: any) {
+      console.error('Gagal membuat listenKey Binance:', err.response?.data || err.message);
+    }
+    return null;
+  }
+
+  public async keepAliveListenKey(): Promise<boolean> {
+    if (!this.apiKey || !this.listenKey) return false;
+    try {
+      const client = await this.getHttpClient();
+      await client.put('/fapi/v1/listenKey');
+      return true;
+    } catch (err: any) {
+      console.warn('Gagal keep-alive listenKey:', err.response?.data || err.message);
+      return false;
+    }
+  }
+
+  public async closeListenKey(): Promise<void> {
+    if (!this.apiKey || !this.listenKey) return;
+    try {
+      const client = await this.getHttpClient();
+      await client.delete('/fapi/v1/listenKey');
+    } catch {}
+  }
+
+  public async startUserDataStream(): Promise<void> {
+    if (!this.apiKey || !this.apiSecret) return;
+
+    if (this.userWsClient) {
+      try {
+        this.userWsClient.terminate();
+      } catch {}
+      this.userWsClient = null;
+    }
+
+    const key = await this.createListenKey();
+    if (!key) {
+      logger.log('WARN', '⚠️ [USER DATA STREAM] Gagal mendapatkan listenKey. Mencoba lagi dalam 15 detik...');
+      if (this.userWsReconnectTimer) clearTimeout(this.userWsReconnectTimer);
+      this.userWsReconnectTimer = setTimeout(() => this.startUserDataStream(), 15000);
+      return;
+    }
+
+    if (this.listenKeyKeepAliveTimer) clearInterval(this.listenKeyKeepAliveTimer);
+    this.listenKeyKeepAliveTimer = setInterval(async () => {
+      const ok = await this.keepAliveListenKey();
+      if (!ok) {
+        this.startUserDataStream();
+      }
+    }, 30 * 60 * 1000);
+
+    try {
+      const agent = await this.getOrCreateDohAgent();
+      const streamBase = this.isTestnet ? 'stream.binancefuture.com' : 'fstream.binance.com';
+      const userWsUrl = `wss://${streamBase}/ws/${this.listenKey}`;
+
+      this.userWsClient = new WebSocket(userWsUrl, {
+        agent,
+        handshakeTimeout: 10000,
+      } as any);
+
+      this.userWsClient.on('open', () => {
+        this.isUserWsConnected = true;
+        logger.log('SUCCESS', '⚡ [USER DATA STREAM] Terhubung ke Binance Private Stream (Real-Time Order & Position Update Aktif).');
+      });
+
+      this.userWsClient.on('message', (raw: WebSocket.Data) => {
+        try {
+          const data = JSON.parse(raw.toString());
+          if (data.e === 'ORDER_TRADE_UPDATE') {
+            for (const fn of this.orderTradeListeners) {
+              fn(data.o);
+            }
+          } else if (data.e === 'ACCOUNT_UPDATE') {
+            for (const fn of this.accountUpdateListeners) {
+              fn(data.a);
+            }
+          }
+        } catch (err: any) {
+          console.error('Error parse UserDataStream message:', err.message);
+        }
+      });
+
+      this.userWsClient.on('close', (code) => {
+        this.isUserWsConnected = false;
+        console.warn(`[USER DATA STREAM CLOSED] Code: ${code}. Reconnecting in 5s...`);
+        if (this.userWsReconnectTimer) clearTimeout(this.userWsReconnectTimer);
+        this.userWsReconnectTimer = setTimeout(() => this.startUserDataStream(), 5000);
+      });
+
+      this.userWsClient.on('error', (err) => {
+        console.error('[USER DATA STREAM ERROR]:', err.message);
+        this.userWsClient?.terminate();
+      });
+    } catch (e: any) {
+      console.error('Gagal inisialisasi UserDataStream:', e.message);
+      if (this.userWsReconnectTimer) clearTimeout(this.userWsReconnectTimer);
+      this.userWsReconnectTimer = setTimeout(() => this.startUserDataStream(), 10000);
+    }
+  }
+
+  public onOrderTradeUpdate(callback: (order: any) => void) {
+    this.orderTradeListeners.push(callback);
+  }
+
+  public onAccountUpdate(callback: (account: any) => void) {
+    this.accountUpdateListeners.push(callback);
+  }
+
+  public isUserStreamActive(): boolean {
+    return this.isUserWsConnected;
   }
 }
 

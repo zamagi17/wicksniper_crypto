@@ -159,6 +159,7 @@ export class WickSniperEngine {
     this.lastSyncedConfigJson = JSON.stringify(this.config);
     await db.saveConfig(this.config).catch(() => { });
     if (this.config.tradingMode === 'LIVE') {
+      binanceFutures.startUserDataStream().catch(() => {});
       this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => { });
     }
     this.broadcastConfig();
@@ -177,6 +178,12 @@ export class WickSniperEngine {
 
     binanceFutures.onTickers((tickers: any[]) => {
       this.onPriceTick(tickers);
+    });
+
+    binanceFutures.onOrderTradeUpdate((order: any) => {
+      this.handleUserOrderTradeUpdate(order).catch((err: any) => {
+        logger.log('ERROR', `❌ [USER DATA STREAM HANDLER ERROR] ${err?.message || err}`);
+      });
     });
   }
 
@@ -267,14 +274,20 @@ export class WickSniperEngine {
 
     if (this.config.tradingMode === 'LIVE') {
       await binanceFutures.checkPositionMode();
+      await binanceFutures.startUserDataStream().catch((e: any) => {
+        logger.log('WARN', `⚠️ [USER STREAM START FAILED] ${e.message}`);
+      });
       await this.syncLivePositions();
       await this.syncLiveBalance();
     }
 
-    // Heartbeat ticker, time-limit check tiap 1 detik, sync live position tiap 3s, & sinkronisasi DB tiap 5 detik
+    // Heartbeat ticker, time-limit check tiap 1 detik, sync live position tiap 5s, & sinkronisasi DB tiap 5 detik
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+      this.tickInterval = null;
+    }
     let tickCount = 0;
-    if (!this.tickInterval) {
-      this.tickInterval = setInterval(async () => {
+    this.tickInterval = setInterval(async () => {
         this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
         tickCount++;
@@ -316,7 +329,6 @@ export class WickSniperEngine {
           this.tickInterval = null;
         }
       }, 1000);
-    }
   }
 
   public stop() {
@@ -619,8 +631,14 @@ export class WickSniperEngine {
         );
       }
 
-      // Siapkan payload batch order limit layer 1 ke atas
-      const batchPayload = layers.slice(1).map((l) => ({
+      // SMART GRID QUEUE: Hanya pasang maksimal 2 layer teratas di Binance (QUEUE_DEPTH = 2).
+      // Sisa layer (3, 4, ...) disimpan di antrean memori bot dan baru dipasang jika layer sebelumnya terisi.
+      // Ini mencegah bencana TAKEUSDT di mana layer 3, 4, 5 terisi setelah Take Profit tereksekusi.
+      const QUEUE_DEPTH = 2;
+      const initialActiveLayers = layers.slice(1, 1 + QUEUE_DEPTH);
+      const queuedLayers = layers.slice(1 + QUEUE_DEPTH);
+
+      const batchPayload = initialActiveLayers.map((l) => ({
         symbol,
         side: 'SELL',
         type: 'LIMIT',
@@ -636,7 +654,7 @@ export class WickSniperEngine {
       const tpPromise = this.syncLiveTakeProfitOrder(initialPos).catch(() => { });
 
       if (batchPayload.length > 0) {
-        for (const layer of layers.slice(1)) {
+        for (const layer of initialActiveLayers) {
           this.auditTradeLifecycle(symbol, 'GRID_LAYER_PLACED', {
             layerIndex: layer.layerIndex,
             side: 'SELL',
@@ -651,14 +669,15 @@ export class WickSniperEngine {
           let failedCount = 0;
           let failureReason = '';
 
-          for (let i = 0; i < batchRes.length && (i + 1) < layers.length; i++) {
+          for (let i = 0; i < batchRes.length && i < initialActiveLayers.length; i++) {
             const item = batchRes[i];
+            const targetLayer = initialActiveLayers[i];
             if (item?.orderId) {
-              layers[i + 1].orderId = String(item.orderId);
+              targetLayer.orderId = String(item.orderId);
               placedCount++;
             } else {
               failedCount++;
-              layers[i + 1].status = 'CANCELLED';
+              targetLayer.status = 'CANCELLED';
               const code = item?.code || item?.error?.code;
               const msg = item?.msg || item?.error?.msg || (typeof item === 'string' ? item : '');
               if (!failureReason && (code || msg)) {
@@ -667,7 +686,15 @@ export class WickSniperEngine {
             }
           }
 
-          const totalRequested = layers.length - 1;
+          if (queuedLayers.length > 0) {
+            logger.log(
+              'INFO',
+              `⏳ [SMART GRID QUEUE] ${symbol}: ${placedCount} order limit terpasang di Binance (Layer #1..#${initialActiveLayers.length}). ${queuedLayers.length} layer berikutnya (Layer #${initialActiveLayers.length + 1}..#${layers.length - 1}) disimpan dalam antrean bot.`,
+              symbol
+            );
+          }
+
+          const totalRequested = initialActiveLayers.length;
           if (failedCount > 0 || placedCount < totalRequested) {
             const isMarginError = failureReason.toLowerCase().includes('margin') || failureReason.includes('-2019');
             const reasonText = isMarginError
@@ -691,7 +718,7 @@ export class WickSniperEngine {
           logger.log('ERROR', `❌ [BATCH GRID ERROR] ${symbol}: ${err.message}`, symbol);
           telegram.notifyMarginInsufficient(symbol, 'Penempatan Jaring Averaging (Layer 1+)', {
             placedLayers: 0,
-            totalLayers: layers.length - 1,
+            totalLayers: initialActiveLayers.length,
             reason: err.message,
             availableBalance: this.liveAvailableBalance > 0 ? this.liveAvailableBalance : undefined,
           });
@@ -1072,6 +1099,199 @@ export class WickSniperEngine {
     );
     this.broadcastStatus();
     db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+  }
+
+  /**
+   * Smart Grid Queue: Menempatkan layer berikutnya dari antrean jika order limit SELL di Binance < QUEUE_DEPTH
+   */
+  private async deployNextGridLayerInQueue(pos: ActivePosition) {
+    if (this.config.tradingMode !== 'LIVE' || !pos.layers) return;
+    if (pos.status === 'CLOSING' || pos.status === 'CLOSED') return;
+
+    const QUEUE_DEPTH = 2;
+    // Hitung berapa layer SELL yang saat ini berstatus PENDING dan aktif memiliki orderId di Binance
+    const activeBinanceLayers = pos.layers.filter(
+      (l) => l.status === 'PENDING' && l.orderId && l.layerIndex > 0
+    );
+
+    if (activeBinanceLayers.length >= QUEUE_DEPTH) {
+      return; // Sudah cukup 2 layer aktif di Binance
+    }
+
+    // Ambil layer PENDING berikutnya yang belum dikirim ke Binance (orderId masih kosong)
+    const nextQueuedLayer = pos.layers.find(
+      (l) => l.status === 'PENDING' && !l.orderId && l.layerIndex > 0
+    );
+
+    if (!nextQueuedLayer) {
+      return; // Semua layer sudah terpasang atau terisi
+    }
+
+    logger.log(
+      'INFO',
+      `🚀 [SMART GRID QUEUE] ${pos.symbol}: Memajukan Layer #${nextQueuedLayer.layerIndex} dari antrean ke Binance Limit Order @ $${nextQueuedLayer.price.toFixed(6)} (Qty: ${nextQueuedLayer.qty})`,
+      pos.symbol
+    );
+
+    try {
+      const res = await binanceFutures.placeLimitOrder(
+        pos.symbol,
+        'SELL',
+        nextQueuedLayer.qty,
+        nextQueuedLayer.price,
+        false
+      );
+
+      if (res?.orderId) {
+        nextQueuedLayer.orderId = String(res.orderId);
+        this.auditTradeLifecycle(pos.symbol, 'GRID_LAYER_PLACED', {
+          layerIndex: nextQueuedLayer.layerIndex,
+          side: 'SELL',
+          price: nextQueuedLayer.price,
+          qty: nextQueuedLayer.qty,
+          orderId: nextQueuedLayer.orderId,
+          status: 'ACTIVE_FROM_QUEUE',
+        });
+        logger.log(
+          'SUCCESS',
+          `✅ [GRID QUEUE AKTIF] ${pos.symbol}: Layer #${nextQueuedLayer.layerIndex} berhasil dipasang di Binance (Order ID: #${nextQueuedLayer.orderId})`,
+          pos.symbol
+        );
+      } else {
+        const errMsg = res?.msg || res?.message || JSON.stringify(res);
+        logger.log(
+          'WARN',
+          `⚠️ [GRID QUEUE GAGAL] ${pos.symbol}: Gagal memasang Layer #${nextQueuedLayer.layerIndex}. Alasan: ${errMsg}`,
+          pos.symbol
+        );
+      }
+    } catch (e: any) {
+      logger.log('ERROR', `❌ [GRID QUEUE ERROR] ${pos.symbol} Layer #${nextQueuedLayer.layerIndex}: ${e.message}`, pos.symbol);
+    }
+  }
+
+  /**
+   * Menangani event ORDER_TRADE_UPDATE seketika (<50ms) dari Private User Data Stream Binance
+   * 1. Menghabisi semua order grid tersisa seketika saat Take Profit terisi (Mencegah bencana TAKEUSDT)
+   * 2. Menutup posisi seketika dan mencatat profit riil
+   * 3. Memperbarui ukuran Take Profit dan memajukan antrean Smart Grid Queue saat layer limit terisi
+   */
+  private async handleUserOrderTradeUpdate(order: any) {
+    if (!order || !order.s) return;
+    const symbol = order.s;
+    const pos = this.activePositions.get(symbol);
+    if (!pos) return;
+    if (pos.status === 'CLOSING' || pos.status === 'CLOSED') return;
+
+    const orderId = String(order.i);
+    const side = order.S; // 'BUY' | 'SELL'
+    const status = order.X; // 'FILLED' | 'PARTIALLY_FILLED' | 'CANCELED' | 'EXPIRED' | 'NEW'
+    const isReduceOnly = Boolean(order.R);
+    const fillPrice = parseFloat(order.ap || order.L || '0');
+    const filledQty = parseFloat(order.z || order.l || '0');
+    const realizedProfit = parseFloat(order.rp || '0');
+
+    // 1. ORDER BUY TERISI: TAKE PROFIT
+    if (side === 'BUY' && (status === 'FILLED' || status === 'PARTIALLY_FILLED')) {
+      const isTpMatch = (pos.tpOrderId && String(pos.tpOrderId) === orderId) ||
+                        (pos.tp2OrderId && String(pos.tp2OrderId) === orderId) ||
+                        isReduceOnly;
+
+      if (isTpMatch) {
+        if (status === 'FILLED') {
+          // Kasus Partial TP (Tahap 1 selesai)
+          if (this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.tpOrderId && String(pos.tpOrderId) === orderId) {
+            logger.log(
+              'SUCCESS',
+              `⚡ [USER STREAM] TP1 terisi instan untuk ${symbol} @ $${fillPrice}! Membatalkan antrean jaring & mengaktifkan BEP...`,
+              symbol
+            );
+            await binanceFutures.cancelAllOrders(symbol).catch(() => {});
+            const livePos = await binanceFutures.getOpenPosition(symbol).catch(() => null);
+            if (livePos) {
+              await this.handleLivePartialTpHit(pos, livePos);
+            }
+            return;
+          }
+
+          // Full Take Profit Hit!
+          logger.log(
+            'SUCCESS',
+            `🎯 [USER STREAM INSTANT TP] ${symbol} Take Profit FILLED @ $${fillPrice}! Realized PnL: +$${realizedProfit.toFixed(4)}. Seketika membatalkan SELURUH antrean order di Binance!`,
+            symbol
+          );
+
+          // KRITIKAL: Batalkan seluruh order sisa (<30ms) agar layer tidak terisi jika ada spike balik
+          await binanceFutures.cancelAllOrders(symbol).catch(() => {});
+
+          // Tandai seluruh layer pending tersisa sebagai CANCELLED
+          if (pos.layers) {
+            for (const l of pos.layers) {
+              if (l.status === 'PENDING') l.status = 'CANCELLED';
+            }
+          }
+
+          // Tutup trade secara resmi dan catat realized profit
+          await this.closePosition(pos, 'TAKE_PROFIT', fillPrice > 0 ? fillPrice : pos.targetTpPrice);
+          return;
+        }
+      }
+    }
+
+    // 2. ORDER SELL TERISI: GRID LAYER TERISI
+    if (side === 'SELL' && status === 'FILLED') {
+      let layer = pos.layers.find((l) => l.orderId && String(l.orderId) === orderId);
+      if (!layer) {
+        layer = pos.layers.find((l) => l.status === 'PENDING' && fillPrice > 0 && Math.abs(l.price - fillPrice) / fillPrice < 0.005);
+      }
+
+      if (layer && layer.status === 'PENDING') {
+        layer.status = 'FILLED';
+        layer.filledAt = Date.now();
+        if (!layer.orderId) layer.orderId = orderId;
+
+        logger.log(
+          'SNIPER',
+          `🕸️ [USER STREAM LAYER FILLED] ${symbol} Layer #${layer.layerIndex} terisi instan @ $${fillPrice}! Total Qty bertambah...`,
+          symbol
+        );
+
+        // Ambil posisi riil untuk sinkronisasi akurat volume dan break-even price
+        const livePos = await binanceFutures.getOpenPosition(symbol).catch(() => null);
+        if (livePos && Math.abs(livePos.positionAmt) > 0) {
+          pos.totalQty = Math.abs(livePos.positionAmt);
+          if (livePos.entryPrice > 0) {
+            pos.avgEntryPrice = livePos.entryPrice;
+          }
+          if (livePos.breakEvenPrice && livePos.breakEvenPrice > 0) {
+            pos.breakEvenPrice = livePos.breakEvenPrice;
+          }
+          const exitCfg = this.config.exit;
+          pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+          pos.targetTp2Price = pos.avgEntryPrice * (1 - (exitCfg.takeProfitPct * 2) / 100);
+          if (!pos.partialTpDone) {
+            pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+          }
+          pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
+
+          this.updateTrailingSL(pos);
+
+          // Update order Limit TP di Binance dengan volume baru
+          await this.syncLiveTakeProfitOrder(pos);
+
+          // Pasang layer berikutnya dari Smart Grid Queue
+          await this.deployNextGridLayerInQueue(pos);
+        }
+      }
+    }
+
+    // 3. ORDER SELL DIBATALKAN / EXPIRED
+    if (side === 'SELL' && (status === 'CANCELED' || status === 'EXPIRED')) {
+      const layer = pos.layers.find((l) => l.orderId && String(l.orderId) === orderId);
+      if (layer && layer.status === 'PENDING') {
+        layer.status = 'CANCELLED';
+      }
+    }
   }
 
   /**
@@ -1787,6 +2007,7 @@ export class WickSniperEngine {
                   // Perbarui Limit Take Profit order di Binance jika kuantitas bertambah
                   if (liveQty > oldQty) {
                     await this.syncLiveTakeProfitOrder(pos);
+                    await this.deployNextGridLayerInQueue(pos);
                   }
                 }
               }
@@ -2021,6 +2242,7 @@ export class WickSniperEngine {
           binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
         }
         if (this.config.tradingMode === 'LIVE') {
+          binanceFutures.startUserDataStream().catch(() => {});
           this.syncLiveBalance().catch(() => { });
         }
         if (

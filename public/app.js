@@ -251,6 +251,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function connectWebSocket() {
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  if (socket) {
+    try { socket.close(); } catch (e) {}
+    socket = null;
+  }
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${location.host}`;
   socket = new WebSocket(wsUrl);
@@ -858,8 +865,19 @@ function formatLogMessage(message) {
 }
 
 function appendLog(log) {
+  if (!log) return;
   const terminal = document.getElementById('terminal-logs');
+  if (!terminal) return;
+
+  // Cegah duplikasi entri log yang sama di DOM UI
+  if (log.id && document.getElementById(`log-${log.id}`)) {
+    return;
+  }
+
   const div = document.createElement('div');
+  if (log.id) {
+    div.id = `log-${log.id}`;
+  }
   div.className = `log-entry ${log.level.toLowerCase()}`;
   div.innerText = `[${log.timestamp}] [${log.level}] ${formatLogMessage(log.message)}`;
   terminal.insertBefore(div, terminal.firstChild);
