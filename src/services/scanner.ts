@@ -129,9 +129,23 @@ export class SpikeScanner {
 
       history.push({ symbol, price: currentPrice, time: now });
 
-      // Buang data yang lebih tua dari lookbackMs + 10s
-      while (history.length > 0 && history[0].time < now - lookbackMs - 10000) {
-        history.shift();
+      // [OPTIMIZATION] Bulk slice data lama untuk menghindari Event Loop Lag (O(N) shift di-loop 2400x/dtk)
+      const cutoffTime = now - lookbackMs - 10000;
+      if (history.length > 0 && history[0].time < cutoffTime) {
+        let spliceIndex = 0;
+        for (let i = 0; i < history.length; i++) {
+          if (history[i].time >= cutoffTime) {
+            spliceIndex = i;
+            break;
+          }
+        }
+        if (spliceIndex > 0) {
+          history = history.slice(spliceIndex);
+          this.priceHistory.set(symbol, history);
+        } else if (history[history.length - 1].time < cutoffTime) {
+          history = [];
+          this.priceHistory.set(symbol, history);
+        }
       }
 
       // Cari harga tertua dalam jendela lookback

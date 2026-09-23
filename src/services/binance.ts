@@ -19,8 +19,10 @@ export class BinanceFuturesClient {
   private apiKey: string = '';
   private apiSecret: string = '';
   private isTestnet: boolean = false;
-  private wsUrl: string = 'wss://fstream.binance.com/ws/!ticker@arr';
   private restBaseUrl: string = 'https://fapi.binance.com';
+  private wsDomainIndex: number = 0;
+  private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me', 'fstream.binance.je'];
+  private wsUrl: string = `wss://${this.wsDomains[0]}/ws/!ticker@arr`;
   private wsClient: WebSocket | null = null;
   private httpClient: AxiosInstance | null = null;
   private timeOffset: number = 0;
@@ -50,7 +52,8 @@ export class BinanceFuturesClient {
       this.wsUrl = 'wss://stream.binancefuture.com/ws/!ticker@arr';
     } else {
       this.restBaseUrl = 'https://fapi.binance.com';
-      this.wsUrl = 'wss://fstream.binance.com/ws/!ticker@arr';
+      this.wsDomainIndex = 0;
+      this.wsUrl = `wss://${this.wsDomains[this.wsDomainIndex]}/ws/!ticker@arr`;
     }
 
     if (this.httpClient) {
@@ -544,7 +547,10 @@ export class BinanceFuturesClient {
         message: `Koneksi berhasil! Latensi: ${latencyMs}ms | Saldo Futures Tersedia: $${availableUsdt.toFixed(2)} USDT | Mode: ${this.isDualSidePosition ? 'Hedge Mode' : 'One-Way Mode'}`,
       };
     } catch (err: any) {
-      const binanceMsg = err.response?.data?.msg || err.message;
+      let binanceMsg = err.response?.data?.msg || err.message;
+      if (err.response?.status === 401 && (binanceMsg.includes('Invalid API-key, IP') || binanceMsg.includes('IP') || binanceMsg.includes('API-key'))) {
+        binanceMsg = 'IP Tidak Terdaftar di Whitelist Binance (Atau API Key Salah). Pastikan IP Server Oracle Anda sudah didaftarkan pada API Key Binance Anda.';
+      }
       return {
         success: false,
         latencyMs: 0,
@@ -954,6 +960,17 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Auto-Rotate WebSocket Domain to bypass Cloudflare shadowbans
+   */
+  private rotateWsDomain() {
+    if (this.isTestnet) return;
+    this.wsDomainIndex = (this.wsDomainIndex + 1) % this.wsDomains.length;
+    const newDomain = this.wsDomains[this.wsDomainIndex];
+    this.wsUrl = `wss://${newDomain}/ws/!ticker@arr`;
+    logger.log('INFO', `🔄 [AUTO-ROTATION] Memutar URL WebSocket ke domain cadangan: ${newDomain}`);
+  }
+
+  /**
    * Menghubungkan ke All-Market Ticker WebSocket Stream (!ticker@arr)
    */
   public async startTickerWebSocket() {
@@ -1025,6 +1042,7 @@ export class BinanceFuturesClient {
           logger.log('WARN', '⚠️ [MARKET DATA] WebSocket diam >5 detik. Fallback polling 1 detik diaktifkan.');
           this.isWsConnected = false;
           this.startFastTickerStream();
+          this.rotateWsDomain();
           this.wsClient?.terminate();
         }
       }, 2000);
