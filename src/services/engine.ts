@@ -30,6 +30,7 @@ export class WickSniperEngine {
   private realBalance: number = 0;
   private liveAvailableBalance: number = 0;
   private lastWeightWarnAt: number = 0;
+  private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
 
   constructor(configPath: string) {
     this.configPath = configPath;
@@ -104,6 +105,9 @@ export class WickSniperEngine {
         hardStopCooldownMinutes: 180,
         partialTpEnabled: false,
         partialTpRatio: 0.5,
+        extendHoldOnRedCandleEnabled: true,
+        extendHoldSeconds: 30,
+        maxHoldExtensions: 6,
       },
       paperTrading: {
         initialVirtualBalance: 245.0,
@@ -319,7 +323,7 @@ export class WickSniperEngine {
     }
     let tickCount = 0;
     this.tickInterval = setInterval(async () => {
-        this.checkTimeLimitsAndTrailing();
+        await this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
         tickCount++;
         // Relaksasi interval sync posisi dan balance ke 5 detik (dari 3 detik) untuk menghemat kuota REST
@@ -2071,25 +2075,107 @@ export class WickSniperEngine {
       this.broadcastStatus();
     } finally {
       this.closingSymbols.delete(pos.symbol);
+      this.candle1mCache.delete(pos.symbol);
     }
   }
 
   /**
-   * Pengecekan batas waktu hold maksimal (Time-limit exit)
+   * Cek apakah candle 1 menit saat ini berwarna MERAH (bearish / harga sedang turun).
+   * Menggunakan caching cerdas berbasis openTime candle untuk menghemat kuota REST API.
    */
-  private checkTimeLimitsAndTrailing() {
+  private async isCurrent1mCandleBearish(symbol: string, currentPrice: number): Promise<boolean> {
+    const now = Date.now();
+    let cached = this.candle1mCache.get(symbol);
+
+    // Refresh jika cache belum ada atau candle 1m sudah berganti menit (openTime + 60s <= now)
+    if (!cached || now >= cached.openTime + 60_000 || now - cached.fetchedAt > 60_000) {
+      try {
+        const client = await binanceFutures.getHttpClient();
+        const res = await client.get('/fapi/v1/klines', {
+          params: { symbol, interval: '1m', limit: 2 },
+          timeout: 1000,
+        });
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          const currentCandle = res.data[res.data.length - 1];
+          const openTime = currentCandle[0];
+          const open = parseFloat(currentCandle[1]);
+          cached = { open, openTime, fetchedAt: now };
+          this.candle1mCache.set(symbol, cached);
+        }
+      } catch (e: any) {
+        logger.log('WARN', `⚠️ [CANDLE 1M CHECK] Gagal mengambil kline 1m ${symbol}: ${e.message}`, symbol);
+      }
+    }
+
+    if (!cached || cached.open <= 0) {
+      return false;
+    }
+
+    // Untuk posisi SHORT: Candle 1m MERAH jika harga saat ini lebih rendah dari harga Open candle berjalan
+    return currentPrice < cached.open;
+  }
+
+  /**
+   * Pengecekan batas waktu hold maksimal (Time-limit exit)
+   * Dilengkapi fitur perpanjangan dinamis saat candle 1m sedang merah (bearish)
+   */
+  private async checkTimeLimitsAndTrailing() {
     const maxHoldMs = (this.config.exit.maxHoldMinutes || 10) * 60 * 1000;
     const now = Date.now();
+    const extendEnabled = this.config.exit.extendHoldOnRedCandleEnabled ?? true;
+    const extendSec = this.config.exit.extendHoldSeconds || 30;
+    const maxExtensions = this.config.exit.maxHoldExtensions || 6;
 
     for (const pos of this.activePositions.values()) {
-      const holdDeadlineAt = pos.openedAt + maxHoldMs;
+      if (pos.status !== 'SNIPING') continue;
+
+      const totalAllowedMs = maxHoldMs + (pos.extendedHoldMs || 0);
+      const holdDeadlineAt = pos.openedAt + totalAllowedMs;
       const holdRemainingMs = Math.max(0, holdDeadlineAt - now);
       pos.holdDeadlineAt = holdDeadlineAt;
       pos.holdRemainingSeconds = Math.ceil(holdRemainingMs / 1000);
-      pos.holdAction = pos.currentPrice >= pos.avgEntryPrice ? 'CLOSE_NOW' : 'WATCH';
 
-      if (now - pos.openedAt >= maxHoldMs && pos.status === 'SNIPING') {
-        logger.log('WARN', `⏰ [TIME LIMIT] ${pos.symbol} telah ditahan lebih dari ${this.config.exit.maxHoldMinutes} menit. Menutup posisi secara paksa...`, pos.symbol);
+      // Evaluasi perpanjangan jika sisa waktu <= extendSec (misal 30 detik) dan limit perpanjangan belum habis
+      if (extendEnabled && pos.holdRemainingSeconds <= extendSec && (pos.extensionCount || 0) < maxExtensions) {
+        // Guard rolling window: hanya evaluasi 1 kali per siklus perpanjangan
+        const minGapMs = Math.max(10_000, (extendSec - 5) * 1000);
+        if (!pos.lastExtensionAt || now - pos.lastExtensionAt >= minGapMs) {
+          const isBearish = await this.isCurrent1mCandleBearish(pos.symbol, pos.currentPrice);
+          pos.candle1mStatus = isBearish ? 'RED' : 'GREEN';
+
+          if (isBearish) {
+            pos.extendedHoldMs = (pos.extendedHoldMs || 0) + extendSec * 1000;
+            pos.extensionCount = (pos.extensionCount || 0) + 1;
+            pos.lastExtensionAt = now;
+
+            const updatedTotalAllowed = maxHoldMs + pos.extendedHoldMs;
+            pos.holdDeadlineAt = pos.openedAt + updatedTotalAllowed;
+            pos.holdRemainingSeconds = Math.ceil(Math.max(0, pos.holdDeadlineAt - now) / 1000);
+
+            logger.log(
+              'INFO',
+              `⏳ [HOLD EXTENDED] ${pos.symbol}: Candle 1m MERAH (Harga $${pos.currentPrice.toFixed(4)} sedang turun). Menambah waktu hold +${extendSec}s (Perpanjangan ke-${pos.extensionCount}/${maxExtensions}). Sisa waktu baru: ${pos.holdRemainingSeconds}s`,
+              pos.symbol
+            );
+          }
+        }
+      }
+
+      // Tentukan status holdAction untuk visualisasi dashboard
+      if (pos.extensionCount && pos.extensionCount > 0) {
+        pos.holdAction = pos.candle1mStatus === 'RED' ? 'WATCH' : (pos.currentPrice >= pos.avgEntryPrice ? 'CLOSE_NOW' : 'WATCH');
+      } else {
+        pos.holdAction = pos.currentPrice >= pos.avgEntryPrice ? 'CLOSE_NOW' : 'WATCH';
+      }
+
+      // Jika waktu benar-benar telah habis
+      if (now - pos.openedAt >= totalAllowedMs) {
+        const extraNote = pos.extensionCount ? ` (setelah ${pos.extensionCount}x perpanjangan)` : '';
+        logger.log(
+          'WARN',
+          `⏰ [TIME LIMIT] ${pos.symbol} telah ditahan lebih dari ${this.config.exit.maxHoldMinutes} menit${extraNote}. Menutup posisi secara paksa...`,
+          pos.symbol
+        );
         this.closePosition(pos, 'TIME_LIMIT_EXIT', pos.currentPrice);
       }
     }

@@ -511,8 +511,17 @@ function renderActivePositions(positions) {
       const remainingMinutes = Math.floor(remainingSeconds / 60);
       const remainingSecs = remainingSeconds % 60;
       const holdCountdown = `${String(remainingMinutes).padStart(2, '0')}:${String(remainingSecs).padStart(2, '0')}`;
-      const holdAction = pos.holdAction === 'CLOSE_NOW' ? '⚠️ Jangan perpanjang' : '👀 Masih bisa dipantau';
-      const holdClass = pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
+      let holdAction = pos.holdAction === 'CLOSE_NOW' ? '⚠️ Jangan perpanjang' : '👀 Masih bisa dipantau';
+      if (pos.extensionCount && pos.extensionCount > 0) {
+        const extSec = currentConfig?.exit?.extendHoldSeconds || 30;
+        const maxExt = currentConfig?.exit?.maxHoldExtensions || 6;
+        holdAction = `🔄 Diperpanjang +${extSec * pos.extensionCount}s (${pos.extensionCount}/${maxExt})`;
+      } else if (currentConfig?.exit?.extendHoldOnRedCandleEnabled && remainingSeconds <= (currentConfig?.exit?.extendHoldSeconds || 30)) {
+        holdAction = pos.candle1mStatus === 'RED' ? '📉 Candle 1m Merah (Siap perpanjang)' : '⏳ Pantau 30s terakhir';
+      }
+      const holdClass = pos.extensionCount && pos.extensionCount > 0
+        ? 'text-green'
+        : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
 
       const layersHtml = (pos.layers || [])
         .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${l.price.toFixed(4)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
@@ -978,6 +987,15 @@ function populateSettingsForm(cfg) {
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
+
+  // Perpanjangan Waktu Hold saat Candle 1m Merah
+  const erhCheckbox = document.getElementById('cfg-extend-hold-red-enabled');
+  if (erhCheckbox) {
+    erhCheckbox.checked = cfg.exit?.extendHoldOnRedCandleEnabled !== false;
+    toggleExtendHoldRedInput();
+  }
+  setVal('cfg-extend-hold-seconds', cfg.exit?.extendHoldSeconds || 30);
+  setVal('cfg-extend-hold-max-extensions', cfg.exit?.maxHoldExtensions || 6);
   const brCheckbox = document.getElementById('cfg-bottom-rejection-enabled');
   if (brCheckbox) {
     brCheckbox.checked = !!cfg.scanner?.skipBottomRejectionEnabled;
@@ -1099,6 +1117,9 @@ function getSettingsFormData() {
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
       trailingTpEnabled: !!document.getElementById('cfg-trailing-tp-enabled')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-trailing-tp-callback', '0.4')) || 0.4,
+      extendHoldOnRedCandleEnabled: !!document.getElementById('cfg-extend-hold-red-enabled')?.checked,
+      extendHoldSeconds: parseInt(getVal('cfg-extend-hold-seconds', '30'), 10) || 30,
+      maxHoldExtensions: parseInt(getVal('cfg-extend-hold-max-extensions', '6'), 10) || 6,
     },
     grid: {
       ...(currentConfig?.grid || {}),
@@ -1332,6 +1353,15 @@ function toggleBottomRejectionInput() {
   }
 }
 window.toggleBottomRejectionInput = toggleBottomRejectionInput;
+
+function toggleExtendHoldRedInput() {
+  const checkbox = document.getElementById('cfg-extend-hold-red-enabled');
+  const group = document.getElementById('cfg-extend-hold-params');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleExtendHoldRedInput = toggleExtendHoldRedInput;
 
 function toggleTrailingTpInput() {
   const checkbox = document.getElementById('cfg-trailing-tp-enabled');

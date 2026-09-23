@@ -46,6 +46,9 @@ export interface BotConfig {
     hardStopCooldownMinutes?: number;
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)
+    extendHoldOnRedCandleEnabled?: boolean;
+    extendHoldSeconds?: number;
+    maxHoldExtensions?: number;
   };
   paperTrading: {
     initialVirtualBalance: number;
@@ -111,6 +114,10 @@ export interface ActivePosition {
   holdDeadlineAt?: number;
   holdRemainingSeconds?: number;
   holdAction?: 'WATCH' | 'CLOSE_NOW';
+  extendedHoldMs?: number;
+  extensionCount?: number;
+  lastExtensionAt?: number;
+  candle1mStatus?: 'RED' | 'GREEN' | 'UNKNOWN';
   targetTpPrice: number;
   targetTp2Price?: number;
   hardSlPrice: number;

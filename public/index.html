@@ -347,6 +347,29 @@
           </div>
         </div>
 
+        <!-- PERPANJANGAN HOLD DINAMIS SAAT CANDLE 1M MERAH -->
+        <div class="form-row" style="background: rgba(48, 209, 88, 0.03); border: 1px dashed rgba(48, 209, 88, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-green);">
+              <input type="checkbox" id="cfg-extend-hold-red-enabled" onchange="toggleExtendHoldRedInput()" style="width: 16px; height: 16px; accent-color: var(--color-green);">
+              ⏳ Perpanjang Waktu Hold jika Candle 1m Merah (Bearish)
+            </label>
+            <small class="form-hint">Ketika sisa waktu hold tersisa &le; 30 detik dan candle 1m sedang merah (harga sedang turun menuju TP), tambahkan waktu ekstra agar posisi SHORT tidak terputus prematur di tengah penurunan harga.</small>
+          </div>
+          <div id="cfg-extend-hold-params" style="display: none; grid-column: span 2; gap: 12px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1;">
+              <label>Durasi Tambahan (Detik)</label>
+              <input type="number" id="cfg-extend-hold-seconds" min="10" max="300" step="5" class="form-control" placeholder="30">
+              <small class="form-hint">Default: 30 detik per siklus perpanjangan.</small>
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label>Batas Maksimal Perpanjangan (Kali)</label>
+              <input type="number" id="cfg-extend-hold-max-extensions" min="1" max="30" step="1" class="form-control" placeholder="6">
+              <small class="form-hint">Default: 6x (maksimal tambahan +3 menit untuk mencegah infinite hold).</small>
+            </div>
+          </div>
+        </div>
+
         <div class="form-row" style="background: rgba(255, 59, 48, 0.03); border: 1px dashed rgba(255, 59, 48, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-red);">
