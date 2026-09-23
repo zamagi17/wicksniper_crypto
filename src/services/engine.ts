@@ -1317,6 +1317,10 @@ export class WickSniperEngine {
       let closeResOrderId: string | undefined = undefined;
 
       if (this.config.tradingMode === 'LIVE') {
+        // 1. Batalkan semua antrean order (TP & pending grid layers) terlebih dahulu
+        await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
+
+        // 2. Ambil posisi riil di Binance setelah order dibatalkan untuk menghindari race condition
         let realPos: any = null;
         try {
           realPos = await binanceFutures.getOpenPosition(pos.symbol);
@@ -1324,45 +1328,56 @@ export class WickSniperEngine {
           console.warn(`[closePosition] Gagal cek posisi riil ${pos.symbol}:`, e.message);
         }
 
+        const isPositionAlreadyClosed = !realPos || Math.abs(realPos.positionAmt) === 0;
+        const binanceAmt = realPos ? Math.abs(realPos.positionAmt) : 0;
+        let closeQty = binanceAmt > 0 ? binanceAmt : pos.totalQty;
+
+        // Anti-Orphan Sync: Jika ada layer baru yang terisi saat harga spike, sinkronkan totalQty memori ke riil Binance
+        if (binanceAmt > 0 && Math.abs(binanceAmt - pos.totalQty) > 0.000001) {
+          logger.log(
+            'WARN',
+            `🔄 [ANTI-ORPHAN SYNC] ${pos.symbol}: Sinkronisasi qty closing dari memori (${pos.totalQty}) ke riil Binance (${binanceAmt}) krn race-condition layer fill saat close/SL.`,
+            pos.symbol
+          );
+          pos.totalQty = binanceAmt;
+          if (realPos.entryPrice && realPos.entryPrice > 0) {
+            pos.avgEntryPrice = realPos.entryPrice;
+            pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
+          }
+        }
+
         this.auditTradeLifecycle(pos.symbol, 'FULL_CLOSE_REQUESTED', {
           side: 'BUY',
-          qty: realPos ? Math.abs(realPos.positionAmt) : pos.totalQty,
+          qty: closeQty,
           reason,
           closePrice,
           status: 'SENT',
         });
 
-        const isPositionAlreadyClosed = !realPos || Math.abs(realPos.positionAmt) === 0;
-
-        await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
-
         let fillExitPrice = 0;
         let execQty = 0;
 
-        if (!isPositionAlreadyClosed) {
-          const closeQty = Math.min(Math.abs(realPos.positionAmt), pos.totalQty || Math.abs(realPos.positionAmt));
-          if (closeQty > 0) {
-            this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_REQUESTED', {
-              side: 'BUY',
-              qty: closeQty,
-              reason,
-              closePrice,
-              status: 'SENT',
-            });
-            const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
-            if (closeRes?.orderId) {
-              closeResOrderId = String(closeRes.orderId);
-            }
-            execQty = parseFloat(closeRes?.executedQty || '0');
-            const cumQuote = parseFloat(closeRes?.cumQuote || '0');
-            fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
-            if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
-              fillExitPrice = cumQuote / execQty;
-            }
+        if (!isPositionAlreadyClosed && closeQty > 0) {
+          this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_REQUESTED', {
+            side: 'BUY',
+            qty: closeQty,
+            reason,
+            closePrice,
+            status: 'SENT',
+          });
+          const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+          if (closeRes?.orderId) {
+            closeResOrderId = String(closeRes.orderId);
+          }
+          execQty = parseFloat(closeRes?.executedQty || '0');
+          const cumQuote = parseFloat(closeRes?.cumQuote || '0');
+          fillExitPrice = parseFloat(closeRes?.avgPrice || '0');
+          if ((!fillExitPrice || fillExitPrice <= 0) && execQty > 0 && cumQuote > 0) {
+            fillExitPrice = cumQuote / execQty;
+          }
 
-            if (fillExitPrice > 0) {
-              actualExitPrice = fillExitPrice;
-            }
+          if (fillExitPrice > 0) {
+            actualExitPrice = fillExitPrice;
           }
         }
 
@@ -1396,15 +1411,44 @@ export class WickSniperEngine {
             confirmedClose = true;
           }
 
-          const realPosAfterClose = await binanceFutures.getOpenPosition(pos.symbol);
+          let realPosAfterClose: any = null;
+          try {
+            realPosAfterClose = await binanceFutures.getOpenPosition(pos.symbol);
+          } catch (e: any) {
+            console.warn(`[closePosition] Gagal cek posisi riil pasca close ${pos.symbol}:`, e.message);
+          }
+
           if (realPosAfterClose && Math.abs(realPosAfterClose.positionAmt) === 0) {
             confirmedClose = true;
+          } else if (realPosAfterClose && Math.abs(realPosAfterClose.positionAmt) > 0) {
+            const leftoverQty = Math.abs(realPosAfterClose.positionAmt);
+            logger.log(
+              'WARN',
+              `🧹 [ORPHAN SWEEPER] ${pos.symbol}: Masih tersisa ${leftoverQty} kontrak di Binance setelah close. Menjalankan emergency sweep...`,
+              pos.symbol
+            );
+            try {
+              await binanceFutures.closePositionMarket(pos.symbol, 'BUY', leftoverQty);
+              await new Promise((resolve) => setTimeout(resolve, 600));
+              realPosAfterClose = await binanceFutures.getOpenPosition(pos.symbol);
+              if (!realPosAfterClose || Math.abs(realPosAfterClose.positionAmt) === 0) {
+                confirmedClose = true;
+              } else {
+                confirmedClose = false;
+              }
+            } catch (sweepErr: any) {
+              console.error(`[ORPHAN SWEEPER] Gagal sweep sisa posisi ${pos.symbol}:`, sweepErr.message);
+              confirmedClose = false;
+            }
           }
 
           if (!confirmedClose) {
+            if (realPosAfterClose && Math.abs(realPosAfterClose.positionAmt) > 0) {
+              pos.totalQty = Math.abs(realPosAfterClose.positionAmt);
+            }
             logger.log(
               'WARN',
-              `⚠️ [CLOSE NOT CONFIRMED] Posisi ${pos.symbol} belum terkonfirmasi tertutup di Binance. Local state tidak dihapus untuk mencegah desync log DB.`,
+              `⚠️ [CLOSE NOT CONFIRMED] Posisi ${pos.symbol} belum terkonfirmasi tertutup di Binance. Local state tetap aktif agar tidak orphan.`,
               pos.symbol
             );
             this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_NOT_CONFIRMED', {
