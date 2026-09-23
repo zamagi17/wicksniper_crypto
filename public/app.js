@@ -458,6 +458,27 @@ function renderStatus(status) {
 
   document.getElementById('closed-count-tag').innerText = `${status.totalTrades} Trade`;
 
+  // Render Cooldown Strip
+  const cooldownStrip = document.getElementById('cooldown-strip');
+  const cooldownTags = document.getElementById('cooldown-list-tags');
+  if (cooldownStrip && cooldownTags) {
+    const list = status.cooldownCoins || [];
+    const now = Date.now();
+    const activeCooldowns = list.filter(c => c.until > now);
+    if (activeCooldowns.length > 0) {
+      cooldownStrip.style.display = 'flex';
+      cooldownTags.innerHTML = activeCooldowns.map(c => {
+        const remainingSec = Math.max(0, Math.round((c.until - now) / 1000));
+        const mins = Math.floor(remainingSec / 60);
+        const secs = remainingSec % 60;
+        const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        return `<span style="padding: 2px 8px; background: rgba(255, 170, 0, 0.18); border: 1px solid rgba(255, 170, 0, 0.35); border-radius: 4px; font-weight: 700; color: #ffb84d;">${c.symbol} (${timeStr})</span>`;
+      }).join('');
+    } else {
+      cooldownStrip.style.display = 'none';
+    }
+  }
+
   // 4. Render Active Positions
   renderActivePositions(status.activePositions || []);
 

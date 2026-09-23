@@ -273,6 +273,33 @@ export class WickSniperEngine {
     await binanceFutures.startTickerWebSocket(this.config.scanner.dataSource, this.config.scanner.pollingIntervalMs);
     this.scanner.start();
 
+    // Pulihkan status cooldown koin dari riwayat trade terakhir di database agar tidak hilang saat restart
+    try {
+      const recentTrades = await db.loadRecentTrades(30);
+      const now = Date.now();
+      for (const t of recentTrades) {
+        if (!t.symbol || !t.timestamp) continue;
+        const cooldownMins =
+          t.exitReason === 'EARLY_MOMENTUM_EXIT'
+            ? this.config.exit.earlyExitCooldownMinutes || 60
+            : t.exitReason === 'HARD_STOP_LOSS'
+              ? this.config.exit.hardStopCooldownMinutes || 180
+              : this.config.scanner.cooldownMinutes || 10;
+        const expiry = t.timestamp + cooldownMins * 60 * 1000;
+        if (expiry > now) {
+          const remainingMinutes = Math.ceil((expiry - now) / 60000);
+          this.scanner.setCooldown(t.symbol, remainingMinutes);
+          logger.log(
+            'INFO',
+            `⏳ [COOLDOWN DIPULIHKAN] ${t.symbol} masih dalam cooldown (${remainingMinutes}m tersisa sampai ${new Date(expiry).toLocaleTimeString('id-ID')}).`,
+            t.symbol
+          );
+        }
+      }
+    } catch (e: any) {
+      console.warn('Gagal memulihkan cooldown trade sebelumnya:', e.message);
+    }
+
     if (this.config.tradingMode === 'LIVE') {
       await binanceFutures.checkPositionMode();
       await binanceFutures.startUserDataStream().catch((e: any) => {
@@ -354,6 +381,15 @@ export class WickSniperEngine {
     this.spikesDetectedToday++;
 
     const symbol = alert.symbol;
+
+    // Proteksi lapis ganda: Cek apakah koin masih dalam masa cooldown
+    if (this.scanner.isCoolingDown(symbol)) {
+      alert.status = 'SKIPPED';
+      alert.skipReason = `Koin ${symbol} masih dalam masa jeda cooldown antar trade`;
+      logger.log('INFO', `⏳ [COOLDOWN SKIP] Lonjakan pada ${symbol} diabaikan karena masih dalam masa cooldown.`, symbol);
+      db.saveSpike(alert).catch(() => { });
+      return;
+    }
 
     // Cek kuota posisi aktif (di memori bot DAN di Binance aktual untuk mode LIVE)
     let currentActiveCount = this.activePositions.size;
@@ -1941,6 +1977,11 @@ export class WickSniperEngine {
             ? this.config.exit.hardStopCooldownMinutes || 180
             : this.config.scanner.cooldownMinutes || 10;
       this.scanner.setCooldown(pos.symbol, cooldownMinutes);
+      logger.log(
+        'INFO',
+        `⏳ [COOLDOWN AKTIF] ${pos.symbol} diistirahatkan selama ${cooldownMinutes} menit (sampai ${new Date(Date.now() + cooldownMinutes * 60000).toLocaleTimeString('id-ID')}).`,
+        pos.symbol
+      );
 
       const isProfit = trade.realizedPnl >= 0;
       const reasonLabel =
