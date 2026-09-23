@@ -1386,6 +1386,11 @@ export class WickSniperEngine {
 
           this.updateTrailingSL(pos);
 
+          // Reset status trailing runner saat layer averaging baru terisi
+          pos.trailingTpActive = false;
+          pos.lowestPrice = undefined;
+          pos.peakPnlPct = 0;
+
           // Update order Limit TP di Binance dengan volume baru
           await this.syncLiveTakeProfitOrder(pos);
 
@@ -1703,6 +1708,25 @@ export class WickSniperEngine {
           return;
         }
 
+        // Gembok Anti-Minus Trailing TP: Jika alasan adalah TRAILING_TP namun posisi masih aktif di Binance dan harga pasar riil sudah >= Modal (rugi untuk SHORT),
+        // DILARANG melempar Market Order rugi! Batalkan penutupan market, kembalikan ke status SNIPING & pasang ulang Limit TP Maker.
+        const currentMktPrice = pos.currentPrice || closePrice;
+        const entryRef = (realPos?.entryPrice && realPos.entryPrice > 0) ? realPos.entryPrice : pos.avgEntryPrice;
+        if (reason === 'TRAILING_TP' && !isPositionAlreadyClosed && binanceAmt > 0 && currentMktPrice >= entryRef) {
+          logger.log(
+            'WARN',
+            `🛡️ [GEMBOK TRAILING TP] ${pos.symbol}: Eksekusi Trailing TP dibatalkan karena harga pasar ($${currentMktPrice.toFixed(6)}) sudah >= Modal ($${entryRef.toFixed(6)}). Menolak tutup rugi, Limit TP Maker dipasang kembali!`,
+            pos.symbol
+          );
+          pos.status = 'SNIPING';
+          pos.trailingTpActive = false;
+          pos.lowestPrice = undefined;
+          pos.peakPnlPct = 0;
+          this.closingSymbols.delete(pos.symbol);
+          await this.syncLiveTakeProfitOrder(pos);
+          return;
+        }
+
         // Anti-Orphan Sync: Jika ada layer baru yang terisi saat harga spike, sinkronkan totalQty memori ke riil Binance
         if (binanceAmt > 0 && Math.abs(binanceAmt - pos.totalQty) > 0.000001) {
           logger.log(
@@ -1915,11 +1939,12 @@ export class WickSniperEngine {
               if (reason === 'TAKE_PROFIT' && isPositionAlreadyClosed && !isTpOrderMatch) {
                 reason = 'MANUAL_CLOSE';
                 logger.log('INFO', `⚡ [MANUAL CLOSE TERDETEKSI] ${pos.symbol}: Posisi ditutup secara manual di Binance.`, pos.symbol);
-              } else if (reason === 'TAKE_PROFIT' && actualRealizedPnl < 0) {
+              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP') && actualRealizedPnl < 0) {
+                const origReason = reason;
                 reason = 'FEE_LOSS_EXIT';
                 logger.log(
                   'WARN',
-                  `💸 [FEE > PROFIT] ${pos.symbol}: TP tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
+                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
                   pos.symbol
                 );
               }
@@ -2144,6 +2169,9 @@ export class WickSniperEngine {
 
                   // Perbarui Limit Take Profit order di Binance jika kuantitas bertambah
                   if (liveQty > oldQty) {
+                    pos.trailingTpActive = false;
+                    pos.lowestPrice = undefined;
+                    pos.peakPnlPct = 0;
                     await this.syncLiveTakeProfitOrder(pos);
                     await this.deployNextGridLayerInQueue(pos);
                   }
