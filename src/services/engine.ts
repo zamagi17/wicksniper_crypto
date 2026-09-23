@@ -905,18 +905,7 @@ export class WickSniperEngine {
           }
         }
 
-        // Jika Trailing TP aktif, aktifkan mode trailing agar profit bisa berlari lebih dalam
-        if (this.config.exit.trailingTpEnabled) {
-          pos.trailingTpActive = true;
-          if (this.config.tradingMode === 'LIVE') {
-            if (pos.tpOrderId) binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
-            if (pos.tp2OrderId) binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => {});
-            pos.tpOrderId = undefined;
-            pos.tp2OrderId = undefined;
-          }
-          continue;
-        }
-
+        // 1. PRIORITAS MAKER LIMIT TP PADA MODE LIVE:
         // Jika dalam mode LIVE dan memiliki Limit TP order yang terpasang di Binance:
         if (this.config.tradingMode === 'LIVE' && (pos.tpOrderId || pos.tp2OrderId)) {
           // Periksa apakah posisi di Binance sudah tertutup otomatis oleh Limit TP matching engine
@@ -933,9 +922,37 @@ export class WickSniperEngine {
               continue;
             }
           }
-          // Jika posisi masih terbuka di Binance, biarkan Limit TP order dieksekusi oleh Binance matching engine
+
+          // JIKA TRAILING TP AKTIF:
+          // HANYA aktifkan trailing jika harga benar-benar dump LEBIH DALAM dari target TP (>= 0.3% di bawah target TP)
+          // Ini memberi kesempatan penuh bagi Limit Maker Order di Binance untuk tersapu bersih di harga pas tanpa slippage!
+          if (this.config.exit.trailingTpEnabled && currentPrice <= pos.targetTpPrice * 0.997) {
+            if (!pos.trailingTpActive) {
+              pos.trailingTpActive = true;
+              pos.lowestPrice = currentPrice;
+              logger.log(
+                'INFO',
+                `🚀 [TRAILING TP AKTIF] ${pos.symbol}: Harga menembus target TP awal ke $${currentPrice.toFixed(6)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
+                pos.symbol
+              );
+              if (pos.tpOrderId) binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
+              if (pos.tp2OrderId) binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => {});
+              pos.tpOrderId = undefined;
+              pos.tp2OrderId = undefined;
+            }
+            continue;
+          }
+
+          // Jika harga hanya menyentuh atau menguji targetTpPrice biasa, biarkan Limit TP order dieksekusi oleh Binance matching engine
           // sebagai MAKER (bebas slippage & fee jauh lebih murah 0.02%).
-          // JANGAN batalkan dan lempar Market Order terburu-buru yang memicu slippage dan rugi fee!
+          // DILARANG membatalkan Limit Order dan melempar Market Order terburu-buru yang memicu slippage!
+          continue;
+        }
+
+        // Mode PAPER dengan Trailing TP:
+        if (this.config.tradingMode === 'PAPER' && this.config.exit.trailingTpEnabled) {
+          pos.trailingTpActive = true;
+          pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
           continue;
         }
 
@@ -943,18 +960,44 @@ export class WickSniperEngine {
         continue;
       }
 
-      // C. TRAILING TAKE PROFIT
-      // Proteksi volatilitas: minimal 5 detik sejak order dibuka, pnlPct minimal 1.0% (menutupi fee roundtrip),
-      // dan harga pasar harus benar-benar di bawah avgEntryPrice (profit riil untuk SHORT)
+      // C. TRAILING TAKE PROFIT (DILENGKAPI GEMBOK PROFIT ANTI-MINUS & ANTI-SLIPPAGE)
       const trailingAgeMs = Date.now() - pos.openedAt;
-      if (
-        this.config.exit.trailingTpEnabled &&
-        trailingAgeMs >= 5000 &&
-        pos.peakPnlPct >= this.config.exit.takeProfitPct * pos.leverage
-      ) {
-        const dropFromPeak = pos.peakPnlPct - pos.pnlPct;
-        const callbackThreshold = (this.config.exit.trailingCallbackPct || 0.4) * pos.leverage;
-        if (dropFromPeak >= callbackThreshold && pos.pnlPct >= 1.0 && currentPrice < pos.avgEntryPrice) {
+      if (this.config.exit.trailingTpEnabled && pos.trailingTpActive && trailingAgeMs >= 3000) {
+        // Catat titik harga terendah (profit terdalam untuk posisi SHORT)
+        pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
+
+        // Batas Harga Maksimum Aman (Profit Floor):
+        // Wajib minimal 0.6% di bawah avgEntryPrice (menutupi fee roundtrip taker + buffer slippage pantulan wick)
+        const minRequiredProfitPct = Math.max(0.6, (this.config.exit.trailingCallbackPct || 0.4) * 1.5);
+        const safeTrailingMaxPrice = pos.avgEntryPrice * (1 - minRequiredProfitPct / 100);
+
+        // PROTEKSI 1: Jika pantulan harga memantul naik mendekati BEP (di atas batas aman), DILARANG tutup rugi!
+        // Segera batalkan mode trailing dan pasang kembali Limit TP Maker di Binance agar posisi tetap terjaga dalam jaring
+        if (currentPrice > safeTrailingMaxPrice) {
+          logger.log(
+            'WARN',
+            `🛡️ [TRAILING RE-ANCHOR GUARD] ${pos.symbol}: Pantulan harga mendekati BEP ($${currentPrice.toFixed(6)} > batas aman $${safeTrailingMaxPrice.toFixed(6)}). Trailing TP distandbykan & Limit TP dipasang kembali di Binance agar posisi tetap aman dalam jaring.`,
+            pos.symbol
+          );
+          pos.trailingTpActive = false;
+          pos.lowestPrice = undefined;
+          pos.peakPnlPct = 0;
+          if (this.config.tradingMode === 'LIVE') {
+            this.syncLiveTakeProfitOrder(pos).catch(() => {});
+          }
+          continue;
+        }
+
+        // PROTEKSI 2: Hitung callback dari titik terendah riil
+        const callbackPct = this.config.exit.trailingCallbackPct || 0.4;
+        const bouncePct = ((currentPrice - pos.lowestPrice) / pos.lowestPrice) * 100;
+
+        if (bouncePct >= callbackPct && currentPrice <= safeTrailingMaxPrice) {
+          logger.log(
+            'SUCCESS',
+            `🎯 [TRAILING TP HIT] ${pos.symbol}: Memantul +${bouncePct.toFixed(2)}% dari harga terendah $${pos.lowestPrice.toFixed(6)} ➜ Mengamankan profit di $${currentPrice.toFixed(6)} (Cuan aman di bawah batas $${safeTrailingMaxPrice.toFixed(6)}).`,
+            pos.symbol
+          );
           this.closePosition(pos, 'TRAILING_TP', currentPrice);
           continue;
         }
