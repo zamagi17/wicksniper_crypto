@@ -889,89 +889,16 @@ export class WickSniperEngine {
       }
 
       // B. TAKE PROFIT PULLBACK (DILENGKAPI STAGE 1 PARTIAL TP & BEP PROTECTION)
-      // Proteksi anti-whipsaw / order propagation: beri waktu minimal 3 detik sejak order dibuka
-      // dan pastikan harga pasar benar-benar di bawah avgEntryPrice (profit riil)
-      const tradeAgeMs = Date.now() - pos.openedAt;
-      if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
-        if (this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.totalQty > 0) {
+      // Jika Trailing TP sedang aktif, serahkan seluruh evaluasi runner ke Section C
+      if (pos.trailingTpActive) {
+        // Biarkan Section C menangani trailing runner & callback
+      } else {
+        const tradeAgeMs = Date.now() - pos.openedAt;
+        if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
           if (this.config.tradingMode === 'LIVE') {
-            try {
-              const livePos = await binanceFutures.getOpenPosition(pos.symbol);
-              if (!livePos || Math.abs(livePos.positionAmt) === 0) {
-                // Seluruh posisi sudah tertutup (misal flash dump tembus TP1 & TP2 sekaligus)
-                this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice);
-                continue;
-              }
-              const currentLiveQty = Math.abs(livePos.positionAmt);
-              if (currentLiveQty < pos.totalQty) {
-                // TP1 sudah terisi sebagian di Binance sebagai MAKER!
-                await this.handleLivePartialTpHit(pos, livePos);
-                continue;
-              }
-              // Jika order limit TP1 & TP2 masih antre di Binance, biarkan Binance mengeksekusi sebagai MAKER!
-              continue;
-            } catch { }
-          } else {
-            // Mode PAPER TRADING:
-            const ratio = this.config.exit.partialTpRatio || 0.5;
-            const desiredPartialQty = pos.totalQty * ratio;
-            const safePartialQty = parseFloat(binanceFutures.formatQty(pos.symbol, desiredPartialQty));
-            if (safePartialQty > 0 && safePartialQty < pos.totalQty) {
-              const partialPnl = Math.round((pos.avgEntryPrice - currentPrice) * safePartialQty * 100) / 100;
-              this.virtualBalance += partialPnl;
-              pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - safePartialQty));
-              pos.partialTpDone = true;
-              pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
-              if (pos.layers) {
-                for (const l of pos.layers) {
-                  if (l.status === 'PENDING') l.status = 'CANCELLED';
-                }
-              }
-              pos.hardSlPrice = pos.avgEntryPrice * (1 - 0.0008);
-              pos.targetTp2Price = pos.avgEntryPrice * (1 - (this.config.exit.takeProfitPct * 2) / 100);
-              pos.targetTpPrice = pos.targetTp2Price;
-              logger.log(
-                'SUCCESS',
-                `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke BEP: $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
-                pos.symbol
-              );
-              telegram.notifyPartialTp(
-                pos.symbol,
-                partialPnl,
-                pos.totalQty,
-                pos.avgEntryPrice,
-                pos.targetTpPrice
-              );
-              this.broadcastStatus();
-              db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
-              continue;
-            }
-          }
-        }
-
-        // 1. PRIORITAS MAKER LIMIT TP PADA MODE LIVE:
-        // Jika dalam mode LIVE dan memiliki Limit TP order yang terpasang di Binance:
-        if (this.config.tradingMode === 'LIVE' && (pos.tpOrderId || pos.tp2OrderId)) {
-          // Periksa apakah posisi di Binance sudah tertutup otomatis oleh Limit TP matching engine
-          const openPos = await binanceFutures.getOpenPosition(pos.symbol);
-          if (!openPos || Math.abs(openPos.positionAmt) === 0) {
-            // Sudah terisi oleh Limit Order Binance di targetTpPrice tanpa slippage!
-            this.closePosition(pos, 'TAKE_PROFIT', pos.targetTp2Price || pos.targetTpPrice);
-            continue;
-          }
-          if (this.config.exit.partialTpEnabled && !pos.partialTpDone) {
-            const currentLiveQty = Math.abs(openPos.positionAmt);
-            if (currentLiveQty < pos.totalQty) {
-              await this.handleLivePartialTpHit(pos, openPos);
-              continue;
-            }
-          }
-
-          // JIKA TRAILING TP AKTIF:
-          // HANYA aktifkan trailing jika harga benar-benar dump LEBIH DALAM dari target TP (>= 0.3% di bawah target TP)
-          // Ini memberi kesempatan penuh bagi Limit Maker Order di Binance untuk tersapu bersih di harga pas tanpa slippage!
-          if (this.config.exit.trailingTpEnabled && currentPrice <= pos.targetTpPrice * 0.997) {
-            if (!pos.trailingTpActive) {
+            // JIKA TRAILING TP DIAKTIFKAN:
+            // Aktifkan runner jika harga dump tembus lebih dalam (>= 0.3% di bawah target TP)
+            if (this.config.exit.trailingTpEnabled && currentPrice <= pos.targetTpPrice * 0.997) {
               pos.trailingTpActive = true;
               pos.lowestPrice = currentPrice;
               logger.log(
@@ -983,25 +910,61 @@ export class WickSniperEngine {
               if (pos.tp2OrderId) binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => {});
               pos.tpOrderId = undefined;
               pos.tp2OrderId = undefined;
+              continue;
             }
+
+            // Mode LIVE: Order Limit TP Maker sudah antre di Binance matching engine.
+            // DILARANG melempar Market Order di sini! Matching engine Binance mengeksekusi sebagai MAKER (0.02% fee, 0 slippage).
+            // Notifikasi pengisian akan diterima instan melalui Private User Data Stream / syncLivePositions.
+            continue;
+          } else {
+            // Mode PAPER TRADING:
+            if (this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.totalQty > 0) {
+              const ratio = this.config.exit.partialTpRatio || 0.5;
+              const desiredPartialQty = pos.totalQty * ratio;
+              const safePartialQty = parseFloat(binanceFutures.formatQty(pos.symbol, desiredPartialQty));
+              if (safePartialQty > 0 && safePartialQty < pos.totalQty) {
+                const partialPnl = Math.round((pos.avgEntryPrice - currentPrice) * safePartialQty * 100) / 100;
+                this.virtualBalance += partialPnl;
+                pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - safePartialQty));
+                pos.partialTpDone = true;
+                pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
+                if (pos.layers) {
+                  for (const l of pos.layers) {
+                    if (l.status === 'PENDING') l.status = 'CANCELLED';
+                  }
+                }
+                pos.hardSlPrice = pos.avgEntryPrice * (1 - 0.0008);
+                pos.targetTp2Price = pos.avgEntryPrice * (1 - (this.config.exit.takeProfitPct * 2) / 100);
+                pos.targetTpPrice = pos.targetTp2Price;
+                logger.log(
+                  'SUCCESS',
+                  `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke BEP: $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
+                  pos.symbol
+                );
+                telegram.notifyPartialTp(
+                  pos.symbol,
+                  partialPnl,
+                  pos.totalQty,
+                  pos.avgEntryPrice,
+                  pos.targetTpPrice
+                );
+                this.broadcastStatus();
+                db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+                continue;
+              }
+            }
+
+            if (this.config.exit.trailingTpEnabled) {
+              pos.trailingTpActive = true;
+              pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
+              continue;
+            }
+
+            this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
             continue;
           }
-
-          // Jika harga hanya menyentuh atau menguji targetTpPrice biasa, biarkan Limit TP order dieksekusi oleh Binance matching engine
-          // sebagai MAKER (bebas slippage & fee jauh lebih murah 0.02%).
-          // DILARANG membatalkan Limit Order dan melempar Market Order terburu-buru yang memicu slippage!
-          continue;
         }
-
-        // Mode PAPER dengan Trailing TP:
-        if (this.config.tradingMode === 'PAPER' && this.config.exit.trailingTpEnabled) {
-          pos.trailingTpActive = true;
-          pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
-          continue;
-        }
-
-        this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
-        continue;
       }
 
       // C. TRAILING TAKE PROFIT (DILENGKAPI GEMBOK PROFIT ANTI-MINUS & ANTI-SLIPPAGE)
@@ -1665,6 +1628,21 @@ export class WickSniperEngine {
         const binanceAmt = realPos ? Math.abs(realPos.positionAmt) : 0;
         let closeQty = binanceAmt > 0 ? binanceAmt : pos.totalQty;
 
+        // Proteksi Anti-Panic TP: Jika reason adalah TAKE_PROFIT pada mode LIVE tetapi posisi ternyata MASIH AKTIF di Binance,
+        // DILARANG melempar Market Order terburu-buru yang memicu kerugian fee & slippage!
+        // Kembalikan status SNIPING dan pasang ulang Limit TP Maker.
+        if (reason === 'TAKE_PROFIT' && !isPositionAlreadyClosed && binanceAmt > 0) {
+          logger.log(
+            'WARN',
+            `⚠️ [ANTI-PANIC TP] ${pos.symbol}: Permintaan Take Profit dibatalkan dari penutupan market karena posisi masih aktif (${binanceAmt} kontrak). Menyinkronkan Limit TP Maker kembali...`,
+            pos.symbol
+          );
+          pos.status = 'SNIPING';
+          this.closingSymbols.delete(pos.symbol);
+          await this.syncLiveTakeProfitOrder(pos);
+          return;
+        }
+
         // Anti-Orphan Sync: Jika ada layer baru yang terisi saat harga spike, sinkronkan totalQty memori ke riil Binance
         if (binanceAmt > 0 && Math.abs(binanceAmt - pos.totalQty) > 0.000001) {
           logger.log(
@@ -2049,9 +2027,17 @@ export class WickSniperEngine {
           // Jika posisi sudah 0 / tidak ditemukan di Binance dan posisi bot sudah berjalan > 5 detik:
           // artinya posisi sudah tertutup otomatis di Binance (Limit Take Profit terisi oleh matching engine)
           if ((!realPos || Math.abs(realPos.positionAmt) === 0) && Date.now() - pos.openedAt > 5000 && pos.status === 'SNIPING') {
-            logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance! Menyinkronkan eksekusi riil...`, symbol);
-            await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
-            continue;
+            let verifiedPos: any = realPos;
+            if (!verifiedPos) {
+              try {
+                verifiedPos = await binanceFutures.getOpenPosition(symbol);
+              } catch { }
+            }
+            if (!verifiedPos || Math.abs(verifiedPos.positionAmt) === 0) {
+              logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance! Menyinkronkan eksekusi riil...`, symbol);
+              await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
+              continue;
+            }
           }
 
           // Sinkronisasi kuantitas & avg entry price jika ada layer tambahan atau TP1 terisi di Binance
