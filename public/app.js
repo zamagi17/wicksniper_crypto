@@ -1399,6 +1399,8 @@ function openBacktestModal() {
     if (bteemCheckbox) bteemCheckbox.checked = !!currentConfig.exit?.earlyExitMomentumEnabled;
     if (currentConfig.exit?.earlyExitMinBullishCandles) document.getElementById('bt-early-exit-candles').value = currentConfig.exit.earlyExitMinBullishCandles;
     if (currentConfig.exit?.earlyExitMinRisePct) document.getElementById('bt-early-exit-rise').value = currentConfig.exit.earlyExitMinRisePct;
+    if (currentConfig.exit?.earlyExitCooldownMinutes) document.getElementById('bt-early-exit-cooldown').value = currentConfig.exit.earlyExitCooldownMinutes;
+    if (currentConfig.exit?.hardStopCooldownMinutes) document.getElementById('bt-hard-sl-cooldown').value = currentConfig.exit.hardStopCooldownMinutes;
     const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
     if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
     const btptRatio = document.getElementById('bt-partial-tp-ratio');
@@ -1443,6 +1445,8 @@ function resetBacktestParams() {
     if (bteemCheckbox) bteemCheckbox.checked = !!currentConfig.exit?.earlyExitMomentumEnabled;
     if (currentConfig.exit?.earlyExitMinBullishCandles) document.getElementById('bt-early-exit-candles').value = currentConfig.exit.earlyExitMinBullishCandles;
     if (currentConfig.exit?.earlyExitMinRisePct) document.getElementById('bt-early-exit-rise').value = currentConfig.exit.earlyExitMinRisePct;
+    if (currentConfig.exit?.earlyExitCooldownMinutes) document.getElementById('bt-early-exit-cooldown').value = currentConfig.exit.earlyExitCooldownMinutes;
+    if (currentConfig.exit?.hardStopCooldownMinutes) document.getElementById('bt-hard-sl-cooldown').value = currentConfig.exit.hardStopCooldownMinutes;
     const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
     if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
     const btptRatio = document.getElementById('bt-partial-tp-ratio');
@@ -1528,6 +1532,8 @@ async function executeBacktest() {
     earlyExitMomentumEnabled: !!document.getElementById('bt-early-exit-momentum-enabled')?.checked,
     earlyExitMinBullishCandles: parseInt(document.getElementById('bt-early-exit-candles')?.value) || 3,
     earlyExitMinRisePct: parseFloat(document.getElementById('bt-early-exit-rise')?.value) || 0.5,
+    earlyExitCooldownMinutes: parseInt(document.getElementById('bt-early-exit-cooldown')?.value) || 60,
+    hardStopCooldownMinutes: parseInt(document.getElementById('bt-hard-sl-cooldown')?.value) || 180,
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
     partialTpRatio: (parseFloat(document.getElementById('bt-partial-tp-ratio')?.value) || 50) / 100,
     trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,

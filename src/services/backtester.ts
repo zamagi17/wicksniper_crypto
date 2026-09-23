@@ -19,6 +19,8 @@ export interface BacktestParams {
   earlyExitMomentumEnabled?: boolean;
   earlyExitMinBullishCandles?: number;
   earlyExitMinRisePct?: number;
+  earlyExitCooldownMinutes?: number;
+  hardStopCooldownMinutes?: number;
   partialTpEnabled?: boolean;
   partialTpRatio?: number;
   trailingTpEnabled?: boolean;
@@ -115,6 +117,8 @@ export class WickSniperBacktester {
     const maxTotalMarginPerCoin = params.maxTotalMarginPerCoin || 35;
     const cooldownMinutes = params.cooldownMinutes || 10;
     const maxHoldMinutes = params.maxHoldMinutes || 10;
+    const earlyExitCooldownMinutes = params.earlyExitCooldownMinutes || 60;
+    const hardStopCooldownMinutes = params.hardStopCooldownMinutes || 180;
     const earlyExitMomentumEnabled = params.earlyExitMomentumEnabled === true;
     const earlyExitMinBullishCandles = Math.max(2, params.earlyExitMinBullishCandles || 3);
     const earlyExitMinRisePct = params.earlyExitMinRisePct || 0.5;
@@ -442,7 +446,13 @@ export class WickSniperBacktester {
           });
 
           // Set cooldown koin ini
-          cooldownUntil = exitTime + cooldownMinutes * 60000;
+          const tradeCooldownMinutes =
+            exitReason === 'EARLY_MOMENTUM_EXIT'
+              ? earlyExitCooldownMinutes
+              : exitReason === 'HARD_STOP_LOSS'
+                ? hardStopCooldownMinutes
+                : cooldownMinutes;
+          cooldownUntil = exitTime + tradeCooldownMinutes * 60000;
         }
       }
     }
