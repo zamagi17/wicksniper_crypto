@@ -274,6 +274,7 @@ body {
 .text-accent { color: var(--color-cyan); }
 .text-green { color: var(--color-green); }
 .text-red { color: var(--color-red); }
+.text-yellow { color: var(--color-yellow, #ffb300); }
 .text-gold { color: var(--color-gold); }
 .text-cyan { color: var(--color-cyan); }
 .text-purple { color: var(--color-purple); }

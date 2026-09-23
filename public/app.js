@@ -476,6 +476,12 @@ function renderActivePositions(positions) {
       const isProfit = (pos.unrealizedPnl || 0) >= 0;
       const pnlColor = isProfit ? 'text-green' : 'text-red';
       const pnlSign = isProfit ? '+' : '';
+      const remainingSeconds = Math.max(0, Number(pos.holdRemainingSeconds ?? 0));
+      const remainingMinutes = Math.floor(remainingSeconds / 60);
+      const remainingSecs = remainingSeconds % 60;
+      const holdCountdown = `${String(remainingMinutes).padStart(2, '0')}:${String(remainingSecs).padStart(2, '0')}`;
+      const holdAction = pos.holdAction === 'CLOSE_NOW' ? '⚠️ Jangan perpanjang' : '👀 Masih bisa dipantau';
+      const holdClass = pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
 
       const layersHtml = (pos.layers || [])
         .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${l.price.toFixed(4)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
@@ -520,6 +526,10 @@ function renderActivePositions(positions) {
             <div class="pos-metric-item">
               <small>Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)</small>
               <span class="text-red">$${pos.hardSlPrice.toFixed(4)}</span>
+            </div>
+            <div class="pos-metric-item">
+              <small>Sisa Waktu Hold</small>
+              <span class="${holdClass}"><b>${holdCountdown}</b> <small>${holdAction}</small></span>
             </div>
           </div>
 
@@ -601,6 +611,7 @@ function renderClosedTradesTable(trades) {
                 t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard SL' :
                 t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
                 t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
+                t.exitReason === 'EARLY_MOMENTUM_EXIT' ? '⚠️ Early Momentum' :
                 t.exitReason === 'MANUAL_CLOSE' ? '⚡ Manual' :
                 (t.exitReason || '-')
               }</b></small>
@@ -719,6 +730,7 @@ function openTradeDetailModal(tradeId) {
           t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
           t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
           t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
+          t.exitReason === 'EARLY_MOMENTUM_EXIT' ? '⚠️ Early Momentum' :
           t.exitReason === 'MANUAL_CLOSE' ? '⚡ Tutup Manual' :
           t.exitReason
         }</div>
@@ -924,6 +936,12 @@ function populateSettingsForm(cfg) {
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
+  const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
+  if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
+  setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 3);
+  setVal('cfg-early-exit-rise', cfg.exit?.earlyExitMinRisePct || 0.5);
+  setVal('cfg-early-exit-cooldown', cfg.exit?.earlyExitCooldownMinutes || 60);
+  setVal('cfg-hard-sl-cooldown', cfg.exit?.hardStopCooldownMinutes || 180);
 
   // Partial Take Profit
   const ptCheckbox = document.getElementById('cfg-partial-tp-enabled');
@@ -1009,6 +1027,11 @@ function getSettingsFormData() {
       takeProfitPct: parseFloat(getVal('cfg-tp-pct', '1.2')) || 1.2,
       hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
       maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
+      earlyExitMomentumEnabled: !!document.getElementById('cfg-early-exit-momentum-enabled')?.checked,
+      earlyExitMinBullishCandles: parseInt(getVal('cfg-early-exit-candles', '3')) || 3,
+      earlyExitMinRisePct: parseFloat(getVal('cfg-early-exit-rise', '0.5')) || 0.5,
+      earlyExitCooldownMinutes: parseInt(getVal('cfg-early-exit-cooldown', '60')) || 60,
+      hardStopCooldownMinutes: parseInt(getVal('cfg-hard-sl-cooldown', '180')) || 180,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '50')) || 50) / 100,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
@@ -1372,6 +1395,10 @@ function openBacktestModal() {
     if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
     const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
     if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
+    const bteemCheckbox = document.getElementById('bt-early-exit-momentum-enabled');
+    if (bteemCheckbox) bteemCheckbox.checked = !!currentConfig.exit?.earlyExitMomentumEnabled;
+    if (currentConfig.exit?.earlyExitMinBullishCandles) document.getElementById('bt-early-exit-candles').value = currentConfig.exit.earlyExitMinBullishCandles;
+    if (currentConfig.exit?.earlyExitMinRisePct) document.getElementById('bt-early-exit-rise').value = currentConfig.exit.earlyExitMinRisePct;
     const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
     if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
     const btptRatio = document.getElementById('bt-partial-tp-ratio');
@@ -1412,6 +1439,10 @@ function resetBacktestParams() {
     if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
     const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
     if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
+    const bteemCheckbox = document.getElementById('bt-early-exit-momentum-enabled');
+    if (bteemCheckbox) bteemCheckbox.checked = !!currentConfig.exit?.earlyExitMomentumEnabled;
+    if (currentConfig.exit?.earlyExitMinBullishCandles) document.getElementById('bt-early-exit-candles').value = currentConfig.exit.earlyExitMinBullishCandles;
+    if (currentConfig.exit?.earlyExitMinRisePct) document.getElementById('bt-early-exit-rise').value = currentConfig.exit.earlyExitMinRisePct;
     const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
     if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
     const btptRatio = document.getElementById('bt-partial-tp-ratio');
@@ -1494,6 +1525,9 @@ async function executeBacktest() {
     takeProfitPct: parseFloat(document.getElementById('bt-tp').value) || 1.2,
     hardStopLossPct: parseFloat(document.getElementById('bt-sl').value) || 4.5,
     trailingSlEnabled: !!document.getElementById('bt-trailing-sl-enabled')?.checked,
+    earlyExitMomentumEnabled: !!document.getElementById('bt-early-exit-momentum-enabled')?.checked,
+    earlyExitMinBullishCandles: parseInt(document.getElementById('bt-early-exit-candles')?.value) || 3,
+    earlyExitMinRisePct: parseFloat(document.getElementById('bt-early-exit-rise')?.value) || 0.5,
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
     partialTpRatio: (parseFloat(document.getElementById('bt-partial-tp-ratio')?.value) || 50) / 100,
     trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,
@@ -1573,6 +1607,7 @@ async function executeBacktest() {
           else if (t.exitReason === 'TRAILING_TP') exitReasonLabel = t.partialTpTaken ? '🎯 Stage 2 TP / BEP' : '📈 Trailing TP';
           else if (t.exitReason === 'HARD_STOP_LOSS') exitReasonLabel = '🛑 Hard SL';
           else if (t.exitReason === 'TIME_LIMIT_EXIT') exitReasonLabel = '⏰ Batas Waktu';
+          else if (t.exitReason === 'EARLY_MOMENTUM_EXIT') exitReasonLabel = '⚠️ Early Momentum';
           else if (t.exitReason === 'FEE_LOSS_EXIT') exitReasonLabel = '💸 TP Minus Fee';
 
           return `

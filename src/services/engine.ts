@@ -14,6 +14,7 @@ export class WickSniperEngine {
   private scanner: SpikeScanner;
   private virtualBalance: number = 1000;
   private activePositions: Map<string, ActivePosition> = new Map();
+  private priceMomentum: Map<string, { price: number; time: number }[]> = new Map();
   private closingSymbols: Set<string> = new Set();
   private syncingTpSymbols: Set<string> = new Set();
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
@@ -91,6 +92,11 @@ export class WickSniperEngine {
           { filledLayerMin: 5, percentOfBase: 0.3 },
         ],
         maxHoldMinutes: 60,
+        earlyExitMomentumEnabled: false,
+        earlyExitMinBullishCandles: 3,
+        earlyExitMinRisePct: 0.5,
+        earlyExitCooldownMinutes: 60,
+        hardStopCooldownMinutes: 180,
         partialTpEnabled: false,
         partialTpRatio: 0.5,
       },
@@ -702,6 +708,10 @@ export class WickSniperEngine {
       if (currentPrice <= 0) continue;
 
       pos.currentPrice = currentPrice;
+      const samples = this.priceMomentum.get(symbol) || [];
+      samples.push({ price: currentPrice, time: Date.now() });
+      const recentSamples = samples.filter((sample) => Date.now() - sample.time <= 90_000).slice(-8);
+      this.priceMomentum.set(symbol, recentSamples);
 
       // 1. Cek layer fill (hanya untuk mode PAPER: simulasi pengisian jaring)
       // Pada mode LIVE, layer diisi langsung oleh matching engine Binance dan disinkronkan di syncLivePositions
@@ -765,6 +775,16 @@ export class WickSniperEngine {
           );
           this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
         }
+        continue;
+      }
+
+      if (this.shouldEarlyExitMomentum(pos, recentSamples)) {
+        logger.log(
+          'WARN',
+          `⚠️ [EARLY MOMENTUM EXIT] ${pos.symbol}: Harga di atas average entry dan momentum naik memenuhi parameter proteksi.`,
+          pos.symbol
+        );
+        this.closePosition(pos, 'EARLY_MOMENTUM_EXIT', currentPrice);
         continue;
       }
 
@@ -884,6 +904,24 @@ export class WickSniperEngine {
         }
       }
     }
+  }
+
+  private shouldEarlyExitMomentum(pos: ActivePosition, samples: { price: number; time: number }[]): boolean {
+    const exitCfg = this.config.exit;
+    if (!exitCfg.earlyExitMomentumEnabled || pos.partialTpDone || samples.length < 2) return false;
+    if (pos.currentPrice <= pos.avgEntryPrice) return false;
+
+    const installedLayerCount = pos.layers.filter((layer) => layer.status !== 'CANCELLED').length;
+    const filledLayerCount = pos.layers.filter((layer) => layer.status === 'FILLED').length;
+    const minimumFilledLayers = Math.ceil(installedLayerCount / 2);
+    if (installedLayerCount === 0 || filledLayerCount < minimumFilledLayers) return false;
+
+    const requiredSamples = Math.max(2, exitCfg.earlyExitMinBullishCandles || 3);
+    if (samples.length < requiredSamples) return false;
+    const window = samples.slice(-requiredSamples);
+    const rising = window.every((sample, index) => index === 0 || sample.price > window[index - 1].price);
+    const risePct = ((window[window.length - 1].price - window[0].price) / window[0].price) * 100;
+    return rising && risePct >= (exitCfg.earlyExitMinRisePct || 0.5);
   }
 
   private recalculatePositionAverage(pos: ActivePosition) {
@@ -1552,7 +1590,13 @@ export class WickSniperEngine {
         this.config.tradingMode === 'PAPER' ? this.virtualBalance : undefined
       );
 
-      this.scanner.setCooldown(pos.symbol, this.config.scanner.cooldownMinutes || 10);
+      const cooldownMinutes =
+        trade.exitReason === 'EARLY_MOMENTUM_EXIT'
+          ? this.config.exit.earlyExitCooldownMinutes || 60
+          : trade.exitReason === 'HARD_STOP_LOSS'
+            ? this.config.exit.hardStopCooldownMinutes || 180
+            : this.config.scanner.cooldownMinutes || 10;
+      this.scanner.setCooldown(pos.symbol, cooldownMinutes);
 
       const isProfit = trade.realizedPnl >= 0;
       const reasonLabel =
@@ -1562,6 +1606,8 @@ export class WickSniperEngine {
             ? '📈 Trailing Take Profit'
             : trade.exitReason === 'HARD_STOP_LOSS'
               ? '🛑 Hard Stop Loss (Cut-Off)'
+                  : trade.exitReason === 'EARLY_MOMENTUM_EXIT'
+                    ? '⚠️ Early Momentum Exit'
               : trade.exitReason === 'FEE_LOSS_EXIT'
                 ? '💸 TP Minus Fee (Biaya > Profit)'
                 : trade.exitReason === 'TIME_LIMIT_EXIT'
@@ -1588,6 +1634,12 @@ export class WickSniperEngine {
     const now = Date.now();
 
     for (const pos of this.activePositions.values()) {
+      const holdDeadlineAt = pos.openedAt + maxHoldMs;
+      const holdRemainingMs = Math.max(0, holdDeadlineAt - now);
+      pos.holdDeadlineAt = holdDeadlineAt;
+      pos.holdRemainingSeconds = Math.ceil(holdRemainingMs / 1000);
+      pos.holdAction = pos.currentPrice >= pos.avgEntryPrice ? 'CLOSE_NOW' : 'WATCH';
+
       if (now - pos.openedAt >= maxHoldMs && pos.status === 'SNIPING') {
         logger.log('WARN', `⏰ [TIME LIMIT] ${pos.symbol} telah ditahan lebih dari ${this.config.exit.maxHoldMinutes} menit. Menutup posisi secara paksa...`, pos.symbol);
         this.closePosition(pos, 'TIME_LIMIT_EXIT', pos.currentPrice);

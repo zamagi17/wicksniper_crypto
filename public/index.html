@@ -319,6 +319,32 @@
           </div>
         </div>
 
+        <div class="form-row" style="background: rgba(255, 59, 48, 0.03); border: 1px dashed rgba(255, 59, 48, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-red);">
+              <input type="checkbox" id="cfg-early-exit-momentum-enabled" style="width: 16px; height: 16px; accent-color: var(--color-red);">
+              ⚠️ Aktifkan Early Exit Momentum
+            </label>
+            <small class="form-hint">Menutup SHORT lebih cepat jika harga di atas average entry dan momentum naik memenuhi ambang candle. Default nonaktif.</small>
+          </div>
+          <div class="form-group">
+            <label>Jumlah Candle Bullish</label>
+            <input type="number" id="cfg-early-exit-candles" min="2" max="10" step="1" class="form-control" placeholder="3">
+          </div>
+          <div class="form-group">
+            <label>Kenaikan Minimum (%)</label>
+            <input type="number" id="cfg-early-exit-rise" min="0.1" max="5" step="0.1" class="form-control" placeholder="0.5">
+          </div>
+          <div class="form-group">
+            <label>Cooldown Early Exit (Menit)</label>
+            <input type="number" id="cfg-early-exit-cooldown" min="1" max="1440" step="5" class="form-control" placeholder="60">
+          </div>
+          <div class="form-group">
+            <label>Cooldown Hard SL (Menit)</label>
+            <input type="number" id="cfg-hard-sl-cooldown" min="1" max="1440" step="5" class="form-control" placeholder="180">
+          </div>
+        </div>
+
         <!-- TRAILING STOP LOSS SECTION -->
         <div class="form-row" style="background: rgba(255, 150, 0, 0.03); border: 1px dashed rgba(255, 150, 0, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
@@ -617,6 +643,18 @@
               📉 Aktifkan Trailing Stop Loss
             </label>
             <small class="form-hint">Mengencangkan SL otomatis saat jaring terisi untuk mengunci profit (leverage-aware).</small>
+          </div>
+
+          <div class="form-group" style="grid-column: span 2; background: rgba(255, 59, 48, 0.03); border: 1px dashed rgba(255, 59, 48, 0.25); border-radius: var(--radius-sm); padding: 10px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-red);">
+              <input type="checkbox" id="bt-early-exit-momentum-enabled" style="width: 16px; height: 16px; accent-color: var(--color-red);">
+              ⚠️ Aktifkan Early Exit Momentum
+            </label>
+            <small class="form-hint">Close lebih cepat saat candle bullish beruntun dan harga berada di atas average entry.</small>
+            <div style="display: flex; gap: 12px; margin-top: 8px;">
+              <input type="number" id="bt-early-exit-candles" class="form-control" value="3" min="2" max="10" step="1" placeholder="Candle bullish">
+              <input type="number" id="bt-early-exit-rise" class="form-control" value="0.5" min="0.1" max="5" step="0.1" placeholder="Kenaikan minimum %">
+            </div>
           </div>
 
           <!-- PARTIAL TAKE PROFIT SECTION DI BACKTEST LAB -->

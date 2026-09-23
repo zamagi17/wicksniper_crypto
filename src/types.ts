@@ -34,6 +34,11 @@ export interface BotConfig {
     trailingSlMaxReturnRatio?: number;
     trailingSlTiers?: Array<{ filledLayerMin: number; percentOfBase: number }>;
     maxHoldMinutes: number;
+    earlyExitMomentumEnabled?: boolean;
+    earlyExitMinBullishCandles?: number;
+    earlyExitMinRisePct?: number;
+    earlyExitCooldownMinutes?: number;
+    hardStopCooldownMinutes?: number;
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)
   };
@@ -98,6 +103,9 @@ export interface ActivePosition {
   totalMarginUsed: number;
   layers: GridLayer[];
   openedAt: number;
+  holdDeadlineAt?: number;
+  holdRemainingSeconds?: number;
+  holdAction?: 'WATCH' | 'CLOSE_NOW';
   targetTpPrice: number;
   targetTp2Price?: number;
   hardSlPrice: number;
@@ -123,7 +131,7 @@ export interface ClosedTrade {
   realizedPnl: number;
   pnlPct: number;
   durationSeconds: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'MANUAL_CLOSE';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'MANUAL_CLOSE';
   isPaper: boolean;
   closedAt: string;
   timestamp: number;

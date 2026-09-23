@@ -16,6 +16,9 @@ export interface BacktestParams {
   maxTotalMarginPerCoin?: number;
   cooldownMinutes?: number;
   maxHoldMinutes?: number;
+  earlyExitMomentumEnabled?: boolean;
+  earlyExitMinBullishCandles?: number;
+  earlyExitMinRisePct?: number;
   partialTpEnabled?: boolean;
   partialTpRatio?: number;
   trailingTpEnabled?: boolean;
@@ -35,7 +38,7 @@ export interface BacktestTrade {
   marginUsed: number;
   realizedPnl: number;
   pnlPct: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'MANUAL_CLOSE';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'MANUAL_CLOSE';
   durationMinutes: number;
   layersFilled: number;
   partialTpTaken: boolean;
@@ -112,6 +115,9 @@ export class WickSniperBacktester {
     const maxTotalMarginPerCoin = params.maxTotalMarginPerCoin || 35;
     const cooldownMinutes = params.cooldownMinutes || 10;
     const maxHoldMinutes = params.maxHoldMinutes || 10;
+    const earlyExitMomentumEnabled = params.earlyExitMomentumEnabled === true;
+    const earlyExitMinBullishCandles = Math.max(2, params.earlyExitMinBullishCandles || 3);
+    const earlyExitMinRisePct = params.earlyExitMinRisePct || 0.5;
     const partialTpEnabled = params.partialTpEnabled === true;
     const partialTpRatio = params.partialTpRatio !== undefined ? params.partialTpRatio : 0.5;
     const trailingTpEnabled = params.trailingTpEnabled === true;
@@ -292,6 +298,22 @@ export class WickSniperBacktester {
             exitReason = partialDone ? 'TRAILING_TP' : 'HARD_STOP_LOSS';
             exitTime = evalCandle.openTime;
             break;
+          }
+
+          const installedLayerCount = layers.filter((layer) => layer.status !== 'CANCELLED').length;
+          const filledLayerCount = layers.filter((layer) => layer.status === 'FILLED').length;
+          const minimumFilledLayers = Math.ceil(installedLayerCount / 2);
+          if (earlyExitMomentumEnabled && !partialDone && filledLayerCount >= minimumFilledLayers && evalCandle.close > avgPrice && k - earlyExitMinBullishCandles + 1 >= i) {
+            const momentumCandles = candles.slice(k - earlyExitMinBullishCandles + 1, k + 1);
+            const bullish = momentumCandles.every((candle) => candle.close > candle.open);
+            const risePct = ((momentumCandles[momentumCandles.length - 1].close - momentumCandles[0].open) / momentumCandles[0].open) * 100;
+            if (bullish && risePct >= earlyExitMinRisePct) {
+              tradeClosed = true;
+              exitPrice = evalCandle.close;
+              exitReason = 'EARLY_MOMENTUM_EXIT';
+              exitTime = evalCandle.openTime;
+              break;
+            }
           }
 
           // 3. Evaluasi TAKE PROFIT (Ekor Jarum / Pullback Wick)
