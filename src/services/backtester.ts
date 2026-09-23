@@ -26,6 +26,10 @@ export interface BacktestParams {
   trailingTpEnabled?: boolean;
   trailingCallbackPct?: number;
   initialBalance?: number;
+  skipBottomRejectionEnabled?: boolean;
+  bottomRejectionMinRangePct?: number;
+  bottomRejectionWickRatio?: number;
+  bottomRejectionDominanceRatio?: number;
 }
 
 export interface BacktestTrade {
@@ -64,8 +68,36 @@ export interface BacktestResult {
   profitFactor: number;
   avgTradeDurationMinutes: number;
   partialTpTrades: number;
+  bottomRejectionSkips: number;
   trades: BacktestTrade[];
   equityCurve: { time: string; balance: number }[];
+}
+
+/**
+ * Mendeteksi apakah anatomi candle 1m merupakan pola bottom rejection / liquidity sweep ekstrem:
+ * 1. Rentang candle (High - Low) / Low >= minRangePct (volatilitas tinggi)
+ * 2. Lower wick >= body * wickToBodyRatio (ekor bawah ekstrem)
+ * 3. Lower wick >= upperWick * dominanceRatio (buyer mendominasi penuh)
+ */
+export function isBottomRejectionCandle(
+  c: Candle,
+  minRangePct: number = 1.5,
+  wickToBodyRatio: number = 2.0,
+  dominanceRatio: number = 1.0
+): boolean {
+  if (!c || c.low <= 0) return false;
+  const rangePct = ((c.high - c.low) / c.low) * 100;
+  if (rangePct < minRangePct) return false;
+
+  const rawBody = Math.abs(c.close - c.open);
+  const candleBodyEffective = Math.max(rawBody, (c.high - c.low) * 0.05);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+  const upperWick = c.high - Math.max(c.open, c.close);
+
+  const isExtremeLowerWick = lowerWick >= candleBodyEffective * wickToBodyRatio;
+  const isLowerWickDominant = lowerWick >= upperWick * dominanceRatio;
+
+  return isExtremeLowerWick && isLowerWickDominant;
 }
 
 export class WickSniperBacktester {
@@ -135,6 +167,7 @@ export class WickSniperBacktester {
 
     const allTrades: BacktestTrade[] = [];
     let totalCandlesAnalyzed = 0;
+    let totalBottomRejectionSkips = 0;
     const equityCurve: { time: string; balance: number }[] = [
       { time: new Date(params.startTime).toLocaleDateString('id-ID'), balance: initialBalance },
     ];
@@ -158,6 +191,17 @@ export class WickSniperBacktester {
         const surge = Math.max(surgeFromOpen, surgeFromPrevClose);
 
         if (surge < spikeMinPercent) continue;
+
+        // Skip jika candle 1m sebelumnya menunjukkan Bottom Rejection / Sweep ekstrem
+        if (params.skipBottomRejectionEnabled) {
+          const minRange = params.bottomRejectionMinRangePct ?? 1.5;
+          const wickRatio = params.bottomRejectionWickRatio ?? 2.0;
+          const dominanceRatio = params.bottomRejectionDominanceRatio ?? 1.0;
+          if (isBottomRejectionCandle(prevC, minRange, wickRatio, dominanceRatio)) {
+            totalBottomRejectionSkips++;
+            continue;
+          }
+        }
 
         // --- SIMULASI PENEMBAKAN JARING WICK SNIPER ---
         const entryTime = c.openTime;
@@ -495,6 +539,7 @@ export class WickSniperBacktester {
       profitFactor,
       avgTradeDurationMinutes: avgDuration,
       partialTpTrades,
+      bottomRejectionSkips: totalBottomRejectionSkips,
       trades: allTrades,
       equityCurve,
     };

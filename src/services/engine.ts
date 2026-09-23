@@ -6,6 +6,8 @@ import { SpikeScanner } from './scanner';
 import { logger } from './logger';
 import { db } from './db';
 import { telegram } from './telegram';
+import { Candle } from './dataFetcher';
+import { isBottomRejectionCandle } from './backtester';
 
 export class WickSniperEngine {
   private config: BotConfig;
@@ -428,6 +430,48 @@ export class WickSniperEngine {
         }
       } catch (e: any) {
         logger.log('WARN', `⚠️ [CHECK LIVE POSISI] Gagal mengecek posisi aktif Binance ${symbol}: ${e.message}`);
+      }
+    }
+
+    // Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) secepat kilat (Non-blocking fail-open)
+    if (this.config.scanner?.skipBottomRejectionEnabled) {
+      try {
+        const client = await binanceFutures.getHttpClient();
+        const klineRes = await client.get('/fapi/v1/klines', {
+          params: { symbol, interval: '1m', limit: 2 },
+          timeout: 700,
+        });
+        if (Array.isArray(klineRes.data) && klineRes.data.length >= 2) {
+          const k = klineRes.data[klineRes.data.length - 2];
+          const prevCandle: Candle = {
+            openTime: k[0],
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+            closeTime: k[6],
+            tradesCount: k[8] ? parseInt(k[8]) : 0,
+          };
+
+          const minRange = this.config.scanner.bottomRejectionMinRangePct ?? 1.5;
+          const wickRatio = this.config.scanner.bottomRejectionWickRatio ?? 2.0;
+
+          if (isBottomRejectionCandle(prevCandle, minRange, wickRatio, 1.0)) {
+            const rangePct = (((prevCandle.high - prevCandle.low) / prevCandle.low) * 100).toFixed(1);
+            alert.status = 'SKIPPED';
+            alert.skipReason = `Candle 1m sebelumnya Bottom Rejection / Sweep ekstrem (Rentang: ${rangePct}%)`;
+            logger.log(
+              'INFO',
+              `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada candle 1m sebelumnya (Rentang: ${rangePct}%).`,
+              symbol
+            );
+            db.saveSpike(alert).catch(() => { });
+            return;
+          }
+        }
+      } catch (e: any) {
+        logger.log('INFO', `[BOTTOM REJECTION FILTER] Lewati cek kline cepat ${symbol}: ${e.message}`);
       }
     }
 

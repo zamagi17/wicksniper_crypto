@@ -978,6 +978,13 @@ function populateSettingsForm(cfg) {
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
+  const brCheckbox = document.getElementById('cfg-bottom-rejection-enabled');
+  if (brCheckbox) {
+    brCheckbox.checked = !!cfg.scanner?.skipBottomRejectionEnabled;
+    toggleBottomRejectionInput();
+  }
+  setVal('cfg-bottom-rejection-range', cfg.scanner?.bottomRejectionMinRangePct || 1.5);
+  setVal('cfg-bottom-rejection-ratio', cfg.scanner?.bottomRejectionWickRatio || 2.0);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
   setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 3);
@@ -1064,6 +1071,9 @@ function getSettingsFormData() {
     scanner: {
       ...(currentConfig?.scanner || {}),
       spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '2.0')) || 2.0,
+      skipBottomRejectionEnabled: !!document.getElementById('cfg-bottom-rejection-enabled')?.checked,
+      bottomRejectionMinRangePct: parseFloat(getVal('cfg-bottom-rejection-range', '1.5')) || 1.5,
+      bottomRejectionWickRatio: parseFloat(getVal('cfg-bottom-rejection-ratio', '2.0')) || 2.0,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
@@ -1314,6 +1324,15 @@ function toggleTrailingSL() {
 }
 window.toggleTrailingSL = toggleTrailingSL;
 
+function toggleBottomRejectionInput() {
+  const checkbox = document.getElementById('cfg-bottom-rejection-enabled');
+  const group = document.getElementById('cfg-bottom-rejection-params');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleBottomRejectionInput = toggleBottomRejectionInput;
+
 function toggleTrailingTpInput() {
   const checkbox = document.getElementById('cfg-trailing-tp-enabled');
   const group = document.getElementById('trailing-tp-callback-group');
@@ -1484,6 +1503,17 @@ function openBacktestModal() {
     if (currentConfig.grid?.martingaleMultiplier) document.getElementById('bt-martingale').value = currentConfig.grid.martingaleMultiplier;
     if (currentConfig.exit?.maxHoldMinutes) document.getElementById('bt-max-hold').value = currentConfig.exit.maxHoldMinutes;
     if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
+    const btbrCheckbox = document.getElementById('bt-bottom-rejection-enabled');
+    if (btbrCheckbox) btbrCheckbox.checked = !!currentConfig.scanner?.skipBottomRejectionEnabled;
+    const btbrRange = document.getElementById('bt-bottom-rejection-range');
+    if (btbrRange && currentConfig.scanner?.bottomRejectionMinRangePct) {
+      btbrRange.value = currentConfig.scanner.bottomRejectionMinRangePct;
+    }
+    const btbrRatio = document.getElementById('bt-bottom-rejection-ratio');
+    if (btbrRatio && currentConfig.scanner?.bottomRejectionWickRatio) {
+      btbrRatio.value = currentConfig.scanner.bottomRejectionWickRatio;
+    }
+    toggleBtBottomRejection();
     _backtestModalInitialized = true;
   }
 
@@ -1530,8 +1560,28 @@ function resetBacktestParams() {
     if (currentConfig.grid?.martingaleMultiplier) document.getElementById('bt-martingale').value = currentConfig.grid.martingaleMultiplier;
     if (currentConfig.exit?.maxHoldMinutes) document.getElementById('bt-max-hold').value = currentConfig.exit.maxHoldMinutes;
     if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
+    const btbrCheckbox = document.getElementById('bt-bottom-rejection-enabled');
+    if (btbrCheckbox) btbrCheckbox.checked = !!currentConfig.scanner?.skipBottomRejectionEnabled;
+    const btbrRange = document.getElementById('bt-bottom-rejection-range');
+    if (btbrRange && currentConfig.scanner?.bottomRejectionMinRangePct) {
+      btbrRange.value = currentConfig.scanner.bottomRejectionMinRangePct;
+    }
+    const btbrRatio = document.getElementById('bt-bottom-rejection-ratio');
+    if (btbrRatio && currentConfig.scanner?.bottomRejectionWickRatio) {
+      btbrRatio.value = currentConfig.scanner.bottomRejectionWickRatio;
+    }
+    toggleBtBottomRejection();
   }
 }
+
+function toggleBtBottomRejection() {
+  const isChecked = document.getElementById('bt-bottom-rejection-enabled')?.checked;
+  const container = document.getElementById('bt-bottom-rejection-container');
+  if (container) {
+    container.style.display = isChecked ? 'inline-flex' : 'none';
+  }
+}
+window.toggleBtBottomRejection = toggleBtBottomRejection;
 
 function toggleBtPartialTp() {
   const isChecked = document.getElementById('bt-partial-tp-enabled')?.checked;
@@ -1599,6 +1649,9 @@ async function executeBacktest() {
     partialTpRatio: (parseFloat(document.getElementById('bt-partial-tp-ratio')?.value) || 50) / 100,
     trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,
     trailingCallbackPct: parseFloat(document.getElementById('bt-trailing-tp-callback')?.value) || 0.4,
+    skipBottomRejectionEnabled: !!document.getElementById('bt-bottom-rejection-enabled')?.checked,
+    bottomRejectionMinRangePct: parseFloat(document.getElementById('bt-bottom-rejection-range')?.value) || 1.5,
+    bottomRejectionWickRatio: parseFloat(document.getElementById('bt-bottom-rejection-ratio')?.value) || 2.0,
     marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 3,
     layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.0,
     totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 6,
@@ -1650,6 +1703,9 @@ async function executeBacktest() {
     let candleSub = `${r.totalCandlesAnalyzed.toLocaleString()} Lilin 1m`;
     if (r.partialTpTrades > 0) {
       candleSub += ` • 🎯 ${r.partialTpTrades} Partial TP`;
+    }
+    if (r.bottomRejectionSkips > 0) {
+      candleSub += ` • 🛡️ ${r.bottomRejectionSkips} Sweep Ditolak`;
     }
     document.getElementById('bt-res-candles').innerText = candleSub;
 
