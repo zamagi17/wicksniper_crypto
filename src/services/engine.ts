@@ -16,6 +16,7 @@ export class WickSniperEngine {
   private scanner: SpikeScanner;
   private virtualBalance: number = 1000;
   private activePositions: Map<string, ActivePosition> = new Map();
+  private deployingSymbols: Set<string> = new Set(); // Kunci slot konkurensi (Anti-Race Condition lonjakan bersamaan)
   private priceMomentum: Map<string, { price: number; time: number }[]> = new Map();
   private closingSymbols: Set<string> = new Set();
   private syncingTpSymbols: Set<string> = new Set();
@@ -393,93 +394,108 @@ export class WickSniperEngine {
       return;
     }
 
-    // Cek kuota posisi aktif (di memori bot DAN di Binance aktual untuk mode LIVE)
-    let currentActiveCount = this.activePositions.size;
-    if (this.config.tradingMode === 'LIVE') {
-      try {
-        const livePositions = await binanceFutures.getAllOpenPositions();
-        currentActiveCount = Math.max(currentActiveCount, livePositions.length);
-      } catch { }
-    }
-
-    if (currentActiveCount >= this.config.grid.maxConcurrentCoins) {
+    // Proteksi Lapis 1 (SYNCHRONOUS ATOMIC LOCK):
+    // Cek kuota posisi aktif + order yang SEDANG dalam proses penembakan jaringan
+    const maxCoins = this.config.grid.maxConcurrentCoins;
+    const currentActiveAndDeploying = this.activePositions.size + this.deployingSymbols.size;
+    if (currentActiveAndDeploying >= maxCoins) {
       alert.status = 'SKIPPED';
-      alert.skipReason = `Maksimal posisi aktif (${this.config.grid.maxConcurrentCoins}) tercapai`;
-      logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh (${currentActiveCount}/${this.config.grid.maxConcurrentCoins}).`);
+      alert.skipReason = `Maksimal posisi aktif (${maxCoins}) tercapai`;
+      logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh (${currentActiveAndDeploying}/${maxCoins}).`);
       db.saveSpike(alert).catch(() => { });
       return;
     }
 
-    // Cek apakah koin ini sudah memiliki posisi aktif di memori atau di Binance riil
-    if (this.activePositions.has(symbol)) {
+    // Cek apakah koin ini sudah aktif atau sedang dalam proses penembakan
+    if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) {
       alert.status = 'SKIPPED';
-      alert.skipReason = `Sudah ada posisi aktif pada ${symbol}`;
+      alert.skipReason = `Sudah ada posisi aktif atau order sedang diproses pada ${symbol}`;
       db.saveSpike(alert).catch(() => { });
       return;
     }
 
-    if (this.config.tradingMode === 'LIVE') {
-      try {
-        const livePos = await binanceFutures.getOpenPosition(symbol);
-        if (livePos && Math.abs(livePos.positionAmt) > 0) {
-          alert.status = 'SKIPPED';
-          alert.skipReason = `Posisi aktif sudah ada di Binance pada ${symbol} (Qty: ${Math.abs(livePos.positionAmt)})`;
-          logger.log('WARN', `⚠️ [SKIP ORDER BARU] ${symbol} sudah punya posisi aktif di Binance. Bot menahan order baru agar tidak avg down/duplicate.`);
-          db.saveSpike(alert).catch(() => { });
-          return;
-        }
-      } catch (e: any) {
-        logger.log('WARN', `⚠️ [CHECK LIVE POSISI] Gagal mengecek posisi aktif Binance ${symbol}: ${e.message}`);
-      }
-    }
+    // KUNCI SLOT SEKETIKA SECARA SYNCHRONOUS SEBELUM ANY AWAIT BERJALAN!
+    // Ini menghentikan koin lain yang spike di milidetik yang sama agar tidak menembus batas kuota.
+    this.deployingSymbols.add(symbol);
 
-    // Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) secepat kilat (Non-blocking fail-open)
-    if (this.config.scanner?.skipBottomRejectionEnabled) {
-      try {
-        const client = await binanceFutures.getHttpClient();
-        const klineRes = await client.get('/fapi/v1/klines', {
-          params: { symbol, interval: '1m', limit: 2 },
-          timeout: 700,
-        });
-        if (Array.isArray(klineRes.data) && klineRes.data.length >= 2) {
-          const k = klineRes.data[klineRes.data.length - 2];
-          const prevCandle: Candle = {
-            openTime: k[0],
-            open: parseFloat(k[1]),
-            high: parseFloat(k[2]),
-            low: parseFloat(k[3]),
-            close: parseFloat(k[4]),
-            volume: parseFloat(k[5]),
-            closeTime: k[6],
-            tradesCount: k[8] ? parseInt(k[8]) : 0,
-          };
-
-          const minRange = this.config.scanner.bottomRejectionMinRangePct ?? 1.5;
-          const wickRatio = this.config.scanner.bottomRejectionWickRatio ?? 2.0;
-
-          if (isBottomRejectionCandle(prevCandle, minRange, wickRatio, 1.0)) {
-            const rangePct = (((prevCandle.high - prevCandle.low) / prevCandle.low) * 100).toFixed(1);
+    try {
+      // Cek kuota aktual di Binance (untuk mode LIVE)
+      if (this.config.tradingMode === 'LIVE') {
+        try {
+          const livePositions = await binanceFutures.getAllOpenPositions();
+          const effectiveLiveCount = Math.max(this.activePositions.size, livePositions.length) + (this.deployingSymbols.size - 1);
+          if (effectiveLiveCount >= maxCoins) {
             alert.status = 'SKIPPED';
-            alert.skipReason = `Candle 1m sebelumnya Bottom Rejection / Sweep ekstrem (Rentang: ${rangePct}%)`;
-            logger.log(
-              'INFO',
-              `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada candle 1m sebelumnya (Rentang: ${rangePct}%).`,
-              symbol
-            );
+            alert.skipReason = `Maksimal posisi aktif di Binance (${maxCoins}) tercapai`;
+            logger.log('WARN', `⚡ Spike pada ${symbol} dilewati: Kuota Binance aktual penuh (${effectiveLiveCount}/${maxCoins}).`);
             db.saveSpike(alert).catch(() => { });
             return;
           }
+
+          const livePos = await binanceFutures.getOpenPosition(symbol);
+          if (livePos && Math.abs(livePos.positionAmt) > 0) {
+            alert.status = 'SKIPPED';
+            alert.skipReason = `Posisi aktif sudah ada di Binance pada ${symbol} (Qty: ${Math.abs(livePos.positionAmt)})`;
+            logger.log('WARN', `⚠️ [SKIP ORDER BARU] ${symbol} sudah punya posisi aktif di Binance.`);
+            db.saveSpike(alert).catch(() => { });
+            return;
+          }
+        } catch (e: any) {
+          logger.log('WARN', `⚠️ [CHECK LIVE POSISI] Gagal mengecek posisi aktif Binance ${symbol}: ${e.message}`);
         }
-      } catch (e: any) {
-        logger.log('INFO', `[BOTTOM REJECTION FILTER] Lewati cek kline cepat ${symbol}: ${e.message}`);
       }
+
+      // Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) secepat kilat (Non-blocking fail-open)
+      if (this.config.scanner?.skipBottomRejectionEnabled) {
+        try {
+          const client = await binanceFutures.getHttpClient();
+          const klineRes = await client.get('/fapi/v1/klines', {
+            params: { symbol, interval: '1m', limit: 2 },
+            timeout: 700,
+          });
+          if (Array.isArray(klineRes.data) && klineRes.data.length >= 2) {
+            const k = klineRes.data[klineRes.data.length - 2];
+            const prevCandle: Candle = {
+              openTime: k[0],
+              open: parseFloat(k[1]),
+              high: parseFloat(k[2]),
+              low: parseFloat(k[3]),
+              close: parseFloat(k[4]),
+              volume: parseFloat(k[5]),
+              closeTime: k[6],
+              tradesCount: k[8] ? parseInt(k[8]) : 0,
+            };
+
+            const minRange = this.config.scanner.bottomRejectionMinRangePct ?? 1.5;
+            const wickRatio = this.config.scanner.bottomRejectionWickRatio ?? 2.0;
+
+            if (isBottomRejectionCandle(prevCandle, minRange, wickRatio, 1.0)) {
+              const rangePct = (((prevCandle.high - prevCandle.low) / prevCandle.low) * 100).toFixed(1);
+              alert.status = 'SKIPPED';
+              alert.skipReason = `Candle 1m sebelumnya Bottom Rejection / Sweep ekstrem (Rentang: ${rangePct}%)`;
+              logger.log(
+                'INFO',
+                `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada candle 1m sebelumnya (Rentang: ${rangePct}%).`,
+                symbol
+              );
+              db.saveSpike(alert).catch(() => { });
+              return;
+            }
+          }
+        } catch (e: any) {
+          logger.log('INFO', `[BOTTOM REJECTION FILTER] Lewati cek kline cepat ${symbol}: ${e.message}`);
+        }
+      }
+
+      alert.status = 'EXECUTING';
+      logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
+      db.saveSpike(alert).catch(() => { });
+
+      await this.deployGridLadder(symbol, alert.currentPrice, alert.surgePct, alert.lookbackSeconds);
+    } finally {
+      // Lepaskan kunci konkurensi (slot kini sudah resmi tercatat di this.activePositions atau dibatalkan)
+      this.deployingSymbols.delete(symbol);
     }
-
-    alert.status = 'EXECUTING';
-    logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
-    db.saveSpike(alert).catch(() => { });
-
-    await this.deployGridLadder(symbol, alert.currentPrice, alert.surgePct, alert.lookbackSeconds);
   }
 
   /**
@@ -2160,7 +2176,11 @@ export class WickSniperEngine {
       // Jika ada posisi aktif di Binance (seperti AMCUSDT atau IRENUSDT) yang belum ada di memori bot,
       // pulihkan kembali ke activePositions dan pasangkan Limit Take Profit agar tidak "Open Orders: 0"!
       for (const livePos of allLivePositions) {
-        if (!this.activePositions.has(livePos.symbol) && Math.abs(livePos.positionAmt) > 0) {
+        if (
+          !this.activePositions.has(livePos.symbol) &&
+          !this.deployingSymbols.has(livePos.symbol) &&
+          Math.abs(livePos.positionAmt) > 0
+        ) {
           logger.log(
             'WARN',
             `🔄 [RE-ADOPSI POSISI] Menemukan posisi aktif ${livePos.symbol} di Binance (Qty: ${Math.abs(livePos.positionAmt)}, Entry: $${livePos.entryPrice}). Memulihkan ke radar bot & memasang proteksi TP...`,
