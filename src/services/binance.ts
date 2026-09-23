@@ -976,10 +976,6 @@ export class BinanceFuturesClient {
         this.lastWsMessageAt = Date.now();
         console.log(`⚡ [WEBSOCKET CONNECTED] Terhubung ke Binance Futures All-Market Stream (${this.wsUrl})`);
         logger.log('INFO', '⚡ [MARKET DATA] Binance WebSocket terhubung.');
-        if (this.fastPollInterval) {
-          clearInterval(this.fastPollInterval);
-          this.fastPollInterval = null;
-        }
       });
 
       this.wsClient.on('message', (raw: WebSocket.Data) => {
@@ -987,6 +983,11 @@ export class BinanceFuturesClient {
           this.lastWsMessageAt = Date.now();
           const data = JSON.parse(raw.toString());
           if (Array.isArray(data)) {
+            if (data.length > 0 && this.fastPollInterval) {
+              clearInterval(this.fastPollInterval);
+              this.fastPollInterval = null;
+              logger.log('INFO', '✅ [MARKET DATA] Payload ticker valid diterima. Fallback polling dihentikan.');
+            }
             for (const listener of this.tickerListeners) {
               listener(data);
             }
@@ -1014,7 +1015,7 @@ export class BinanceFuturesClient {
         // Fallback polling hanya jika WebSocket benar-benar terputus
         this.startFastTickerStream();
         if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
-        this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 5000);
+        this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 30000);
       });
 
       if (this.wsWatchdogTimer) clearInterval(this.wsWatchdogTimer);
@@ -1031,7 +1032,7 @@ export class BinanceFuturesClient {
       console.error('Gagal inisialisasi WebSocket:', e.message);
       this.startFastTickerStream();
       if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
-      this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 5000);
+      this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 30000);
     }
   }
 
