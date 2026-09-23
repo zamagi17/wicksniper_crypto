@@ -48,6 +48,8 @@ export class BinanceFuturesClient {
   private listenKeyKeepAliveTimer: NodeJS.Timeout | null = null;
   private isUserWsConnected: boolean = false;
   private userWsReconnectTimer: NodeJS.Timeout | null = null;
+  private userWsReconnectAttempts: number = 0;
+  private hasLoggedUserWsConnected: boolean = false;
   private orderTradeListeners: ((order: any) => void)[] = [];
   private accountUpdateListeners: ((account: any) => void)[] = [];
 
@@ -1256,6 +1258,11 @@ export class BinanceFuturesClient {
   public async startUserDataStream(): Promise<void> {
     if (!this.apiKey || !this.apiSecret) return;
 
+    // Jika sudah aktif dan terhubung, tidak perlu reconnect berulang
+    if (this.isUserWsConnected && this.userWsClient && this.userWsClient.readyState === WebSocket.OPEN) {
+      return;
+    }
+
     if (this.userWsClient) {
       try {
         this.userWsClient.terminate();
@@ -1282,7 +1289,8 @@ export class BinanceFuturesClient {
     try {
       const agent = await this.getOrCreateDohAgent();
       const streamBase = this.isTestnet ? 'stream.binancefuture.com' : 'fstream.binance.com';
-      const userWsUrl = `wss://${streamBase}/ws/${this.listenKey}`;
+      // Menggunakan endpoint /private/ws/ resmi Binance Futures 2026
+      const userWsUrl = `wss://${streamBase}/private/ws/${this.listenKey}`;
 
       this.userWsClient = new WebSocket(userWsUrl, {
         agent,
@@ -1291,7 +1299,11 @@ export class BinanceFuturesClient {
 
       this.userWsClient.on('open', () => {
         this.isUserWsConnected = true;
-        logger.log('SUCCESS', '⚡ [USER DATA STREAM] Terhubung ke Binance Private Stream (Real-Time Order & Position Update Aktif).');
+        this.userWsReconnectAttempts = 0;
+        if (!this.hasLoggedUserWsConnected) {
+          this.hasLoggedUserWsConnected = true;
+          logger.log('SUCCESS', '⚡ [USER DATA STREAM] Terhubung ke Binance Private Stream (Real-Time Order & Position Update Aktif).');
+        }
       });
 
       this.userWsClient.on('message', (raw: WebSocket.Data) => {
@@ -1313,9 +1325,21 @@ export class BinanceFuturesClient {
 
       this.userWsClient.on('close', (code) => {
         this.isUserWsConnected = false;
-        console.warn(`[USER DATA STREAM CLOSED] Code: ${code}. Reconnecting in 5s...`);
+        this.userWsReconnectAttempts++;
+        // Exponential backoff: 5s, 10s, 20s, 30s, max 60s
+        const delayMs = Math.min(60000, Math.pow(2, Math.min(this.userWsReconnectAttempts - 1, 4)) * 5000);
+        console.warn(`[USER DATA STREAM CLOSED] Code: ${code}. Attempt ${this.userWsReconnectAttempts}. Reconnecting in ${delayMs / 1000}s...`);
+
+        if (this.userWsReconnectAttempts === 3) {
+          logger.log(
+            'WARN',
+            `⚠️ [USER DATA STREAM] WebSocket privat terputus (Code: ${code}). Bot otomatis memakai sinkronisasi REST API untuk posisi & order.`
+          );
+          this.hasLoggedUserWsConnected = false;
+        }
+
         if (this.userWsReconnectTimer) clearTimeout(this.userWsReconnectTimer);
-        this.userWsReconnectTimer = setTimeout(() => this.startUserDataStream(), 5000);
+        this.userWsReconnectTimer = setTimeout(() => this.startUserDataStream(), delayMs);
       });
 
       this.userWsClient.on('error', (err) => {
