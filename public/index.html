@@ -294,11 +294,23 @@
         <div class="form-row">
           <div class="form-group" style="grid-column: span 2;">
             <label>Sumber Data Live Market (Kill-Switch)</label>
-            <select id="cfg-data-source" class="form-control">
+            <select id="cfg-data-source" class="form-control" onchange="toggleDataSourceGroup()">
               <option value="WEBSOCKET">Real-Time WebSocket (Tercepat, latensi milidetik)</option>
-              <option value="POLLING">HTTP Polling (500ms, 100% Anti-Shadowban)</option>
+              <option value="POLLING">HTTP Polling (REST API, 100% Anti-Shadowban)</option>
             </select>
             <small class="form-hint">Jika IP server Anda terkena shadowban Binance, ubah ke <b>Polling</b> agar bot tetap bisa berjalan lancar tanpa error.</small>
+          </div>
+
+          <div class="form-group" id="polling-interval-group" style="grid-column: span 2; display: none;">
+            <label>Kecepatan Interval Polling REST</label>
+            <select id="cfg-polling-interval" class="form-control">
+              <option value="500">⚡ 500 ms (Agresif & Reaktif, ~50% Kuota REST)</option>
+              <option value="750">⏱️ 750 ms (Cepat & Seimbang, ~33% Kuota REST)</option>
+              <option value="1000" selected>🛡️ 1000 ms / 1 Detik (Standar Rekomendasi, ~25% Kuota REST)</option>
+              <option value="1500">🐢 1500 ms / 1.5 Detik (Hemat Kuota, ~16% Kuota REST)</option>
+              <option value="2000">💤 2000 ms / 2 Detik (Ultra Santai, ~12% Kuota REST)</option>
+            </select>
+            <small class="form-hint">Pilih 500ms untuk respon spike kilat, atau 1000ms untuk kuota lebih aman. Pantau indikator Quota REST di header bot.</small>
           </div>
         </div>
 
@@ -476,6 +488,14 @@
             <label>Daftar Koin Whitelist (Pisahkan dengan koma)</label>
             <input type="text" id="cfg-whitelist-symbols" class="form-control" placeholder="AKEUSDT, BTWUSDT, CROSSUSDT">
             <small class="form-hint">Contoh: AKEUSDT, BTWUSDT, SAGAUSDT</small>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top: 8px;">
+          <div class="form-group" style="grid-column: span 2;">
+            <label>Daftar Koin Blacklist / Exclude (Pisahkan dengan koma)</label>
+            <input type="text" id="cfg-exclude-symbols" class="form-control" placeholder="USDCUSDT, FDUSDUSDT, BTCUSDT, ETHUSDT, OURAUSDT">
+            <small class="form-hint">Koin-koin ini akan selalu diabaikan oleh scanner (tidak akan pernah discan atau ditembak).</small>
           </div>
         </div>
 

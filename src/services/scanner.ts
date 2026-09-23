@@ -44,6 +44,15 @@ export class SpikeScanner {
         }
       }
     }
+    if (this.config.excludeSymbols && this.config.excludeSymbols.length > 0) {
+      const excluded = new Set(this.config.excludeSymbols);
+      for (const sym of this.lastPrices.keys()) {
+        if (excluded.has(sym)) {
+          this.lastPrices.delete(sym);
+          this.priceHistory.delete(sym);
+        }
+      }
+    }
   }
 
   public setCooldown(symbol: string, minutes: number) {

@@ -70,6 +70,7 @@ export class WickSniperEngine {
         maxPriceUsdt: 2000,
         excludeSymbols: ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT'],
         cooldownMinutes: 20,
+        pollingIntervalMs: 1000,
       },
       grid: {
         maxConcurrentCoins: 2,
@@ -137,7 +138,7 @@ export class WickSniperEngine {
       telegram.updateConfig(this.config.telegram);
     }
     if (this.isRunning) {
-      binanceFutures.startTickerWebSocket(this.config.scanner.dataSource).catch(() => {});
+      binanceFutures.startTickerWebSocket(this.config.scanner.dataSource, this.config.scanner.pollingIntervalMs).catch(() => {});
     }
     if (this.config.apiKey && this.config.apiSecret) {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
@@ -269,7 +270,7 @@ export class WickSniperEngine {
 
     await binanceFutures.syncTime();
     await binanceFutures.loadExchangeInfo();
-    await binanceFutures.startTickerWebSocket(this.config.scanner.dataSource);
+    await binanceFutures.startTickerWebSocket(this.config.scanner.dataSource, this.config.scanner.pollingIntervalMs);
     this.scanner.start();
 
     if (this.config.tradingMode === 'LIVE') {
@@ -538,6 +539,13 @@ export class WickSniperEngine {
           availableBalance: this.liveAvailableBalance > 0 ? this.liveAvailableBalance : undefined,
           requiredAmount: (currentPrice * layer0Qty) / leverage,
         });
+
+        // Auto-Cooldown: Jika order ditolak Binance (misal koin Pre-Market / not whitelisted / margin),
+        // pasang cooldown agar scanner tidak berulang kali menembak koin yang sama & membuang kuota API.
+        const isNotWhitelisted = errMsg.toLowerCase().includes('white list') || errMsg.toLowerCase().includes('whitelist');
+        const cooldownMins = isNotWhitelisted ? 120 : (this.config.scanner.cooldownMinutes || 20);
+        this.scanner.setCooldown(symbol, cooldownMins);
+        logger.log('INFO', `⏳ [AUTO-COOLDOWN] ${symbol} diberi cooldown ${cooldownMins} menit untuk mencegah spam order gagal.`, symbol);
         return;
       }
       layers[0].orderId = String(res0.orderId);
@@ -2279,7 +2287,7 @@ export class WickSniperEngine {
           telegram.updateConfig(this.config.telegram);
         }
         if (this.isRunning) {
-          binanceFutures.startTickerWebSocket(this.config.scanner.dataSource).catch(() => {});
+          binanceFutures.startTickerWebSocket(this.config.scanner.dataSource, this.config.scanner.pollingIntervalMs).catch(() => {});
         }
         if (this.config.apiKey && this.config.apiSecret) {
           binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);

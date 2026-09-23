@@ -995,6 +995,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.1);
   setVal('cfg-cooldown', cfg.scanner?.cooldownMinutes || 20);
   setVal('cfg-data-source', cfg.scanner?.dataSource || 'WEBSOCKET');
+  setVal('cfg-polling-interval', String(cfg.scanner?.pollingIntervalMs || 1000));
+  toggleDataSourceGroup();
   setVal('cfg-api-key', cfg.apiKey || '');
   setVal('cfg-api-secret', cfg.apiSecret || '');
 
@@ -1022,6 +1024,7 @@ function populateSettingsForm(cfg) {
     toggleWhitelistInput();
   }
   setVal('cfg-whitelist-symbols', (cfg.scanner?.whitelistSymbols || []).join(', '));
+  setVal('cfg-exclude-symbols', (cfg.scanner?.excludeSymbols ?? ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT']).join(', '));
 }
 
 function getSettingsFormData() {
@@ -1043,7 +1046,12 @@ function getSettingsFormData() {
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+      excludeSymbols: (getVal('cfg-exclude-symbols', '') || '')
+        .split(',')
+        .map(s => s.trim().toUpperCase())
+        .filter(Boolean),
       dataSource: getVal('cfg-data-source', 'WEBSOCKET'),
+      pollingIntervalMs: parseInt(getVal('cfg-polling-interval', '1000'), 10) || 1000,
     },
     exit: {
       ...(currentConfig?.exit || {}),
@@ -1293,6 +1301,15 @@ function toggleTrailingTpInput() {
   }
 }
 window.toggleTrailingTpInput = toggleTrailingTpInput;
+
+function toggleDataSourceGroup() {
+  const select = document.getElementById('cfg-data-source');
+  const group = document.getElementById('polling-interval-group');
+  if (group) {
+    group.style.display = select && select.value === 'POLLING' ? 'block' : 'none';
+  }
+}
+window.toggleDataSourceGroup = toggleDataSourceGroup;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER
@@ -1689,6 +1706,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cfg-partial-tp-enabled')?.addEventListener('change', togglePartialTpInput);
   document.getElementById('cfg-trailing-sl-enabled')?.addEventListener('change', toggleTrailingSL);
   document.getElementById('cfg-whitelist-enabled')?.addEventListener('change', toggleWhitelistInput);
+  document.getElementById('cfg-data-source')?.addEventListener('change', toggleDataSourceGroup);
 });
 
 // PWA Service Worker Registration & Cache Busting
