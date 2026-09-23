@@ -179,6 +179,8 @@ export interface EngineStatus {
   marketDataAgeMs?: number;
   leverage?: number;
   marginType?: 'CROSSED' | 'ISOLATED';
+  usedWeight1m?: number;
+  orderCount10s?: number;
 }
 
 export interface LogEntry {

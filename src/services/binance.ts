@@ -38,6 +38,9 @@ export class BinanceFuturesClient {
   private positionCache: any[] = [];
   private readonly POSITION_CACHE_TTL = 2000; // 2 second cache
   public lastOrderError: string = '';
+  public lastUsedWeight: number = 0;
+  public lastOrderCount10s: number = 0;
+  public lastOrderCount1m: number = 0;
 
   constructor() {
     this.initHttpClient();
@@ -140,6 +143,52 @@ export class BinanceFuturesClient {
         'User-Agent': 'WickSniper/1.0',
       },
     });
+
+    this.httpClient.interceptors.response.use(
+      (response) => {
+        const weight = response.headers['x-mbx-used-weight-1m'];
+        if (weight) {
+          const parsed = parseInt(weight, 10);
+          if (!isNaN(parsed)) {
+            this.lastUsedWeight = parsed;
+          }
+        }
+        const ord10s = response.headers['x-mbx-order-count-10s'];
+        if (ord10s) {
+          const parsed = parseInt(ord10s, 10);
+          if (!isNaN(parsed)) {
+            this.lastOrderCount10s = parsed;
+          }
+        }
+        const ord1m = response.headers['x-mbx-order-count-1m'];
+        if (ord1m) {
+          const parsed = parseInt(ord1m, 10);
+          if (!isNaN(parsed)) {
+            this.lastOrderCount1m = parsed;
+          }
+        }
+        return response;
+      },
+      (error) => {
+        if (error.response?.headers) {
+          const weight = error.response.headers['x-mbx-used-weight-1m'];
+          if (weight) {
+            const parsed = parseInt(weight, 10);
+            if (!isNaN(parsed)) {
+              this.lastUsedWeight = parsed;
+            }
+          }
+          const ord10s = error.response.headers['x-mbx-order-count-10s'];
+          if (ord10s) {
+            const parsed = parseInt(ord10s, 10);
+            if (!isNaN(parsed)) {
+              this.lastOrderCount10s = parsed;
+            }
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
   }
 
   public async getHttpClient(): Promise<AxiosInstance> {
@@ -978,7 +1027,7 @@ export class BinanceFuturesClient {
     if (dataSource) this.currentDataSource = dataSource;
 
     if (this.currentDataSource === 'POLLING') {
-      logger.log('INFO', '✅ Mode POLLING diaktifkan. Menghentikan WebSocket dan beralih ke REST API 500ms.');
+      logger.log('INFO', '✅ Mode POLLING diaktifkan. Menghentikan WebSocket dan beralih ke REST API 1000ms (1 detik).');
       this.isWsConnected = false;
       if (this.wsClient) {
         try {
@@ -990,7 +1039,7 @@ export class BinanceFuturesClient {
         clearTimeout(this.wsReconnectTimer);
         this.wsReconnectTimer = null;
       }
-      this.startFastTickerStream(500);
+      this.startFastTickerStream(1000);
       return;
     }
 
@@ -1091,9 +1140,9 @@ export class BinanceFuturesClient {
       if (err.response) {
         const status = err.response.status;
         if (status === 429) {
-          logger.log('WARN', '⚠️ [MARKET DATA] Terkena HTTP 429 Rate Limit (Terlalu banyak request API REST).');
+          logger.log('WARN', `⚠️ [MARKET DATA] Terkena HTTP 429 Rate Limit (Used Weight: ${this.lastUsedWeight}/2400). Menahan request sementara...`);
         } else if (status === 418) {
-          logger.log('ERROR', '❌ [MARKET DATA] IP Terkena Banned Sementara oleh API REST Binance (HTTP 418).');
+          logger.log('ERROR', `❌ [MARKET DATA] IP Terkena Banned Sementara oleh API REST Binance (HTTP 418). Used Weight: ${this.lastUsedWeight}/2400.`);
         }
       }
     }

@@ -26,6 +26,7 @@ export class WickSniperEngine {
   private tickInterval: NodeJS.Timeout | null = null;
   private realBalance: number = 0;
   private liveAvailableBalance: number = 0;
+  private lastWeightWarnAt: number = 0;
 
   constructor(configPath: string) {
     this.configPath = configPath;
@@ -277,12 +278,37 @@ export class WickSniperEngine {
         this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
         tickCount++;
-        if (tickCount % 3 === 0 && this.config.tradingMode === 'LIVE') {
+        // Relaksasi interval sync posisi dan balance ke 5 detik (dari 3 detik) untuk menghemat kuota REST
+        if (tickCount % 5 === 0 && this.config.tradingMode === 'LIVE') {
           await this.syncLivePositions();
           await this.syncLiveBalance();
         }
         if (tickCount % 5 === 0) {
           await this.syncConfigFromDb();
+        }
+
+        // Tampilkan log pemakaian Kuota API (Weight) setiap 15 detik jika ada aktivitas REST
+        if (tickCount % 15 === 0) {
+          const weight = binanceFutures.lastUsedWeight;
+          if (weight > 0) {
+            const ord10s = binanceFutures.lastOrderCount10s;
+            const pct = Math.round((weight / 2400) * 100);
+            const level = pct >= 80 ? 'WARN' : 'INFO';
+            logger.log(
+              level,
+              `📊 [API WEIGHT] Binance REST Quota: ${weight}/2400 (${pct}%) | Orders 10s: ${ord10s}/300`
+            );
+          }
+        }
+
+        // Peringatan otomatis jika kuota mendekati batas kritis (>= 1900 weight / ~80%)
+        const currentWeight = binanceFutures.lastUsedWeight;
+        if (currentWeight >= 1900 && (!this.lastWeightWarnAt || Date.now() - this.lastWeightWarnAt > 20000)) {
+          this.lastWeightWarnAt = Date.now();
+          logger.log(
+            'WARN',
+            `⚠️ [RATE LIMIT ALERT] Pemakaian kuota API Binance mencapai ${currentWeight}/2400 (${Math.round((currentWeight / 2400) * 100)}%)! Kurangi frekuensi request agar tidak terkena HTTP 429.`
+          );
         }
         // Jika bot dihentikan dan semua posisi sudah tertutup, bersihkan interval
         if (!this.isRunning && this.activePositions.size === 0 && this.tickInterval) {
@@ -1937,6 +1963,8 @@ export class WickSniperEngine {
       marketDataAgeMs: this.scanner.getDataAgeMs(),
       leverage: this.config.leverage || 5,
       marginType: this.config.marginType || 'CROSSED',
+      usedWeight1m: binanceFutures.lastUsedWeight,
+      orderCount10s: binanceFutures.lastOrderCount10s,
     };
   }
 
