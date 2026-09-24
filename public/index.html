@@ -9,6 +9,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="WickSniper">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
@@ -17,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.3.0">
+  <link rel="stylesheet" href="style.css?v=2.3.0">
 </head>
 <body>
   <!-- FULLSCREEN LOGIN OVERLAY -->
@@ -96,10 +98,16 @@
         <span id="btn-engine-text">Jalankan Bot</span>
       </button>
 
-      <button class="btn btn-secondary" onclick="openBacktestModal()">🧪 Backtest Lab</button>
-      <button class="btn btn-secondary" onclick="openSettingsModal()">⚙️ Pengaturan</button>
-      <button class="btn btn-secondary" id="btn-lock-terminal" onclick="logoutSession()" title="Kunci Dashboard"><span class="icon">🔒</span> Kunci</button>
-      <button class="btn btn-danger" id="btn-reset-demo" onclick="resetDemo()">🧹 Reset Demo</button>
+      <button class="btn btn-secondary nav-btn-desktop" onclick="openBacktestModal()">🧪 Backtest Lab</button>
+      <button class="btn btn-secondary nav-btn-desktop" onclick="openSettingsModal()">⚙️ Pengaturan</button>
+      <button class="btn btn-secondary nav-btn-desktop" id="btn-lock-terminal" onclick="logoutSession()" title="Kunci Dashboard"><span class="icon">🔒</span> Kunci</button>
+      <button class="btn btn-danger nav-btn-desktop" id="btn-reset-demo" onclick="resetDemo()">🧹 Reset Demo</button>
+
+      <!-- MOBILE ACTION DRAWER TOGGLE (Visible on Mobile & Tablet) -->
+      <button type="button" class="btn btn-secondary btn-mobile-menu" id="btn-mobile-menu" onclick="toggleMobileDrawer()" title="Buka Kontrol & Pengaturan">
+        <span class="icon">⚙️</span>
+        <span class="btn-text">Menu</span>
+      </button>
     </div>
   </header>
 
@@ -137,12 +145,38 @@
       </div>
     </section>
 
+    <!-- MOBILE SEGMENTED TABS (< 1024px) -->
+    <nav class="mobile-segmented-nav" id="mobile-tabs-nav" aria-label="Navigasi Panel">
+      <button type="button" class="seg-tab active" data-tab="pos" onclick="switchMobileTab('pos')">
+        <span class="seg-icon">⚡</span>
+        <span class="seg-text">Posisi</span>
+        <span class="seg-badge" id="tab-pos-badge" style="display: none;">0</span>
+      </button>
+      <button type="button" class="seg-tab" data-tab="radar" onclick="switchMobileTab('radar')">
+        <span class="seg-icon">📡</span>
+        <span class="seg-text">Radar</span>
+      </button>
+      <button type="button" class="seg-tab" data-tab="trades" onclick="switchMobileTab('trades')">
+        <span class="seg-icon">📜</span>
+        <span class="seg-text">Riwayat</span>
+        <span class="seg-badge" id="tab-trades-badge" style="display: none;">0</span>
+      </button>
+      <button type="button" class="seg-tab" data-tab="logs" onclick="switchMobileTab('logs')">
+        <span class="seg-icon">📟</span>
+        <span class="seg-text">Terminal</span>
+      </button>
+      <button type="button" class="seg-tab" data-tab="all" onclick="switchMobileTab('all')">
+        <span class="seg-icon">📊</span>
+        <span class="seg-text">Semua</span>
+      </button>
+    </nav>
+
     <!-- MAIN TWO-COLUMN LAYOUT -->
-    <div class="dashboard-columns">
+    <div class="dashboard-columns" id="dashboard-columns" data-active-tab="pos">
       <!-- LEFT COLUMN: POSITIONS & RADAR -->
       <div class="col-left">
         <!-- ACTIVE POSITIONS SECTION -->
-        <div class="panel">
+        <div class="panel mobile-tab-panel" id="panel-positions" data-tab-name="pos">
           <div class="panel-header">
             <div class="panel-title">
               <span class="icon">⚡</span>
@@ -169,7 +203,7 @@
         </div>
 
         <!-- SPIKE RADAR FEED -->
-        <div class="panel">
+        <div class="panel mobile-tab-panel" id="panel-radar" data-tab-name="radar">
           <div class="panel-header">
             <div class="panel-title">
               <span class="icon">📡</span>
@@ -203,7 +237,7 @@
       <!-- RIGHT COLUMN: TRADES & LOGS -->
       <div class="col-right">
         <!-- LIVE TERMINAL LOGS -->
-        <div class="panel">
+        <div class="panel mobile-tab-panel" id="panel-logs" data-tab-name="logs">
           <div class="panel-header">
             <div class="panel-title">
               <span class="icon">📟</span>
@@ -218,7 +252,7 @@
         </div>
 
         <!-- CLOSED TRADES HISTORY -->
-        <div class="panel">
+        <div class="panel mobile-tab-panel" id="panel-trades" data-tab-name="trades">
           <div class="panel-header">
             <div class="panel-title">
               <span class="icon">📜</span>
@@ -251,6 +285,79 @@
       </div>
     </div>
   </main>
+
+  <!-- MOBILE QUICK ACTION DRAWER (Action Sheet for iPhone / Android / iPad) -->
+  <div id="mobile-drawer" class="mobile-drawer-backdrop" onclick="handleDrawerOverlayClick(event)">
+    <div class="mobile-drawer-sheet">
+      <div class="drawer-handle-bar"></div>
+      <div class="drawer-header">
+        <div class="drawer-title-box">
+          <span class="drawer-logo">⚡</span>
+          <div>
+            <h3>KONTROL & PENGATURAN</h3>
+            <p>Akses cepat menu bot wick sniper</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close" onclick="closeMobileDrawer()">&times;</button>
+      </div>
+
+      <div class="drawer-body">
+        <div class="drawer-mode-indicator">
+          <span>Mode Berjalan:</span>
+          <span id="mobile-mode-chip" class="badge-mode paper">🧪 PAPER TRADING</span>
+        </div>
+
+        <div class="drawer-menu-grid">
+          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); openSettingsModal();">
+            <div class="dm-icon bg-cyan">⚙️</div>
+            <div class="dm-info">
+              <b>Pengaturan Parameter</b>
+              <small>Ubah TP/SL, Kuota, Grid & API Binance</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+
+          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); openBacktestModal();">
+            <div class="dm-icon bg-purple">🧪</div>
+            <div class="dm-info">
+              <b>Backtest Lab</b>
+              <small>Uji performa dengan data candle historis</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+
+          <button type="button" class="drawer-menu-card" id="btn-drawer-reset-demo" onclick="closeMobileDrawer(); resetDemo();">
+            <div class="dm-icon bg-gold">🧹</div>
+            <div class="dm-info">
+              <b>Reset Demo Saldo</b>
+              <small>Kembalikan saldo paper ke nominal awal</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+
+          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); logoutSession();">
+            <div class="dm-icon bg-red">🔒</div>
+            <div class="dm-info">
+              <b>Kunci Terminal</b>
+              <small>Logout & kunci akses dashboard</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+        </div>
+
+        <div class="drawer-system-stats">
+          <div class="ds-row">
+            <span>Koneksi Engine:</span>
+            <b id="drawer-ws-status">OFFLINE 🔴</b>
+          </div>
+          <div class="ds-row">
+            <span>Terminal Core:</span>
+            <b>v2.2.3 HFT Sniper</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- SETTINGS MODAL -->
   <div id="settings-modal" class="modal-backdrop">
@@ -962,6 +1069,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.2.3"></script>
+  <script src="app.js?v=2.3.0"></script>
 </body>
 </html>

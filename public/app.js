@@ -447,6 +447,24 @@ function renderStatus(status) {
     resetDemoBtn.style.display = status.tradingMode === 'LIVE' ? 'none' : 'inline-flex';
   }
 
+  const drawerResetBtn = document.getElementById('btn-drawer-reset-demo');
+  if (drawerResetBtn) {
+    drawerResetBtn.style.display = status.tradingMode === 'LIVE' ? 'none' : 'flex';
+  }
+
+  const mobileModeChip = document.getElementById('mobile-mode-chip');
+  if (mobileModeChip) {
+    mobileModeChip.className = status.tradingMode === 'LIVE' ? 'badge-mode live' : 'badge-mode paper';
+    mobileModeChip.innerText = status.tradingMode === 'LIVE' ? '🟢 LIVE TRADING' : '🧪 PAPER TRADING';
+  }
+
+  const drawerWsStatus = document.getElementById('drawer-ws-status');
+  if (drawerWsStatus) {
+    drawerWsStatus.innerHTML = status.wsConnected
+      ? '<span class="text-green">ONLINE 🟢</span>'
+      : '<span class="text-red">OFFLINE 🔴</span>';
+  }
+
   const pnlEl = document.getElementById('metric-pnl');
   const isPosPnl = status.accumulatedPnl >= 0;
   pnlEl.innerText = `${isPosPnl ? '+' : ''}$${status.accumulatedPnl.toFixed(2)}`;
@@ -467,6 +485,27 @@ function renderStatus(status) {
   const marketDataLabel = marketDataStale ? '⚠️ Data stale' : `${status.ticksPerSecond || 0} tick/s`;
   document.getElementById('radar-pulse-tag').innerText = `Memindai ${status.monitoredCoinsCount || 0} Koin (${marketDataLabel})`;
   document.getElementById('active-count-tag').innerText = `${status.activePositionsCount} Posisi`;
+
+  // Update Mobile Navigation Badges
+  const tabPosBadge = document.getElementById('tab-pos-badge');
+  if (tabPosBadge) {
+    if (status.activePositionsCount > 0) {
+      tabPosBadge.style.display = 'inline-flex';
+      tabPosBadge.innerText = status.activePositionsCount;
+    } else {
+      tabPosBadge.style.display = 'none';
+    }
+  }
+
+  const tabTradesBadge = document.getElementById('tab-trades-badge');
+  if (tabTradesBadge) {
+    if (status.totalTrades > 0) {
+      tabTradesBadge.style.display = 'inline-flex';
+      tabTradesBadge.innerText = status.totalTrades > 99 ? '99+' : status.totalTrades;
+    } else {
+      tabTradesBadge.style.display = 'none';
+    }
+  }
   
   const activeMarginEl = document.getElementById('active-margin-tag');
   if (activeMarginEl) {
@@ -1916,7 +1955,7 @@ document.addEventListener('visibilitychange', () => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js?v=2.2.2')
+      .register('/sw.js?v=2.3.0')
       .then((reg) => {
         reg.update();
       })
@@ -1925,3 +1964,62 @@ if ('serviceWorker' in navigator) {
       });
   });
 }
+
+// ============================================================================
+// MOBILE NAVIGATION & ACTION DRAWER (PWA READY)
+// ============================================================================
+function switchMobileTab(tabKey) {
+  const container = document.getElementById('dashboard-columns');
+  if (container) {
+    container.setAttribute('data-active-tab', tabKey);
+  }
+
+  const tabs = document.querySelectorAll('.seg-tab');
+  tabs.forEach((tab) => {
+    if (tab.getAttribute('data-tab') === tabKey) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  });
+
+  try {
+    localStorage.setItem('wicksniper_mobile_tab', tabKey);
+  } catch (e) {}
+}
+
+function toggleMobileDrawer() {
+  const drawer = document.getElementById('mobile-drawer');
+  if (drawer) {
+    drawer.classList.toggle('open');
+  }
+}
+
+function closeMobileDrawer() {
+  const drawer = document.getElementById('mobile-drawer');
+  if (drawer) {
+    drawer.classList.remove('open');
+  }
+}
+
+function handleDrawerOverlayClick(event) {
+  if (event.target && event.target.id === 'mobile-drawer') {
+    closeMobileDrawer();
+  }
+}
+
+// Restore saved mobile tab on start
+try {
+  const savedTab = localStorage.getItem('wicksniper_mobile_tab');
+  if (savedTab) {
+    switchMobileTab(savedTab);
+  }
+} catch (e) {}
+
+// ESC key closes drawer
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeMobileDrawer();
+  }
+});
+
