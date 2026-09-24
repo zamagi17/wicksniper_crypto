@@ -1,6 +1,5 @@
-const CACHE_NAME = 'wicksniper-pwa-v11';
+const CACHE_NAME = 'wicksniper-pwa-v12';
 const STATIC_ASSETS = [
-  '/style.css',
   '/manifest.json',
   '/icons/icon.svg',
   '/icons/icon-192.png',
@@ -34,12 +33,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Jangan pernah cache file logika aplikasi (JS), halaman HTML, API, atau WebSocket
+  // Jangan pernah cache file logika aplikasi (JS), style (CSS), halaman HTML, API, atau WebSocket
   if (
     url.pathname.startsWith('/api') ||
     url.pathname === '/' ||
     url.pathname.endsWith('.html') ||
     url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
     event.request.method !== 'GET'
   ) {
     event.respondWith(fetch(event.request));

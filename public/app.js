@@ -1955,7 +1955,7 @@ document.addEventListener('visibilitychange', () => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js?v=2.3.0')
+      .register('/sw.js?v=2.3.2')
       .then((reg) => {
         reg.update();
       })
