@@ -289,6 +289,14 @@ function connectWebSocket() {
           populateSettingsForm(msg.data);
           isFormModifiedByUser = false;
         }
+
+        // Sinkronkan juga input backtest lab jika sedang tidak diedit aktif oleh user
+        const btModal = document.getElementById('backtest-modal');
+        const isBtModalOpen = btModal && btModal.style.display === 'flex';
+        if (!isBtModalOpen || !_backtestFormModifiedByUser) {
+          applyConfigToBacktestInputs(msg.data);
+          _backtestFormModifiedByUser = false;
+        }
       } else if (msg.type === 'LOG') {
         appendLog(msg.data);
         if (msg.data.level === 'SNIPER') {
@@ -386,6 +394,8 @@ async function fetchInitialData() {
       populateSettingsForm(resConfig);
       settingsFormInitialized = true;
       isFormModifiedByUser = false;
+      applyConfigToBacktestInputs(resConfig);
+      _backtestFormModifiedByUser = false;
     }
     renderStatus(resStatus);
     renderLogs(resLogs);
@@ -647,6 +657,10 @@ function renderClosedTradesTable(trades) {
         ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
         : '';
 
+      const feeIndicator = (t.fee && t.fee > 0)
+        ? `<br><span style="font-size: 10px; color: var(--color-text-muted);" title="Gross PnL: ${t.grossPnl !== undefined ? (t.grossPnl >= 0 ? '+' : '') + '$' + t.grossPnl.toFixed(2) : '-'} | Fee: -$${t.fee.toFixed(3)}">Fee: -$${t.fee.toFixed(3)}</span>`
+        : '';
+
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${t.id}')" title="Klik untuk melihat rincian trade & perbandingan parameter">
           <td>${t.closedAt}</td>
@@ -654,7 +668,7 @@ function renderClosedTradesTable(trades) {
           <td><span class="text-cyan font-mono"><b>$${(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
           <td><b>${t.durationSeconds}s</b></td>
-          <td class="${pnlColor}"><b>${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</b></td>
+          <td class="${pnlColor}"><b>${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
           <td>
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
               <small class="${t.exitReason === 'HARD_STOP_LOSS' ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
@@ -754,9 +768,21 @@ function openTradeDetailModal(tradeId) {
     <!-- KPI SUMMARY -->
     <div class="td-kpi-grid">
       <div class="td-kpi-card">
-        <div class="td-kpi-label">Realized PnL</div>
+        <div class="td-kpi-label">Net Realized PnL</div>
         <div class="td-kpi-val ${pnlColor}">${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</div>
       </div>
+      ${(t.fee && t.fee > 0) ? `
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Fee Binance (Riil)</div>
+        <div class="td-kpi-val text-red">-$${t.fee.toFixed(4)} USDT</div>
+      </div>
+      <div class="td-kpi-card">
+        <div class="td-kpi-label">Gross PnL (Sebelum Fee)</div>
+        <div class="td-kpi-val ${t.grossPnl !== undefined && t.grossPnl >= 0 ? 'text-green' : 'text-red'}">
+          ${t.grossPnl !== undefined ? (t.grossPnl >= 0 ? '+' : '') + '$' + t.grossPnl.toFixed(2) : '-'} USDT
+        </div>
+      </div>
+      ` : ''}
       <div class="td-kpi-card">
         <div class="td-kpi-label">Entry ➜ Exit</div>
         <div class="td-kpi-val" style="font-size: 12.5px;">$${t.entryPrice} ➜ $${t.exitPrice}</div>
@@ -1491,9 +1517,76 @@ function formatDateTimeLocal(date) {
 }
 
 let _backtestModalInitialized = false;
+let _backtestFormModifiedByUser = false;
 
-function openBacktestModal() {
-  // Hanya set tanggal default jika belum terisi
+function applyConfigToBacktestInputs(cfg) {
+  if (!cfg) return;
+
+  // Default target koin disamakan dengan isi yang ada di config koin whitelist
+  const whitelist = (cfg.scanner?.whitelistSymbols || []).filter(Boolean);
+  const symbolsInput = document.getElementById('bt-symbols');
+  if (symbolsInput) {
+    if (whitelist.length > 0) {
+      symbolsInput.value = whitelist.join(', ');
+    } else {
+      symbolsInput.value = 'AKEUSDT, CROSSUSDT, BTWUSDT';
+    }
+  }
+
+  if (cfg.leverage !== undefined) document.getElementById('bt-leverage').value = cfg.leverage;
+  if (cfg.scanner?.spikeMinPercent !== undefined) document.getElementById('bt-spike').value = cfg.scanner.spikeMinPercent;
+  if (cfg.exit?.takeProfitPct !== undefined) document.getElementById('bt-tp').value = cfg.exit.takeProfitPct;
+  if (cfg.exit?.hardStopLossPct !== undefined) document.getElementById('bt-sl').value = cfg.exit.hardStopLossPct;
+
+  const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
+  if (bttsCheckbox) bttsCheckbox.checked = !!cfg.exit?.trailingSlEnabled;
+
+  const bteemCheckbox = document.getElementById('bt-early-exit-momentum-enabled');
+  if (bteemCheckbox) bteemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
+  if (cfg.exit?.earlyExitMinBullishCandles !== undefined) document.getElementById('bt-early-exit-candles').value = cfg.exit.earlyExitMinBullishCandles;
+  if (cfg.exit?.earlyExitMinRisePct !== undefined) document.getElementById('bt-early-exit-rise').value = cfg.exit.earlyExitMinRisePct;
+  if (cfg.exit?.earlyExitCooldownMinutes !== undefined) document.getElementById('bt-early-exit-cooldown').value = cfg.exit.earlyExitCooldownMinutes;
+  if (cfg.exit?.hardStopCooldownMinutes !== undefined) document.getElementById('bt-hard-sl-cooldown').value = cfg.exit.hardStopCooldownMinutes;
+
+  const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
+  if (btptCheckbox) btptCheckbox.checked = !!cfg.exit?.partialTpEnabled;
+  const btptRatio = document.getElementById('bt-partial-tp-ratio');
+  if (btptRatio && cfg.exit?.partialTpRatio !== undefined) {
+    btptRatio.value = Math.round(cfg.exit.partialTpRatio * 100);
+  }
+  toggleBtPartialTp();
+
+  const btttpCheckbox = document.getElementById('bt-trailing-tp-enabled');
+  if (btttpCheckbox) btttpCheckbox.checked = !!cfg.exit?.trailingTpEnabled;
+  const btttpCallback = document.getElementById('bt-trailing-tp-callback');
+  if (btttpCallback && cfg.exit?.trailingCallbackPct !== undefined) {
+    btttpCallback.value = cfg.exit.trailingCallbackPct;
+  }
+  toggleBtTrailingTp();
+
+  if (cfg.grid?.marginPerLayerUsdt !== undefined) document.getElementById('bt-margin').value = cfg.grid.marginPerLayerUsdt;
+  if (cfg.grid?.layerSpacingPct !== undefined) document.getElementById('bt-spacing').value = cfg.grid.layerSpacingPct;
+  if (cfg.grid?.totalLayers !== undefined) document.getElementById('bt-total-layers').value = cfg.grid.totalLayers;
+  if (cfg.grid?.maxTotalMarginPerCoin !== undefined) document.getElementById('bt-max-margin').value = cfg.grid.maxTotalMarginPerCoin;
+  if (cfg.grid?.martingaleMultiplier !== undefined) document.getElementById('bt-martingale').value = cfg.grid.martingaleMultiplier;
+  if (cfg.exit?.maxHoldMinutes !== undefined) document.getElementById('bt-max-hold').value = cfg.exit.maxHoldMinutes;
+  if (cfg.scanner?.cooldownMinutes !== undefined) document.getElementById('bt-cooldown').value = cfg.scanner.cooldownMinutes;
+
+  const btbrCheckbox = document.getElementById('bt-bottom-rejection-enabled');
+  if (btbrCheckbox) btbrCheckbox.checked = !!cfg.scanner?.skipBottomRejectionEnabled;
+  const btbrRange = document.getElementById('bt-bottom-rejection-range');
+  if (btbrRange && cfg.scanner?.bottomRejectionMinRangePct !== undefined) {
+    btbrRange.value = cfg.scanner.bottomRejectionMinRangePct;
+  }
+  const btbrRatio = document.getElementById('bt-bottom-rejection-ratio');
+  if (btbrRatio && cfg.scanner?.bottomRejectionWickRatio !== undefined) {
+    btbrRatio.value = cfg.scanner.bottomRejectionWickRatio;
+  }
+  toggleBtBottomRejection();
+}
+
+async function openBacktestModal() {
+  // Set tanggal default jika belum terisi
   const startEl = document.getElementById('bt-start-date');
   const endEl = document.getElementById('bt-end-date');
   if (!startEl.value || !endEl.value) {
@@ -1503,112 +1596,51 @@ function openBacktestModal() {
     endEl.value = formatDateTimeLocal(now);
   }
 
-  // Hanya inisialisasi dari config SEKALI saja (saat pertama kali dibuka)
-  // Supaya perubahan user tidak ter-reset tiap buka modal
-  if (!_backtestModalInitialized && currentConfig) {
-    if (currentConfig.leverage) document.getElementById('bt-leverage').value = currentConfig.leverage;
-    if (currentConfig.scanner?.spikeMinPercent) document.getElementById('bt-spike').value = currentConfig.scanner.spikeMinPercent;
-    if (currentConfig.exit?.takeProfitPct) document.getElementById('bt-tp').value = currentConfig.exit.takeProfitPct;
-    if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
-    const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
-    if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
-    const bteemCheckbox = document.getElementById('bt-early-exit-momentum-enabled');
-    if (bteemCheckbox) bteemCheckbox.checked = !!currentConfig.exit?.earlyExitMomentumEnabled;
-    if (currentConfig.exit?.earlyExitMinBullishCandles) document.getElementById('bt-early-exit-candles').value = currentConfig.exit.earlyExitMinBullishCandles;
-    if (currentConfig.exit?.earlyExitMinRisePct) document.getElementById('bt-early-exit-rise').value = currentConfig.exit.earlyExitMinRisePct;
-    if (currentConfig.exit?.earlyExitCooldownMinutes) document.getElementById('bt-early-exit-cooldown').value = currentConfig.exit.earlyExitCooldownMinutes;
-    if (currentConfig.exit?.hardStopCooldownMinutes) document.getElementById('bt-hard-sl-cooldown').value = currentConfig.exit.hardStopCooldownMinutes;
-    const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
-    if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
-    const btptRatio = document.getElementById('bt-partial-tp-ratio');
-    if (btptRatio && currentConfig.exit?.partialTpRatio) {
-      btptRatio.value = Math.round(currentConfig.exit.partialTpRatio * 100);
-    }
-    toggleBtPartialTp();
+  // Muat config segar jika form belum pernah diedit manual atau belum diinisialisasi
+  if (!_backtestModalInitialized || !_backtestFormModifiedByUser) {
+    try {
+      const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+      if (fresh && fresh.exit) {
+        currentConfig = fresh;
+        try {
+          localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+        } catch (e) {}
+      }
+    } catch (e) {}
 
-    const btttpCheckbox = document.getElementById('bt-trailing-tp-enabled');
-    if (btttpCheckbox) btttpCheckbox.checked = !!currentConfig.exit?.trailingTpEnabled;
-    const btttpCallback = document.getElementById('bt-trailing-tp-callback');
-    if (btttpCallback && currentConfig.exit?.trailingCallbackPct) {
-      btttpCallback.value = currentConfig.exit.trailingCallbackPct;
-    }
-    toggleBtTrailingTp();
-    if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
-    if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
-    if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
-    if (currentConfig.grid?.maxTotalMarginPerCoin) document.getElementById('bt-max-margin').value = currentConfig.grid.maxTotalMarginPerCoin;
-    if (currentConfig.grid?.martingaleMultiplier) document.getElementById('bt-martingale').value = currentConfig.grid.martingaleMultiplier;
-    if (currentConfig.exit?.maxHoldMinutes) document.getElementById('bt-max-hold').value = currentConfig.exit.maxHoldMinutes;
-    if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
-    const btbrCheckbox = document.getElementById('bt-bottom-rejection-enabled');
-    if (btbrCheckbox) btbrCheckbox.checked = !!currentConfig.scanner?.skipBottomRejectionEnabled;
-    const btbrRange = document.getElementById('bt-bottom-rejection-range');
-    if (btbrRange && currentConfig.scanner?.bottomRejectionMinRangePct) {
-      btbrRange.value = currentConfig.scanner.bottomRejectionMinRangePct;
-    }
-    const btbrRatio = document.getElementById('bt-bottom-rejection-ratio');
-    if (btbrRatio && currentConfig.scanner?.bottomRejectionWickRatio) {
-      btbrRatio.value = currentConfig.scanner.bottomRejectionWickRatio;
-    }
-    toggleBtBottomRejection();
+    applyConfigToBacktestInputs(currentConfig);
     _backtestModalInitialized = true;
+    _backtestFormModifiedByUser = false;
   }
 
   document.getElementById('backtest-modal').style.display = 'flex';
 }
 
-function resetBacktestParams() {
-  // Reset parameter backtest ke nilai config bot saat ini
-  _backtestModalInitialized = false;
-  openBacktestModal();
-  if (currentConfig) {
-    // Force re-init
-    if (currentConfig.leverage) document.getElementById('bt-leverage').value = currentConfig.leverage;
-    if (currentConfig.scanner?.spikeMinPercent) document.getElementById('bt-spike').value = currentConfig.scanner.spikeMinPercent;
-    if (currentConfig.exit?.takeProfitPct) document.getElementById('bt-tp').value = currentConfig.exit.takeProfitPct;
-    if (currentConfig.exit?.hardStopLossPct) document.getElementById('bt-sl').value = currentConfig.exit.hardStopLossPct;
-    const bttsCheckbox = document.getElementById('bt-trailing-sl-enabled');
-    if (bttsCheckbox) bttsCheckbox.checked = !!currentConfig.exit?.trailingSlEnabled;
-    const bteemCheckbox = document.getElementById('bt-early-exit-momentum-enabled');
-    if (bteemCheckbox) bteemCheckbox.checked = !!currentConfig.exit?.earlyExitMomentumEnabled;
-    if (currentConfig.exit?.earlyExitMinBullishCandles) document.getElementById('bt-early-exit-candles').value = currentConfig.exit.earlyExitMinBullishCandles;
-    if (currentConfig.exit?.earlyExitMinRisePct) document.getElementById('bt-early-exit-rise').value = currentConfig.exit.earlyExitMinRisePct;
-    if (currentConfig.exit?.earlyExitCooldownMinutes) document.getElementById('bt-early-exit-cooldown').value = currentConfig.exit.earlyExitCooldownMinutes;
-    if (currentConfig.exit?.hardStopCooldownMinutes) document.getElementById('bt-hard-sl-cooldown').value = currentConfig.exit.hardStopCooldownMinutes;
-    const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
-    if (btptCheckbox) btptCheckbox.checked = !!currentConfig.exit?.partialTpEnabled;
-    const btptRatio = document.getElementById('bt-partial-tp-ratio');
-    if (btptRatio && currentConfig.exit?.partialTpRatio) {
-      btptRatio.value = Math.round(currentConfig.exit.partialTpRatio * 100);
+async function resetBacktestParams() {
+  // Reset parameter backtest ke nilai config bot saat ini (selalu ambil data fresh)
+  try {
+    const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    if (fresh && fresh.exit) {
+      currentConfig = fresh;
+      try {
+        localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+      } catch (e) {}
     }
-    toggleBtPartialTp();
-
-    const btttpCheckbox = document.getElementById('bt-trailing-tp-enabled');
-    if (btttpCheckbox) btttpCheckbox.checked = !!currentConfig.exit?.trailingTpEnabled;
-    const btttpCallback = document.getElementById('bt-trailing-tp-callback');
-    if (btttpCallback && currentConfig.exit?.trailingCallbackPct) {
-      btttpCallback.value = currentConfig.exit.trailingCallbackPct;
-    }
-    toggleBtTrailingTp();
-    if (currentConfig.grid?.marginPerLayerUsdt) document.getElementById('bt-margin').value = currentConfig.grid.marginPerLayerUsdt;
-    if (currentConfig.grid?.layerSpacingPct) document.getElementById('bt-spacing').value = currentConfig.grid.layerSpacingPct;
-    if (currentConfig.grid?.totalLayers) document.getElementById('bt-total-layers').value = currentConfig.grid.totalLayers;
-    if (currentConfig.grid?.maxTotalMarginPerCoin) document.getElementById('bt-max-margin').value = currentConfig.grid.maxTotalMarginPerCoin;
-    if (currentConfig.grid?.martingaleMultiplier) document.getElementById('bt-martingale').value = currentConfig.grid.martingaleMultiplier;
-    if (currentConfig.exit?.maxHoldMinutes) document.getElementById('bt-max-hold').value = currentConfig.exit.maxHoldMinutes;
-    if (currentConfig.scanner?.cooldownMinutes) document.getElementById('bt-cooldown').value = currentConfig.scanner.cooldownMinutes;
-    const btbrCheckbox = document.getElementById('bt-bottom-rejection-enabled');
-    if (btbrCheckbox) btbrCheckbox.checked = !!currentConfig.scanner?.skipBottomRejectionEnabled;
-    const btbrRange = document.getElementById('bt-bottom-rejection-range');
-    if (btbrRange && currentConfig.scanner?.bottomRejectionMinRangePct) {
-      btbrRange.value = currentConfig.scanner.bottomRejectionMinRangePct;
-    }
-    const btbrRatio = document.getElementById('bt-bottom-rejection-ratio');
-    if (btbrRatio && currentConfig.scanner?.bottomRejectionWickRatio) {
-      btbrRatio.value = currentConfig.scanner.bottomRejectionWickRatio;
-    }
-    toggleBtBottomRejection();
+  } catch (err) {
+    console.warn('Gagal memuat config saat reset backtest:', err);
   }
+
+  applyConfigToBacktestInputs(currentConfig);
+  _backtestFormModifiedByUser = false;
+
+  // Reset rentang waktu default ke 3 hari terakhir sampai sekarang
+  const now = new Date();
+  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
+  document.getElementById('bt-start-date').value = formatDateTimeLocal(threeDaysAgo);
+  document.getElementById('bt-end-date').value = formatDateTimeLocal(now);
+  document.querySelectorAll('.btn-preset').forEach((b) => b.classList.remove('active'));
+  const preset3d = document.querySelectorAll('.btn-preset')[1];
+  if (preset3d) preset3d.classList.add('active');
 }
 
 function toggleBtBottomRejection() {
@@ -1668,35 +1700,45 @@ async function executeBacktest() {
     return;
   }
 
+  const getNum = (id, fallback) => {
+    const val = parseFloat(document.getElementById(id)?.value);
+    return isNaN(val) ? fallback : val;
+  };
+  const getInt = (id, fallback) => {
+    const val = parseInt(document.getElementById(id)?.value, 10);
+    return isNaN(val) ? fallback : val;
+  };
+
   const payload = {
     symbols,
     startTime: new Date(startDate).getTime(),
     endTime: new Date(endDate).getTime(),
-    leverage: parseFloat(document.getElementById('bt-leverage').value) || 5,
-    spikeMinPercent: parseFloat(document.getElementById('bt-spike').value) || 3.2,
-    takeProfitPct: parseFloat(document.getElementById('bt-tp').value) || 1.2,
-    hardStopLossPct: parseFloat(document.getElementById('bt-sl').value) || 4.5,
+    bypassCache: !!document.getElementById('bt-bypass-cache')?.checked,
+    leverage: getNum('bt-leverage', 5),
+    spikeMinPercent: getNum('bt-spike', 2.0),
+    takeProfitPct: getNum('bt-tp', 1.2),
+    hardStopLossPct: getNum('bt-sl', 4.5),
     trailingSlEnabled: !!document.getElementById('bt-trailing-sl-enabled')?.checked,
     earlyExitMomentumEnabled: !!document.getElementById('bt-early-exit-momentum-enabled')?.checked,
-    earlyExitMinBullishCandles: parseInt(document.getElementById('bt-early-exit-candles')?.value) || 3,
-    earlyExitMinRisePct: parseFloat(document.getElementById('bt-early-exit-rise')?.value) || 0.5,
-    earlyExitCooldownMinutes: parseInt(document.getElementById('bt-early-exit-cooldown')?.value) || 60,
-    hardStopCooldownMinutes: parseInt(document.getElementById('bt-hard-sl-cooldown')?.value) || 180,
+    earlyExitMinBullishCandles: getInt('bt-early-exit-candles', 3),
+    earlyExitMinRisePct: getNum('bt-early-exit-rise', 0.5),
+    earlyExitCooldownMinutes: getInt('bt-early-exit-cooldown', 60),
+    hardStopCooldownMinutes: getInt('bt-hard-sl-cooldown', 180),
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
-    partialTpRatio: (parseFloat(document.getElementById('bt-partial-tp-ratio')?.value) || 50) / 100,
+    partialTpRatio: getNum('bt-partial-tp-ratio', 50) / 100,
     trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,
-    trailingCallbackPct: parseFloat(document.getElementById('bt-trailing-tp-callback')?.value) || 0.4,
+    trailingCallbackPct: getNum('bt-trailing-tp-callback', 0.4),
     skipBottomRejectionEnabled: !!document.getElementById('bt-bottom-rejection-enabled')?.checked,
-    bottomRejectionMinRangePct: parseFloat(document.getElementById('bt-bottom-rejection-range')?.value) || 1.5,
-    bottomRejectionWickRatio: parseFloat(document.getElementById('bt-bottom-rejection-ratio')?.value) || 2.0,
-    marginPerLayerUsdt: parseFloat(document.getElementById('bt-margin').value) || 3,
-    layerSpacingPct: parseFloat(document.getElementById('bt-spacing').value) || 1.0,
-    totalLayers: parseInt(document.getElementById('bt-total-layers').value) || 6,
-    maxTotalMarginPerCoin: parseFloat(document.getElementById('bt-max-margin').value) || 80,
-    martingaleMultiplier: parseFloat(document.getElementById('bt-martingale').value) || 1.15,
-    maxHoldMinutes: parseInt(document.getElementById('bt-max-hold').value) || 10,
-    cooldownMinutes: parseInt(document.getElementById('bt-cooldown').value) || 10,
-    initialBalance: parseFloat(document.getElementById('bt-init-balance').value) || 245,
+    bottomRejectionMinRangePct: getNum('bt-bottom-rejection-range', 1.5),
+    bottomRejectionWickRatio: getNum('bt-bottom-rejection-ratio', 2.0),
+    marginPerLayerUsdt: getNum('bt-margin', 3),
+    layerSpacingPct: getNum('bt-spacing', 1.2),
+    totalLayers: getInt('bt-total-layers', 25),
+    maxTotalMarginPerCoin: getNum('bt-max-margin', 50),
+    martingaleMultiplier: getNum('bt-martingale', 1.1),
+    maxHoldMinutes: getInt('bt-max-hold', 60),
+    cooldownMinutes: getInt('bt-cooldown', 20),
+    initialBalance: getNum('bt-init-balance', 245),
   };
 
   // Debug log untuk memastikan params terkirim dengan benar
@@ -1715,9 +1757,14 @@ async function executeBacktest() {
   resultsContainer.style.display = 'none';
 
   try {
-    const res = await authFetch('/api/backtest', {
+    const res = await authFetch('/api/backtest?_t=' + Date.now(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      },
+      cache: 'no-store',
       body: JSON.stringify(payload),
     }).then((r) => r.json());
 
@@ -1734,7 +1781,8 @@ async function executeBacktest() {
     const pnlEl = document.getElementById('bt-res-pnl');
     pnlEl.innerText = `${sign}$${r.netProfitUsdt.toFixed(2)}`;
     pnlEl.className = `kpi-value ${isPos ? 'text-green' : 'text-red'}`;
-    document.getElementById('bt-res-pnl-sub').innerText = `${sign}${r.netProfitPct.toFixed(1)}% dari modal $${r.initialBalance}`;
+    const feeSub = (r.totalFeesUsdt && r.totalFeesUsdt > 0) ? ` • 💸 Fee: -$${r.totalFeesUsdt.toFixed(2)} USDT` : '';
+    document.getElementById('bt-res-pnl-sub').innerText = `${sign}${r.netProfitPct.toFixed(1)}% dari modal $${r.initialBalance}${feeSub}`;
 
     document.getElementById('bt-res-trades').innerText = r.totalTrades;
     let candleSub = `${r.totalCandlesAnalyzed.toLocaleString()} Lilin 1m`;
@@ -1770,6 +1818,10 @@ async function executeBacktest() {
           else if (t.exitReason === 'EARLY_MOMENTUM_EXIT') exitReasonLabel = '⚠️ Early Momentum';
           else if (t.exitReason === 'FEE_LOSS_EXIT') exitReasonLabel = '💸 TP Minus Fee';
 
+          const btFeeTag = (t.fee && t.fee > 0)
+            ? `<br><span style="font-size: 10px; color: var(--color-text-muted);" title="Gross PnL: ${t.grossPnl !== undefined ? (t.grossPnl >= 0 ? '+' : '') + '$' + t.grossPnl.toFixed(2) : '-'} | Fee: -$${t.fee.toFixed(3)}">Fee: -$${t.fee.toFixed(3)}</span>`
+            : '';
+
           return `
             <tr>
               <td>${t.entryTime}</td>
@@ -1777,7 +1829,7 @@ async function executeBacktest() {
               <td><span class="text-cyan font-mono"><b>$${t.marginUsed.toFixed(2)}</b></span></td>
               <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
               <td><b>${t.durationMinutes}m</b></td>
-              <td class="${tColor}"><b>${tSign}$${t.realizedPnl.toFixed(2)} (${tSign}${t.pnlPct.toFixed(1)}%)</b></td>
+              <td class="${tColor}"><b>${tSign}$${t.realizedPnl.toFixed(2)} (${tSign}${t.pnlPct.toFixed(1)}%)</b>${btFeeTag}</td>
               <td><small>${exitReasonLabel}</small></td>
             </tr>
           `;
@@ -1810,6 +1862,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const btModal = document.getElementById('backtest-modal');
+  if (btModal) {
+    btModal.addEventListener('input', () => {
+      _backtestFormModifiedByUser = true;
+    });
+    btModal.addEventListener('change', () => {
+      _backtestFormModifiedByUser = true;
+    });
+  }
+
   document.getElementById('cfg-tg-enabled')?.addEventListener('change', toggleTelegramInputs);
   document.getElementById('cfg-partial-tp-enabled')?.addEventListener('change', togglePartialTpInput);
   document.getElementById('cfg-trailing-sl-enabled')?.addEventListener('change', toggleTrailingSL);
@@ -1837,6 +1899,13 @@ document.addEventListener('visibilitychange', () => {
             populateSettingsForm(fresh);
             isFormModifiedByUser = false;
           }
+
+          const btModal = document.getElementById('backtest-modal');
+          const isBtModalOpen = btModal && btModal.style.display === 'flex';
+          if (!isBtModalOpen || !_backtestFormModifiedByUser) {
+            applyConfigToBacktestInputs(fresh);
+            _backtestFormModifiedByUser = false;
+          }
         }
       })
       .catch(() => {});
@@ -1847,7 +1916,7 @@ document.addEventListener('visibilitychange', () => {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js?v=2.2.1')
+      .register('/sw.js?v=2.2.2')
       .then((reg) => {
         reg.update();
       })

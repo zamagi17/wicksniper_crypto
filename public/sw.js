@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wicksniper-pwa-v7';
+const CACHE_NAME = 'wicksniper-pwa-v9';
 const STATIC_ASSETS = [
   '/style.css',
   '/manifest.json',

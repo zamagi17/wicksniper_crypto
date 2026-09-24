@@ -212,9 +212,14 @@ app.post('/api/check-telegram', requireAuth, async (req, res) => {
 });
 
 app.post('/api/backtest', requireAuth, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   try {
-    const { symbols, startTime, endTime, ...customParams } = req.body;
-    const symbolList = symbols && symbols.length > 0 ? symbols : ['AKEUSDT', 'CROSSUSDT', 'BTWUSDT'];
+    const { symbols, startTime, endTime, bypassCache, ...customParams } = req.body;
+    const configSymbols = engine.getConfig()?.scanner?.whitelistSymbols;
+    const defaultSymbols = (configSymbols && configSymbols.length > 0) ? configSymbols : ['AKEUSDT', 'CROSSUSDT', 'BTWUSDT'];
+    const symbolList = symbols && symbols.length > 0 ? symbols : defaultSymbols;
     const now = Date.now();
     const start = startTime ? new Date(startTime).getTime() : now - 3 * 24 * 60 * 60 * 1000;
     const end = endTime ? new Date(endTime).getTime() : now;
@@ -223,6 +228,7 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
       symbols: symbolList,
       startTime: start,
       endTime: end,
+      bypassCache: !!bypassCache,
       ...customParams,
     });
     res.json({ success: true, result });

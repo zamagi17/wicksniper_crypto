@@ -837,6 +837,28 @@ export class BinanceFuturesClient {
     }
   }
 
+  private bnbPriceCache: { price: number; timestamp: number } = { price: 600, timestamp: 0 };
+
+  /**
+   * Mengambil harga pasar BNBUSDT terkini untuk konversi akurat jika fee dipotong dalam BNB
+   */
+  public async getBnbPrice(): Promise<number> {
+    const now = Date.now();
+    if (now - this.bnbPriceCache.timestamp < 60_000 && this.bnbPriceCache.price > 0) {
+      return this.bnbPriceCache.price;
+    }
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get('/fapi/v1/ticker/price', { params: { symbol: 'BNBUSDT' } });
+      const p = parseFloat(res?.data?.price || '0');
+      if (p > 0) {
+        this.bnbPriceCache = { price: p, timestamp: now };
+        return p;
+      }
+    } catch {}
+    return this.bnbPriceCache.price > 0 ? this.bnbPriceCache.price : 600;
+  }
+
   /**
    * Mengambil detail order Binance berdasarkan orderId untuk memeriksa harga eksekusi (avgPrice)
    */

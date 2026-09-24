@@ -167,6 +167,10 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
     const durationStr = durationMin > 0 ? `${durationMin}m ${durationSec}s` : `${durationSec}s`;
 
     const balanceLine = currentBalance !== undefined ? `\n💼 <b>Saldo Akun:</b> $${currentBalance.toFixed(2)} USDT` : '';
+    const feeLine = trade.fee && trade.fee > 0 ? `\n💸 <b>Fee Binance:</b> -$${trade.fee.toFixed(4)} USDT` : '';
+    const grossPnlLine = trade.grossPnl !== undefined && trade.fee && trade.fee > 0
+      ? `\n📊 <b>Gross PnL:</b> ${trade.grossPnl >= 0 ? '+' : ''}$${trade.grossPnl.toFixed(2)} USDT`
+      : '';
 
     const msg =
 `${emoji} <b>[${title}]</b> ${emoji}
@@ -176,9 +180,9 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
 💵 <b>Harga:</b> <code>$${trade.entryPrice}</code> ➜ <code>$${trade.exitPrice}</code>
 ⏱️ <b>Durasi Trade:</b> ${durationStr}
 🕸️ <b>Layer Terisi:</b> ${trade.layersFilled} Layer
-💰 <b>Margin Dipakai:</b> $${trade.marginUsed.toFixed(2)} USDT
+💰 <b>Margin Dipakai:</b> $${trade.marginUsed.toFixed(2)} USDT${grossPnlLine}${feeLine}
 
-💵 <b>Realized PnL:</b> <b>${pnlSign}$${trade.realizedPnl.toFixed(2)} USDT (${pnlSign}${trade.pnlPct.toFixed(1)}%)</b>${balanceLine}
+💵 <b>Net Realized PnL:</b> <b>${pnlSign}$${trade.realizedPnl.toFixed(2)} USDT (${pnlSign}${trade.pnlPct.toFixed(1)}%)</b>${balanceLine}
 ⚙️ <b>Mode:</b> ${modeTag}`;
 
     this.sendMessage(msg).catch(() => {});

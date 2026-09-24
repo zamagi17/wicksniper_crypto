@@ -52,6 +52,8 @@ export class HistoricalDataFetcher {
     let currentStart = startTime;
     const limit = 1500; // Maksimal batas per request Binance Futures
 
+    let fetchErrorOccurred = false;
+
     while (currentStart < endTime) {
       try {
         const res = await client.get('/fapi/v1/klines', {
@@ -93,6 +95,7 @@ export class HistoricalDataFetcher {
         // Jeda 100ms agar aman dari rate limit
         await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (err: any) {
+        fetchErrorOccurred = true;
         console.error(`[DataFetcher] Error fetching ${symbol}: ${err.message}`);
         break;
       }
@@ -103,7 +106,8 @@ export class HistoricalDataFetcher {
       new Map(allCandles.map((c) => [c.openTime, c])).values()
     ).sort((a, b) => a.openTime - b.openTime);
 
-    if (useCache && uniqueCandles.length > 0) {
+    // Hanya simpan cache jika proses pengambilan berhasil penuh tanpa error
+    if (useCache && !fetchErrorOccurred && uniqueCandles.length > 0) {
       try {
         fs.writeFileSync(cacheFilePath, JSON.stringify(uniqueCandles), 'utf-8');
       } catch (err: any) {

@@ -1680,6 +1680,7 @@ export class WickSniperEngine {
       let actualExitPrice = closePrice;
       let actualRealizedPnl = finalRealizedPnl;
       let actualPnlPct = pnlPct;
+      let actualFee = 0;
       let closeResOrderId: string | undefined = undefined;
 
       if (this.config.tradingMode === 'LIVE') {
@@ -1908,9 +1909,19 @@ export class WickSniperEngine {
               let totalTradedQty = 0;
               let totalTradedQuote = 0;
 
+              // Ambil harga BNB jika ada komisi yang dibayar dengan BNB untuk konversi akurat ke USDT
+              let bnbPrice = 0;
+              const hasBnbFee = closingTrades.some((tr: any) => tr.commissionAsset === 'BNB') ||
+                recentTrades.some((tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime) && tr.commissionAsset === 'BNB');
+              if (hasBnbFee) {
+                bnbPrice = await binanceFutures.getBnbPrice();
+              }
+
               for (const tr of closingTrades) {
                 binancePnlSum += parseFloat(tr.realizedPnl || '0');
-                binanceFeeSum += parseFloat(tr.commission || '0');
+                const rawComm = parseFloat(tr.commission || '0');
+                const feeInUsdt = tr.commissionAsset === 'BNB' ? rawComm * (bnbPrice || 600) : rawComm;
+                binanceFeeSum += feeInUsdt;
                 const tQty = parseFloat(tr.qty || '0');
                 const tPrice = parseFloat(tr.price || '0');
                 totalTradedQty += tQty;
@@ -1921,14 +1932,17 @@ export class WickSniperEngine {
                 (tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime)
               );
               for (const otr of openingTrades) {
-                binanceFeeSum += parseFloat(otr.commission || '0');
+                const rawComm = parseFloat(otr.commission || '0');
+                const feeInUsdt = otr.commissionAsset === 'BNB' ? rawComm * (bnbPrice || 600) : rawComm;
+                binanceFeeSum += feeInUsdt;
               }
 
               if (totalTradedQty > 0) {
                 actualExitPrice = totalTradedQuote / totalTradedQty;
               }
 
-              const netBinancePnl = binancePnlSum - binanceFeeSum;
+              actualFee = Math.round(binanceFeeSum * 1000) / 1000;
+              const netBinancePnl = binancePnlSum - actualFee;
               actualRealizedPnl = Math.round(netBinancePnl * 100) / 100;
               const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
               actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
@@ -1956,13 +1970,21 @@ export class WickSniperEngine {
 
               logger.log(
                 actualRealizedPnl >= 0 ? 'SUCCESS' : 'WARN',
-                `📊 [BINANCE PNL SYNC] ${pos.symbol}: Entry Riil: $${pos.avgEntryPrice.toFixed(6)} | Exit Riil: $${actualExitPrice.toFixed(6)} | Gross: $${binancePnlSum.toFixed(4)} | Fee: $${binanceFeeSum.toFixed(4)} | Net PnL: ${actualRealizedPnl >= 0 ? '+' : ''}$${actualRealizedPnl.toFixed(2)} USDT`,
+                `📊 [BINANCE PNL SYNC] ${pos.symbol}: Entry Riil: $${pos.avgEntryPrice.toFixed(6)} | Exit Riil: $${actualExitPrice.toFixed(6)} | Gross: $${binancePnlSum.toFixed(4)} | Fee: $${actualFee.toFixed(4)} USDT | Net PnL: ${actualRealizedPnl >= 0 ? '+' : ''}$${actualRealizedPnl.toFixed(2)} USDT`,
                 pos.symbol
               );
             } else if (fillExitPrice > 0) {
               const grossPnl = (pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
-              const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.0005;
-              actualRealizedPnl = Math.round((grossPnl - estFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
+              const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.00045;
+              actualFee = Math.round(estFee * 1000) / 1000;
+              actualRealizedPnl = Math.round((grossPnl - actualFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
+              const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+              actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+            } else {
+              const grossPnl = pnl;
+              const estFee = (pos.avgEntryPrice + closePrice) * pos.totalQty * 0.00045;
+              actualFee = Math.round(estFee * 1000) / 1000;
+              actualRealizedPnl = Math.round((grossPnl - actualFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
               const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
               actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
             }
@@ -1974,7 +1996,14 @@ export class WickSniperEngine {
           console.warn(`[Sync PnL] Menggunakan kalkulasi lokal: ${e.message}`);
         }
       } else {
-        this.virtualBalance += Math.round(pnl * 100) / 100;
+        // Mode PAPER TRADING: Potong estimasi komisi riil Binance (round-trip ~0.07% notional)
+        const entryFee = pos.avgEntryPrice * pos.totalQty * 0.00035;
+        const exitFee = closePrice * pos.totalQty * (reason === 'TAKE_PROFIT' ? 0.0002 : 0.0005);
+        actualFee = Math.round((entryFee + exitFee) * 1000) / 1000;
+        actualRealizedPnl = Math.round((finalRealizedPnl - actualFee) * 100) / 100;
+        const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+        actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+        this.virtualBalance += actualRealizedPnl;
       }
 
       const filledLayersCount = (pos.layers || []).filter((l) => l.status === 'FILLED').length;
@@ -1989,6 +2018,8 @@ export class WickSniperEngine {
         qty: pos.totalQty,
         marginUsed: pos.totalMarginUsed,
         realizedPnl: actualRealizedPnl,
+        grossPnl: Math.round((actualRealizedPnl + actualFee) * 100) / 100,
+        fee: actualFee,
         pnlPct: actualPnlPct,
         durationSeconds,
         exitReason: reason,

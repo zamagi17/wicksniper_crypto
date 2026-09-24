@@ -141,6 +141,8 @@ export interface ClosedTrade {
   qty: number;
   marginUsed: number;
   realizedPnl: number;
+  grossPnl?: number;
+  fee?: number;
   pnlPct: number;
   durationSeconds: number;
   exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'MANUAL_CLOSE';

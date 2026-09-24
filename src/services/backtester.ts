@@ -30,6 +30,7 @@ export interface BacktestParams {
   bottomRejectionMinRangePct?: number;
   bottomRejectionWickRatio?: number;
   bottomRejectionDominanceRatio?: number;
+  bypassCache?: boolean;
 }
 
 export interface BacktestTrade {
@@ -43,6 +44,8 @@ export interface BacktestTrade {
   exitPrice: number;
   marginUsed: number;
   realizedPnl: number;
+  grossPnl?: number;
+  fee?: number;
   pnlPct: number;
   exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'MANUAL_CLOSE';
   durationMinutes: number;
@@ -69,6 +72,7 @@ export interface BacktestResult {
   avgTradeDurationMinutes: number;
   partialTpTrades: number;
   bottomRejectionSkips: number;
+  totalFeesUsdt: number;
   trades: BacktestTrade[];
   equityCurve: { time: string; balance: number }[];
 }
@@ -173,7 +177,13 @@ export class WickSniperBacktester {
     ];
 
     for (const symbol of params.symbols) {
-      const candles = await dataFetcher.getKlines(symbol, '1m', params.startTime, params.endTime);
+      const candles = await dataFetcher.getKlines(
+        symbol,
+        '1m',
+        params.startTime,
+        params.endTime,
+        !params.bypassCache
+      );
       totalCandlesAnalyzed += candles.length;
 
       if (candles.length < 5) continue;
@@ -293,6 +303,7 @@ export class WickSniperBacktester {
         let exitTime = c.openTime;
         let partialDone = false;
         let partialRealizedPnl = 0;
+        let partialExitFee = 0;
         let trailingTpActive = false;
         let lowestPriceSeen = avgPrice;
 
@@ -392,6 +403,7 @@ export class WickSniperBacktester {
               const partQty = qty * partialTpRatio;
               const partPnl = (avgPrice - targetTpPrice) * partQty;
               partialRealizedPnl += partPnl;
+              partialExitFee += targetTpPrice * partQty * 0.0002;
               qty -= partQty;
               partialDone = true;
 
@@ -452,8 +464,22 @@ export class WickSniperBacktester {
         }
 
         if (tradeClosed) {
-          const remainingPnl = (avgPrice - exitPrice) * qty;
-          const totalRealizedPnl = Math.round((remainingPnl + partialRealizedPnl) * 100) / 100;
+          // Hitung fee entry untuk semua layer yang terisi (Layer 0 taker 0.05%, Layer 1..N maker 0.02%)
+          const filledLayers = layers.filter((l) => l.status === 'FILLED');
+          let totalEntryFee = 0;
+          for (const f of filledLayers) {
+            const feeRate = f.layerIndex === 0 ? 0.0005 : 0.0002;
+            totalEntryFee += f.price * f.qty * feeRate;
+          }
+
+          // Hitung fee exit untuk sisa posisi (TAKE_PROFIT limit = maker 0.02%, lainnya taker 0.05%)
+          const exitFeeRate = exitReason === 'TAKE_PROFIT' ? 0.0002 : 0.0005;
+          const finalExitFee = exitPrice * qty * exitFeeRate;
+          const tradeFee = Math.round((totalEntryFee + partialExitFee + finalExitFee) * 1000) / 1000;
+
+          const remainingGrossPnl = (avgPrice - exitPrice) * qty;
+          const grossPnl = Math.round((remainingGrossPnl + partialRealizedPnl) * 100) / 100;
+          const totalRealizedPnl = Math.round((grossPnl - tradeFee) * 100) / 100;
           const pnlPct = usedMargin > 0 ? Math.round((totalRealizedPnl / usedMargin) * 1000) / 10 : 0;
           const durationMinutes = Math.max(1, Math.round((exitTime - entryTime) / 60000));
 
@@ -464,7 +490,7 @@ export class WickSniperBacktester {
           if (ddUsdt > maxDrawdownUsdt) maxDrawdownUsdt = ddUsdt;
           if (ddPct > maxDrawdownPct) maxDrawdownPct = ddPct;
 
-          const filledCount = layers.filter((l) => l.status === 'FILLED').length;
+          const filledCount = filledLayers.length;
 
           allTrades.push({
             id: `bt_${symbol}_${entryTime}`,
@@ -477,6 +503,8 @@ export class WickSniperBacktester {
             exitPrice: parseFloat(exitPrice.toFixed(5)),
             marginUsed: Math.round(usedMargin * 100) / 100,
             realizedPnl: totalRealizedPnl,
+            grossPnl,
+            fee: tradeFee,
             pnlPct,
             exitReason,
             durationMinutes,
@@ -492,7 +520,7 @@ export class WickSniperBacktester {
           // Set cooldown koin ini
           const tradeCooldownMinutes =
             exitReason === 'EARLY_MOMENTUM_EXIT'
-              ? earlyExitCooldownMinutes
+               ? earlyExitCooldownMinutes
               : exitReason === 'HARD_STOP_LOSS'
                 ? hardStopCooldownMinutes
                 : cooldownMinutes;
@@ -520,6 +548,7 @@ export class WickSniperBacktester {
       totalTrades > 0 ? Math.round((allTrades.reduce((sum, t) => sum + t.durationMinutes, 0) / totalTrades) * 10) / 10 : 0;
 
     const partialTpTrades = allTrades.filter((t) => t.partialTpTaken).length;
+    const totalFeesUsdt = Math.round(allTrades.reduce((sum, t) => sum + (t.fee || 0), 0) * 100) / 100;
 
     return {
       symbols: params.symbols,
@@ -540,6 +569,7 @@ export class WickSniperBacktester {
       avgTradeDurationMinutes: avgDuration,
       partialTpTrades,
       bottomRejectionSkips: totalBottomRejectionSkips,
+      totalFeesUsdt,
       trades: allTrades,
       equityCurve,
     };
