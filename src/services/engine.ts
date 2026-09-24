@@ -164,8 +164,9 @@ export class WickSniperEngine {
     } catch (e: any) {
       logger.log('ERROR', `Gagal menyimpan konfigurasi: ${e.message}`);
     }
-    this.lastSyncedConfigJson = JSON.stringify(this.config);
     await db.saveConfig(this.config).catch(() => { });
+    const reloadedDb = await db.loadConfig().catch(() => null);
+    this.lastSyncedConfigJson = reloadedDb ? JSON.stringify(reloadedDb) : JSON.stringify(this.config);
     if (this.config.tradingMode === 'LIVE') {
       binanceFutures.startUserDataStream().catch(() => {});
       this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => { });
@@ -2470,7 +2471,10 @@ export class WickSniperEngine {
    * Otomatis membaca ulang konfigurasi dari Database PostgreSQL jika terjadi perubahan "dari belakang"
    */
   public async syncConfigFromDb(): Promise<boolean> {
-    if (!db.isConnected) return false;
+    if (!db.isConnected) {
+      await db.init().catch(() => {});
+      if (!db.isConnected) return false;
+    }
     try {
       const dbCfg = await db.loadConfig();
       if (!dbCfg) return false;
@@ -2487,6 +2491,9 @@ export class WickSniperEngine {
           telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
           security: { ...this.config.security, ...(dbCfg.security || {}) },
         };
+        try {
+          fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+        } catch (e) {}
         this.scanner.updateConfig(this.config.scanner);
         if (this.config.telegram) {
           telegram.updateConfig(this.config.telegram);

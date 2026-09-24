@@ -277,7 +277,18 @@ function connectWebSocket() {
         renderStatus(msg.data);
       } else if (msg.type === 'CONFIG') {
         currentConfig = msg.data;
+        try {
+          localStorage.setItem('wicksniper_config', JSON.stringify(msg.data));
+        } catch (e) {}
         if (currentStatus) renderStatus(currentStatus);
+
+        // Perbarui formulir pengaturan jika modal sedang tertutup atau belum diubah manual oleh pengguna
+        const modal = document.getElementById('settings-modal');
+        const isModalOpen = modal && modal.classList.contains('open');
+        if (!isModalOpen || !isFormModifiedByUser) {
+          populateSettingsForm(msg.data);
+          isFormModifiedByUser = false;
+        }
       } else if (msg.type === 'LOG') {
         appendLog(msg.data);
         if (msg.data.level === 'SNIPER') {
@@ -352,6 +363,8 @@ function playProfitSound() {
 async function fetchInitialData() {
   // Coba muat cache lokal terlebih dahulu untuk kecepatan render
   try {
+    // Bersihkan draft tersisa dari versi sebelumnya agar tidak menimpa setting real dari DB
+    localStorage.removeItem('wicksniper_settings_draft');
     const cachedCfg = localStorage.getItem('wicksniper_config');
     if (cachedCfg) {
       currentConfig = JSON.parse(cachedCfg);
@@ -370,10 +383,9 @@ async function fetchInitialData() {
       try {
         localStorage.setItem('wicksniper_config', JSON.stringify(resConfig));
       } catch (e) {}
-      if (!settingsFormInitialized && !localStorage.getItem('wicksniper_settings_draft')) {
-        populateSettingsForm(resConfig);
-        settingsFormInitialized = true;
-      }
+      populateSettingsForm(resConfig);
+      settingsFormInitialized = true;
+      isFormModifiedByUser = false;
     }
     renderStatus(resStatus);
     renderLogs(resLogs);
@@ -853,12 +865,9 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-margin-type', snap.marginType);
 
   isFormModifiedByUser = true;
-  try {
-    localStorage.setItem('wicksniper_settings_draft', JSON.stringify(getSettingsFormData()));
-  } catch (e) {}
 
   closeTradeDetailModal();
-  openSettingsModal();
+  openSettingsModal(true); // skip reload agar snapshot yang baru diterapkan tidak tertimpa
   alert('✅ Parameter dari trade ini berhasil dimuat ke formulir pengaturan! Silakan periksa lalu klik "Simpan Perubahan" jika ingin menggunakannya.');
 }
 
@@ -1166,38 +1175,36 @@ async function reloadConfigFromServer() {
   }
 }
 
-async function openSettingsModal() {
-  // Jika form belum diisi, ambil dari draft lokal atau dari server
-  if (!settingsFormInitialized) {
-    const draft = localStorage.getItem('wicksniper_settings_draft');
-    if (draft) {
+async function openSettingsModal(skipReload = false) {
+  const modal = document.getElementById('settings-modal');
+  if (modal) modal.classList.add('open');
+
+  if (skipReload) return;
+
+  // Selalu sinkronkan dengan database/server setiap kali modal pengaturan dibuka
+  try {
+    const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    if (fresh && fresh.exit) {
+      currentConfig = fresh;
       try {
-        const parsedDraft = JSON.parse(draft);
-        populateSettingsForm(parsedDraft);
-        isFormModifiedByUser = true;
+        localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+        localStorage.removeItem('wicksniper_settings_draft');
       } catch (e) {}
-    } else {
-      if (!currentConfig) {
-        try {
-          const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
-          if (fresh && fresh.exit) {
-            currentConfig = fresh;
-            localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
-          }
-        } catch {}
-      }
+      populateSettingsForm(fresh);
+      isFormModifiedByUser = false;
+      settingsFormInitialized = true;
+    }
+  } catch (err) {
+    console.warn('Gagal memuat config terbaru saat membuka pengaturan:', err);
+    if (currentConfig) {
       populateSettingsForm(currentConfig);
     }
-    settingsFormInitialized = true;
   }
-
-  // Buka modal TANPA menghapus editan pengguna
-  document.getElementById('settings-modal').classList.add('open');
 }
 
 function closeSettingsModal() {
-  // Hanya sembunyikan modal - JANGAN pernah mereset input form agar draf tidak hilang
-  document.getElementById('settings-modal').classList.remove('open');
+  document.getElementById('settings-modal')?.classList.remove('open');
+  isFormModifiedByUser = false;
 }
 
 async function saveSettings() {
@@ -1797,15 +1804,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (modal) {
     modal.addEventListener('input', () => {
       isFormModifiedByUser = true;
-      try {
-        localStorage.setItem('wicksniper_settings_draft', JSON.stringify(getSettingsFormData()));
-      } catch (e) {}
     });
     modal.addEventListener('change', () => {
       isFormModifiedByUser = true;
-      try {
-        localStorage.setItem('wicksniper_settings_draft', JSON.stringify(getSettingsFormData()));
-      } catch (e) {}
     });
   }
 
@@ -1816,11 +1817,37 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cfg-data-source')?.addEventListener('change', toggleDataSourceGroup);
 });
 
+// Deteksi saat tab aktif kembali (saat buka layar HP/iPad atau kembali dari tab lain)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      connectWebSocket();
+    }
+    authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((fresh) => {
+        if (fresh && fresh.exit) {
+          currentConfig = fresh;
+          try {
+            localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+          } catch (e) {}
+          const modal = document.getElementById('settings-modal');
+          const isModalOpen = modal && modal.classList.contains('open');
+          if (!isModalOpen || !isFormModifiedByUser) {
+            populateSettingsForm(fresh);
+            isFormModifiedByUser = false;
+          }
+        }
+      })
+      .catch(() => {});
+  }
+});
+
 // PWA Service Worker Registration & Cache Busting
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js?v=2.2.0')
+      .register('/sw.js?v=2.2.1')
       .then((reg) => {
         reg.update();
       })
