@@ -21,7 +21,7 @@ export class BinanceFuturesClient {
   private isTestnet: boolean = false;
   private restBaseUrl: string = 'https://fapi.binance.com';
   private wsDomainIndex: number = 0;
-  private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me', 'fstream.binance.je'];
+  private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me'];
   private wsUrl: string = `wss://${this.wsDomains[0]}/market/ws/!ticker@arr`;
   private currentDataSource: 'WEBSOCKET' | 'POLLING' = 'WEBSOCKET';
   private wsClient: WebSocket | null = null;
@@ -1081,6 +1081,7 @@ export class BinanceFuturesClient {
       this.isWsConnected = false;
       if (this.wsClient) {
         try {
+          this.wsClient.removeAllListeners();
           this.wsClient.terminate();
         } catch {}
         this.wsClient = null;
@@ -1093,8 +1094,18 @@ export class BinanceFuturesClient {
       return;
     }
 
+    // Jika WebSocket saat ini SUDAH terhubung dan aktif, jangan putus!
+    if (this.currentDataSource === 'WEBSOCKET' && this.isWsConnected && this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
+      if (this.wsReconnectTimer) {
+        clearTimeout(this.wsReconnectTimer);
+        this.wsReconnectTimer = null;
+      }
+      return;
+    }
+
     if (this.wsClient) {
       try {
+        this.wsClient.removeAllListeners();
         this.wsClient.terminate();
       } catch {}
       this.wsClient = null;
@@ -1110,6 +1121,10 @@ export class BinanceFuturesClient {
       this.wsClient.on('open', () => {
         this.isWsConnected = true;
         this.lastWsMessageAt = Date.now();
+        if (this.wsReconnectTimer) {
+          clearTimeout(this.wsReconnectTimer);
+          this.wsReconnectTimer = null;
+        }
         console.log(`⚡ [WEBSOCKET CONNECTED] Terhubung ke Binance Futures All-Market Stream (${this.wsUrl})`);
         logger.log('INFO', '⚡ [MARKET DATA] Binance WebSocket terhubung.');
       });
@@ -1117,6 +1132,10 @@ export class BinanceFuturesClient {
       this.wsClient.on('message', (raw: WebSocket.Data) => {
         try {
           this.lastWsMessageAt = Date.now();
+          if (this.wsReconnectTimer) {
+            clearTimeout(this.wsReconnectTimer);
+            this.wsReconnectTimer = null;
+          }
           const data = JSON.parse(raw.toString());
           if (Array.isArray(data)) {
             if (data.length > 0 && this.fastPollInterval) {
@@ -1131,6 +1150,13 @@ export class BinanceFuturesClient {
         } catch {}
       });
 
+      this.wsClient.on('ping', () => {
+        this.lastWsMessageAt = Date.now();
+        try {
+          this.wsClient?.pong();
+        } catch {}
+      });
+
       this.wsClient.on('error', (err) => {
         console.error('WebSocket Error:', err.message);
         logger.log('ERROR', `❌ [MARKET DATA] WebSocket Binance error: ${err.message}`);
@@ -1142,8 +1168,10 @@ export class BinanceFuturesClient {
           clearInterval(this.wsWatchdogTimer);
           this.wsWatchdogTimer = null;
         }
+        if (this.currentDataSource === 'POLLING') return;
+
         const now = Date.now();
-        if (code !== 1000 && now - this.lastWsCloseLog > 30000) {
+        if (code !== 1000 && now - this.lastWsCloseLog > 10000) {
           this.lastWsCloseLog = now;
           console.log(`⚠️ WebSocket terputus (Code: ${code}). Mencoba rekoneksi...`);
           logger.log('WARN', `⚠️ [MARKET DATA] WebSocket Binance terputus (Code: ${code}). Reconnect dijadwalkan.`);
@@ -1151,25 +1179,37 @@ export class BinanceFuturesClient {
         // Fallback polling hanya jika WebSocket benar-benar terputus
         this.startFastTickerStream(this.currentPollingIntervalMs);
         if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
-        this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 30000);
+        this.wsReconnectTimer = setTimeout(() => {
+          this.wsReconnectTimer = null;
+          this.startTickerWebSocket();
+        }, 5000);
       });
 
       if (this.wsWatchdogTimer) clearInterval(this.wsWatchdogTimer);
       this.wsWatchdogTimer = setInterval(() => {
-        if (this.isWsConnected && Date.now() - this.lastWsMessageAt > 5000) {
-          console.warn('⚠️ WebSocket Binance diam >5 detik. Mengaktifkan fallback polling dan reconnect.');
-          logger.log('WARN', `⚠️ [MARKET DATA] WebSocket diam >5 detik. Fallback polling ${this.currentPollingIntervalMs}ms diaktifkan.`);
+        if (this.currentDataSource !== 'WEBSOCKET') return;
+        if (this.isWsConnected && Date.now() - this.lastWsMessageAt > 15000) {
+          console.warn('⚠️ WebSocket Binance diam >15 detik. Mengaktifkan fallback polling dan reconnect.');
+          logger.log('WARN', `⚠️ [MARKET DATA] WebSocket diam >15 detik. Fallback polling ${this.currentPollingIntervalMs}ms diaktifkan.`);
           this.isWsConnected = false;
           this.startFastTickerStream(this.currentPollingIntervalMs);
           this.rotateWsDomain();
-          this.wsClient?.terminate();
+          try {
+            this.wsClient?.removeAllListeners();
+            this.wsClient?.terminate();
+          } catch {}
+          this.wsClient = null;
+          this.startTickerWebSocket();
         }
-      }, 2000);
+      }, 5000);
     } catch (e: any) {
       console.error('Gagal inisialisasi WebSocket:', e.message);
       this.startFastTickerStream(this.currentPollingIntervalMs);
       if (this.wsReconnectTimer) clearTimeout(this.wsReconnectTimer);
-      this.wsReconnectTimer = setTimeout(() => this.startTickerWebSocket(), 30000);
+      this.wsReconnectTimer = setTimeout(() => {
+        this.wsReconnectTimer = null;
+        this.startTickerWebSocket();
+      }, 5000);
     }
   }
 
