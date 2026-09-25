@@ -23,6 +23,7 @@ export class WickSniperEngine {
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
   private spikesDetectedToday: number = 0;
+  private lastResetDateWib: string = '';
   private statusListeners: ((status: EngineStatus) => void)[] = [];
   private configListeners: ((config: BotConfig) => void)[] = [];
   private lastSyncedConfigJson: string = '';
@@ -327,6 +328,7 @@ export class WickSniperEngine {
     }
     let tickCount = 0;
     this.tickInterval = setInterval(async () => {
+        this.checkDailyReset();
         await this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
         tickCount++;
@@ -2491,7 +2493,61 @@ export class WickSniperEngine {
     }
   }
 
+  private getTodayWibDate(): string {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+  }
+
+  private getStartOfDayWibTimestamp(): number {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(now);
+    const year = parseInt(parts.find((p) => p.type === 'year')!.value, 10);
+    const month = parseInt(parts.find((p) => p.type === 'month')!.value, 10) - 1;
+    const day = parseInt(parts.find((p) => p.type === 'day')!.value, 10);
+    return Date.UTC(year, month, day) - 7 * 3600 * 1000;
+  }
+
+  private checkDailyReset() {
+    const todayWib = this.getTodayWibDate();
+    if (!this.lastResetDateWib) {
+      this.lastResetDateWib = todayWib;
+      return;
+    }
+    if (this.lastResetDateWib !== todayWib) {
+      const oldDate = this.lastResetDateWib;
+      this.lastResetDateWib = todayWib;
+      this.spikesDetectedToday = 0;
+      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+      logger.log('INFO', `🌅 [RESET HARIAN 00:00 WIB] Pergantian hari (${oldDate} ➔ ${todayWib} WIB). Metrik & lonjakan harian telah direset.`);
+      this.broadcastStatus();
+    }
+  }
+
+  public getClosedTrades(): ClosedTrade[] {
+    return this.closedTrades;
+  }
+
+  public getRecentSpikes(): SpikeAlert[] {
+    return this.scanner.getRecentSpikes();
+  }
+
   public getStatus(): EngineStatus {
+    this.checkDailyReset();
+    const todayStartTs = this.getStartOfDayWibTimestamp();
+
+    // Metrik Hari Ini (Sejak 00:00 WIB)
+    const dailyTrades = this.closedTrades.filter((t) => t.timestamp >= todayStartTs);
+    const dailyTradesCount = dailyTrades.length;
+    const dailyWinsCount = dailyTrades.filter((t) => t.realizedPnl >= 0).length;
+    const dailyLossesCount = dailyTradesCount - dailyWinsCount;
+    const dailyWinRate = dailyTradesCount > 0 ? Math.round((dailyWinsCount / dailyTradesCount) * 1000) / 10 : 0;
+    const dailyPnl = Math.round(dailyTrades.reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
+
+    // Metrik All-Time (Riwayat Berjalan)
     const totalTrades = this.closedTrades.length;
     const wins = this.closedTrades.filter((t) => t.realizedPnl >= 0).length;
     const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 1000) / 10 : 0;
@@ -2512,6 +2568,11 @@ export class WickSniperEngine {
       totalTrades,
       winRate,
       accumulatedPnl,
+      dailyPnl,
+      dailyWinRate,
+      dailyTradesCount,
+      dailyWinsCount,
+      dailyLossesCount,
       activePositions: Array.from(this.activePositions.values()),
       recentSpikes: this.scanner.getRecentSpikes(),
       recentTrades: this.closedTrades.slice(0, 20),

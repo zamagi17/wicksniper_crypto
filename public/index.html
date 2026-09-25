@@ -121,15 +121,15 @@
       </div>
 
       <div class="kpi-card">
-        <div class="kpi-label">Akumulasi Realized PnL</div>
+        <div class="kpi-label">Realized PnL (Hari Ini)</div>
         <div class="kpi-value" id="metric-pnl">+$0.00</div>
-        <div class="kpi-sub" id="metric-pnl-sub">0 Trade Selesai</div>
+        <div class="kpi-sub" id="metric-pnl-sub">Hari Ini (00:00 WIB) • Total: +$0.00</div>
       </div>
 
       <div class="kpi-card">
-        <div class="kpi-label">Win Rate</div>
+        <div class="kpi-label">Win Rate (Hari Ini)</div>
         <div class="kpi-value text-gold" id="metric-winrate">0.0%</div>
-        <div class="kpi-sub" id="metric-winrate-sub">0 Menang / 0 Kalah</div>
+        <div class="kpi-sub" id="metric-winrate-sub">Hari Ini: 0W / 0L • Total: 0.0%</div>
       </div>
 
       <div class="kpi-card">
@@ -212,6 +212,20 @@
             <span class="tag-pulse" id="radar-pulse-tag">Memindai 0 Koin (0 tick/s)</span>
           </div>
 
+          <!-- TOOLBAR FILTER RADAR -->
+          <div class="panel-toolbar">
+            <div class="filter-group">
+              <input type="text" id="radar-filter-symbol" class="panel-filter-input" placeholder="🔍 Cari koin (misal: BTC)..." oninput="handleRadarFilterChange()">
+            </div>
+            <select id="radar-filter-status" class="panel-filter-select" onchange="handleRadarFilterChange()">
+              <option value="ALL">Semua Status</option>
+              <option value="EXECUTING">🎯 Sniped (Dieksekusi)</option>
+              <option value="SKIPPED">🛡️ Dilewati (Filter)</option>
+              <option value="PENDING">⏳ Menunggu</option>
+            </select>
+            <button type="button" class="btn btn-xs" onclick="resetRadarFilter()">Reset</button>
+          </div>
+
           <div class="table-responsive">
             <table class="data-table">
               <thead>
@@ -230,6 +244,15 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- PAGINATION BAR RADAR -->
+          <div class="pagination-bar" id="radar-pagination">
+            <span class="pagination-info" id="radar-pagination-info">Halaman 1 dari 1 (Total: 0 Spike)</span>
+            <div class="pagination-btns">
+              <button type="button" class="btn-page" id="radar-prev-btn" onclick="changeRadarPage(-1)" disabled>◀ Sebelumnya</button>
+              <button type="button" class="btn-page" id="radar-next-btn" onclick="changeRadarPage(1)" disabled>Berikutnya ▶</button>
+            </div>
           </div>
         </div>
       </div>
@@ -261,6 +284,24 @@
             <span class="tag-counter" id="closed-count-tag">0 Trade</span>
           </div>
 
+          <!-- TOOLBAR FILTER TRADES -->
+          <div class="panel-toolbar">
+            <div class="filter-group">
+              <input type="text" id="trades-filter-symbol" class="panel-filter-input" placeholder="🔍 Cari koin (misal: SAGA)..." oninput="handleTradesFilterChange()">
+            </div>
+            <select id="trades-filter-outcome" class="panel-filter-select" onchange="handleTradesFilterChange()">
+              <option value="ALL">Semua Hasil</option>
+              <option value="WIN">🎯 Menang (Take Profit)</option>
+              <option value="LOSS">🛑 Kalah (Stop Loss)</option>
+            </select>
+            <select id="trades-filter-mode" class="panel-filter-select" onchange="handleTradesFilterChange()">
+              <option value="ALL">Semua Mode</option>
+              <option value="LIVE">Live Trading</option>
+              <option value="PAPER">Paper Trading</option>
+            </select>
+            <button type="button" class="btn btn-xs" onclick="resetTradesFilter()">Reset</button>
+          </div>
+
           <div class="table-responsive">
             <table class="data-table">
               <thead>
@@ -280,6 +321,15 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- PAGINATION BAR TRADES -->
+          <div class="pagination-bar" id="trades-pagination">
+            <span class="pagination-info" id="trades-pagination-info">Halaman 1 dari 1 (Total: 0 Trade)</span>
+            <div class="pagination-btns">
+              <button type="button" class="btn-page" id="trades-prev-btn" onclick="changeTradesPage(-1)" disabled>◀ Sebelumnya</button>
+              <button type="button" class="btn-page" id="trades-next-btn" onclick="changeTradesPage(1)" disabled>Berikutnya ▶</button>
+            </div>
           </div>
         </div>
       </div>

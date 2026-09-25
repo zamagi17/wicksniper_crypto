@@ -371,6 +371,167 @@ export class DatabaseService {
     }
   }
 
+  public async queryTrades(options: {
+    page?: number;
+    limit?: number;
+    symbol?: string;
+    outcome?: 'ALL' | 'WIN' | 'LOSS';
+    mode?: 'ALL' | 'LIVE' | 'PAPER';
+  }): Promise<{ trades: ClosedTrade[]; total: number; page: number; totalPages: number }> {
+    const page = Math.max(1, parseInt(String(options.page || 1), 10));
+    const limit = Math.min(100, Math.max(5, parseInt(String(options.limit || 20), 10)));
+    const offset = (page - 1) * limit;
+
+    if (!this.isConnected || !this.pool) {
+      return { trades: [], total: 0, page, totalPages: 0 };
+    }
+
+    try {
+      const conditions: string[] = [];
+      const values: any[] = [];
+      let valIdx = 1;
+
+      if (options.symbol && options.symbol.trim() !== '') {
+        conditions.push(`symbol ILIKE $${valIdx++}`);
+        values.push(`%${options.symbol.trim()}%`);
+      }
+
+      if (options.outcome === 'WIN') {
+        conditions.push(`realized_pnl >= 0`);
+      } else if (options.outcome === 'LOSS') {
+        conditions.push(`realized_pnl < 0`);
+      }
+
+      if (options.mode === 'LIVE') {
+        conditions.push(`is_paper = FALSE`);
+      } else if (options.mode === 'PAPER') {
+        conditions.push(`is_paper = TRUE`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const countRes = await this.pool.query(
+        `SELECT COUNT(*) AS total FROM wicksniper_trades ${whereClause};`,
+        values
+      );
+      const total = parseInt(countRes.rows[0]?.total || '0', 10);
+      const totalPages = Math.ceil(total / limit) || 1;
+
+      const queryValues = [...values, limit, offset];
+      const res = await this.pool.query(
+        `SELECT id, symbol, side, entry_price AS "entryPrice", exit_price AS "exitPrice",
+                qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
+                pnl_pct AS "pnlPct", duration_seconds AS "durationSeconds",
+                exit_reason AS "exitReason", is_paper AS "isPaper",
+                closed_at AS "closedAt", timestamp,
+                params_snapshot AS "paramsSnapshot",
+                layers_detail AS "layersDetail"
+         FROM wicksniper_trades
+         ${whereClause}
+         ORDER BY timestamp DESC
+         LIMIT $${valIdx++} OFFSET $${valIdx++};`,
+        queryValues
+      );
+
+      const trades: ClosedTrade[] = res.rows.map((r: any) => ({
+        id: r.id,
+        symbol: r.symbol,
+        side: r.side,
+        entryPrice: parseFloat(r.entryPrice),
+        exitPrice: parseFloat(r.exitPrice),
+        qty: parseFloat(r.qty),
+        marginUsed: parseFloat(r.marginUsed),
+        realizedPnl: parseFloat(r.realizedPnl),
+        pnlPct: parseFloat(r.pnlPct),
+        durationSeconds: parseInt(r.durationSeconds, 10),
+        exitReason: r.exitReason,
+        isPaper: r.isPaper,
+        closedAt: r.closedAt,
+        timestamp: parseInt(r.timestamp, 10),
+        paramsSnapshot: r.paramsSnapshot || null,
+        layersDetail: r.layersDetail || null,
+      }));
+
+      return { trades, total, page, totalPages };
+    } catch (e: any) {
+      console.error('[Database] Gagal query trades:', e.message);
+      return { trades: [], total: 0, page, totalPages: 0 };
+    }
+  }
+
+  public async querySpikes(options: {
+    page?: number;
+    limit?: number;
+    symbol?: string;
+    status?: string;
+  }): Promise<{ spikes: SpikeAlert[]; total: number; page: number; totalPages: number }> {
+    const page = Math.max(1, parseInt(String(options.page || 1), 10));
+    const limit = Math.min(100, Math.max(5, parseInt(String(options.limit || 15), 10)));
+    const offset = (page - 1) * limit;
+
+    if (!this.isConnected || !this.pool) {
+      return { spikes: [], total: 0, page, totalPages: 0 };
+    }
+
+    try {
+      const conditions: string[] = [];
+      const values: any[] = [];
+      let valIdx = 1;
+
+      if (options.symbol && options.symbol.trim() !== '') {
+        conditions.push(`symbol ILIKE $${valIdx++}`);
+        values.push(`%${options.symbol.trim()}%`);
+      }
+
+      if (options.status && options.status !== 'ALL') {
+        conditions.push(`status = $${valIdx++}`);
+        values.push(options.status);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const countRes = await this.pool.query(
+        `SELECT COUNT(*) AS total FROM wicksniper_spikes ${whereClause};`,
+        values
+      );
+      const total = parseInt(countRes.rows[0]?.total || '0', 10);
+      const totalPages = Math.ceil(total / limit) || 1;
+
+      const queryValues = [...values, limit, offset];
+      const res = await this.pool.query(
+        `SELECT id, symbol,
+                start_price AS "startPrice",
+                current_price AS "currentPrice",
+                surge_pct AS "surgePct",
+                lookback_seconds AS "lookbackSeconds",
+                status, skip_reason AS "skipReason",
+                timestamp
+         FROM wicksniper_spikes
+         ${whereClause}
+         ORDER BY timestamp DESC
+         LIMIT $${valIdx++} OFFSET $${valIdx++};`,
+        queryValues
+      );
+
+      const spikes: SpikeAlert[] = res.rows.map((r: any) => ({
+        id: r.id,
+        symbol: r.symbol,
+        startPrice: parseFloat(r.startPrice),
+        currentPrice: parseFloat(r.currentPrice),
+        surgePct: parseFloat(r.surgePct),
+        lookbackSeconds: parseInt(r.lookbackSeconds, 10),
+        status: r.status as SpikeAlert['status'],
+        skipReason: r.skipReason || undefined,
+        timestamp: parseInt(r.timestamp, 10),
+      }));
+
+      return { spikes, total, page, totalPages };
+    } catch (e: any) {
+      console.error('[Database] Gagal query spikes:', e.message);
+      return { spikes: [], total: 0, page, totalPages: 0 };
+    }
+  }
+
   public async close(): Promise<void> {
     if (this.pool) {
       await this.pool.end();

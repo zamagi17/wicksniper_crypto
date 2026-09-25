@@ -186,6 +186,11 @@ export interface EngineStatus {
   totalTrades: number;
   winRate: number;
   accumulatedPnl: number;
+  dailyPnl?: number;
+  dailyWinRate?: number;
+  dailyTradesCount?: number;
+  dailyWinsCount?: number;
+  dailyLossesCount?: number;
   activePositions: ActivePosition[];
   recentSpikes: SpikeAlert[];
   recentTrades: ClosedTrade[];

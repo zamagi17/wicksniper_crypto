@@ -9,6 +9,7 @@ import { backtester } from './services/backtester';
 import { dataFetcher } from './services/dataFetcher';
 import { binanceFutures } from './services/binance';
 import { telegram } from './services/telegram';
+import { db } from './services/db';
 
 import crypto from 'crypto';
 
@@ -250,6 +251,72 @@ app.post('/api/backtest/clear-cache', requireAuth, (req, res) => {
 
 app.get('/api/logs', (req, res) => {
   res.json(logger.getLogs());
+});
+
+app.get('/api/trades', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const page = parseInt(String(req.query.page || '1'), 10) || 1;
+  const limit = parseInt(String(req.query.limit || '20'), 10) || 20;
+  const symbol = req.query.symbol ? String(req.query.symbol).trim() : undefined;
+  const outcome = req.query.outcome as 'ALL' | 'WIN' | 'LOSS' | undefined;
+  const mode = req.query.mode as 'ALL' | 'LIVE' | 'PAPER' | undefined;
+
+  if (db.isConnected) {
+    const result = await db.queryTrades({ page, limit, symbol, outcome, mode });
+    return res.json({ success: true, ...result });
+  }
+
+  // Memory fallback
+  let list = engine.getClosedTrades();
+  if (symbol) {
+    list = list.filter((t) => t.symbol.toUpperCase().includes(symbol.toUpperCase()));
+  }
+  if (outcome === 'WIN') {
+    list = list.filter((t) => t.realizedPnl >= 0);
+  } else if (outcome === 'LOSS') {
+    list = list.filter((t) => t.realizedPnl < 0);
+  }
+  if (mode === 'LIVE') {
+    list = list.filter((t) => !t.isPaper);
+  } else if (mode === 'PAPER') {
+    list = list.filter((t) => !!t.isPaper);
+  }
+
+  const total = list.length;
+  const totalPages = Math.ceil(total / limit) || 1;
+  const offset = (page - 1) * limit;
+  const trades = list.slice(offset, offset + limit);
+
+  return res.json({ success: true, trades, total, page, totalPages });
+});
+
+app.get('/api/spikes', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const page = parseInt(String(req.query.page || '1'), 10) || 1;
+  const limit = parseInt(String(req.query.limit || '15'), 10) || 15;
+  const symbol = req.query.symbol ? String(req.query.symbol).trim() : undefined;
+  const status = req.query.status ? String(req.query.status) : undefined;
+
+  if (db.isConnected) {
+    const result = await db.querySpikes({ page, limit, symbol, status });
+    return res.json({ success: true, ...result });
+  }
+
+  // Memory fallback
+  let list = engine.getRecentSpikes();
+  if (symbol) {
+    list = list.filter((s) => s.symbol.toUpperCase().includes(symbol.toUpperCase()));
+  }
+  if (status && status !== 'ALL') {
+    list = list.filter((s) => s.status === status);
+  }
+
+  const total = list.length;
+  const totalPages = Math.ceil(total / limit) || 1;
+  const offset = (page - 1) * limit;
+  const spikes = list.slice(offset, offset + limit);
+
+  return res.json({ success: true, spikes, total, page, totalPages });
 });
 
 // WebSocket Realtime Broadcaster

@@ -477,16 +477,19 @@ function renderStatus(status) {
     }
   }
 
+  const dPnl = status.dailyPnl !== undefined ? status.dailyPnl : status.accumulatedPnl;
+  const isPosPnl = dPnl >= 0;
   const pnlEl = document.getElementById('metric-pnl');
-  const isPosPnl = status.accumulatedPnl >= 0;
-  pnlEl.innerText = `${isPosPnl ? '+' : ''}$${status.accumulatedPnl.toFixed(2)}`;
+  pnlEl.innerText = `${isPosPnl ? '+' : ''}$${dPnl.toFixed(2)}`;
   pnlEl.className = `kpi-value ${isPosPnl ? 'text-green' : 'text-red'}`;
-  document.getElementById('metric-pnl-sub').innerText = `${status.totalTrades} Trade Selesai`;
+  const allTimeSign = status.accumulatedPnl >= 0 ? '+' : '';
+  document.getElementById('metric-pnl-sub').innerText = `Hari Ini • Total: ${allTimeSign}$${status.accumulatedPnl.toFixed(2)} (${status.totalTrades} Trade)`;
 
-  document.getElementById('metric-winrate').innerText = `${status.winRate.toFixed(1)}%`;
-  const wins = Math.round((status.winRate / 100) * status.totalTrades);
-  const losses = status.totalTrades - wins;
-  document.getElementById('metric-winrate-sub').innerText = `${wins} Menang / ${losses} Kalah`;
+  const dailyWinRate = status.dailyWinRate !== undefined ? status.dailyWinRate : status.winRate;
+  document.getElementById('metric-winrate').innerText = `${dailyWinRate.toFixed(1)}%`;
+  const dWins = status.dailyWinsCount !== undefined ? status.dailyWinsCount : Math.round((status.winRate / 100) * status.totalTrades);
+  const dLosses = status.dailyLossesCount !== undefined ? status.dailyLossesCount : (status.totalTrades - dWins);
+  document.getElementById('metric-winrate-sub').innerText = `Hari Ini: ${dWins}W / ${dLosses}L • Total: ${status.winRate.toFixed(1)}%`;
 
   document.getElementById('metric-spikes').innerText = status.spikesDetectedToday;
   const totalActiveMargin = (status.activePositions || []).reduce((sum, p) => sum + (p.totalMarginUsed || 0), 0);
@@ -556,10 +559,19 @@ function renderStatus(status) {
   renderActivePositions(status.activePositions || []);
 
   // 5. Render Spikes Radar
-  renderSpikesTable(status.recentSpikes || []);
+  if (radarState.page === 1 && !radarState.symbol && radarState.status === 'ALL') {
+    radarState.total = status.recentSpikes?.length || 0;
+    renderSpikesTable(status.recentSpikes || []);
+    updateRadarPaginationUI();
+  }
 
   // 6. Render Closed Trades
-  renderClosedTradesTable(status.recentTrades || []);
+  if (tradesState.page === 1 && !tradesState.symbol && tradesState.outcome === 'ALL' && tradesState.mode === 'ALL') {
+    tradesState.total = status.totalTrades;
+    tradesState.totalPages = Math.ceil(status.totalTrades / tradesState.limit) || 1;
+    renderClosedTradesTable(status.recentTrades || []);
+    updateTradesPaginationUI();
+  }
 }
 
 function renderActivePositions(positions) {
@@ -655,6 +667,158 @@ function renderActivePositions(positions) {
     .join('');
 }
 
+// --- PAGINATION & FILTER STATE FOR RADAR & TRADES ---
+let tradesState = {
+  page: 1,
+  limit: 20,
+  totalPages: 1,
+  total: 0,
+  symbol: '',
+  outcome: 'ALL',
+  mode: 'ALL',
+};
+
+let radarState = {
+  page: 1,
+  limit: 15,
+  totalPages: 1,
+  total: 0,
+  symbol: '',
+  status: 'ALL',
+};
+
+let recentClosedTrades = [];
+let selectedTradeForDetail = null;
+
+async function fetchPaginatedTrades(page = 1) {
+  tradesState.page = page;
+  const symbol = (document.getElementById('trades-filter-symbol')?.value || '').trim();
+  const outcome = document.getElementById('trades-filter-outcome')?.value || 'ALL';
+  const mode = document.getElementById('trades-filter-mode')?.value || 'ALL';
+  tradesState.symbol = symbol;
+  tradesState.outcome = outcome;
+  tradesState.mode = mode;
+
+  try {
+    const params = new URLSearchParams({
+      page: String(tradesState.page),
+      limit: String(tradesState.limit),
+    });
+    if (symbol) params.append('symbol', symbol);
+    if (outcome !== 'ALL') params.append('outcome', outcome);
+    if (mode !== 'ALL') params.append('mode', mode);
+
+    const res = await fetch(`/api/trades?${params.toString()}`);
+    const data = await res.json();
+    if (data.success) {
+      tradesState.totalPages = data.totalPages || 1;
+      tradesState.total = data.total || 0;
+      renderClosedTradesTable(data.trades);
+      updateTradesPaginationUI();
+    }
+  } catch (e) {
+    console.warn('Gagal memuat riwayat trade:', e);
+  }
+}
+
+function updateTradesPaginationUI() {
+  const infoEl = document.getElementById('trades-pagination-info');
+  const prevBtn = document.getElementById('trades-prev-btn');
+  const nextBtn = document.getElementById('trades-next-btn');
+  const countTag = document.getElementById('closed-count-tag');
+
+  if (infoEl) infoEl.innerText = `Halaman ${tradesState.page} dari ${tradesState.totalPages} (Total: ${tradesState.total} Trade)`;
+  if (countTag) countTag.innerText = `${tradesState.total} Trade`;
+  if (prevBtn) prevBtn.disabled = tradesState.page <= 1;
+  if (nextBtn) nextBtn.disabled = tradesState.page >= tradesState.totalPages;
+}
+
+function changeTradesPage(delta) {
+  const newPage = tradesState.page + delta;
+  if (newPage >= 1 && newPage <= tradesState.totalPages) {
+    fetchPaginatedTrades(newPage);
+  }
+}
+
+let tradesFilterTimer = null;
+function handleTradesFilterChange() {
+  clearTimeout(tradesFilterTimer);
+  tradesFilterTimer = setTimeout(() => {
+    fetchPaginatedTrades(1);
+  }, 250);
+}
+
+function resetTradesFilter() {
+  const symEl = document.getElementById('trades-filter-symbol');
+  const outEl = document.getElementById('trades-filter-outcome');
+  const modEl = document.getElementById('trades-filter-mode');
+  if (symEl) symEl.value = '';
+  if (outEl) outEl.value = 'ALL';
+  if (modEl) modEl.value = 'ALL';
+  fetchPaginatedTrades(1);
+}
+
+async function fetchPaginatedSpikes(page = 1) {
+  radarState.page = page;
+  const symbol = (document.getElementById('radar-filter-symbol')?.value || '').trim();
+  const status = document.getElementById('radar-filter-status')?.value || 'ALL';
+  radarState.symbol = symbol;
+  radarState.status = status;
+
+  try {
+    const params = new URLSearchParams({
+      page: String(radarState.page),
+      limit: String(radarState.limit),
+    });
+    if (symbol) params.append('symbol', symbol);
+    if (status !== 'ALL') params.append('status', status);
+
+    const res = await fetch(`/api/spikes?${params.toString()}`);
+    const data = await res.json();
+    if (data.success) {
+      radarState.totalPages = data.totalPages || 1;
+      radarState.total = data.total || 0;
+      renderSpikesTable(data.spikes);
+      updateRadarPaginationUI();
+    }
+  } catch (e) {
+    console.warn('Gagal memuat radar spikes:', e);
+  }
+}
+
+function updateRadarPaginationUI() {
+  const infoEl = document.getElementById('radar-pagination-info');
+  const prevBtn = document.getElementById('radar-prev-btn');
+  const nextBtn = document.getElementById('radar-next-btn');
+
+  if (infoEl) infoEl.innerText = `Halaman ${radarState.page} dari ${radarState.totalPages} (Total: ${radarState.total} Spike)`;
+  if (prevBtn) prevBtn.disabled = radarState.page <= 1;
+  if (nextBtn) nextBtn.disabled = radarState.page >= radarState.totalPages;
+}
+
+function changeRadarPage(delta) {
+  const newPage = radarState.page + delta;
+  if (newPage >= 1 && newPage <= radarState.totalPages) {
+    fetchPaginatedSpikes(newPage);
+  }
+}
+
+let radarFilterTimer = null;
+function handleRadarFilterChange() {
+  clearTimeout(radarFilterTimer);
+  radarFilterTimer = setTimeout(() => {
+    fetchPaginatedSpikes(1);
+  }, 250);
+}
+
+function resetRadarFilter() {
+  const symEl = document.getElementById('radar-filter-symbol');
+  const statEl = document.getElementById('radar-filter-status');
+  if (symEl) symEl.value = '';
+  if (statEl) statEl.value = 'ALL';
+  fetchPaginatedSpikes(1);
+}
+
 function renderSpikesTable(spikes) {
   const tbody = document.getElementById('spike-table-body');
   if (!spikes || spikes.length === 0) {
@@ -663,14 +827,13 @@ function renderSpikesTable(spikes) {
   }
 
   tbody.innerHTML = spikes
-    .slice(0, 10)
     .map((s) => {
       const timeStr = new Date(s.timestamp).toLocaleTimeString('id-ID');
       const statusBadge =
         s.status === 'EXECUTING'
           ? `<span class="badge-hft" style="background:rgba(0,230,118,0.2);color:#00e676;border-color:#00e676">SNIPED 🎯</span>`
           : s.status === 'SKIPPED'
-          ? `<span class="badge-hft" style="background:rgba(255,179,0,0.2);color:#ffb300;border-color:#ffb300">DILEWATI</span>`
+          ? `<span class="badge-hft" style="background:rgba(255,179,0,0.2);color:#ffb300;border-color:#ffb300" title="${s.skipReason || 'Dilewati filter'}">DILEWATI</span>`
           : `<span class="badge-hft">TERDETEKSI</span>`;
 
       return `
@@ -686,9 +849,6 @@ function renderSpikesTable(spikes) {
     })
     .join('');
 }
-
-let recentClosedTrades = [];
-let selectedTradeForDetail = null;
 
 function renderClosedTradesTable(trades) {
   recentClosedTrades = trades || [];
