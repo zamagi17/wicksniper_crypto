@@ -788,16 +788,20 @@ export class BinanceFuturesClient {
           if (realPos && Math.abs(realPos.positionAmt) > 0) {
             const exactQty = Math.abs(realPos.positionAmt);
             const retryFormattedQty = this.formatQty(symbol, exactQty);
-            console.log(`🔄 Mengirim ulang order penutupan dengan ukuran presisi: ${retryFormattedQty}`);
+            // SISI PENUTUPAN HARUS SESUAI ARAH RIIL DI BINANCE!
+            // Jika positionAmt < 0 (SHORT) -> tutup dengan BUY
+            // Jika positionAmt > 0 (LONG) -> tutup dengan SELL
+            const correctSide: 'BUY' | 'SELL' = realPos.positionAmt < 0 ? 'BUY' : 'SELL';
+            console.log(`🔄 Mengirim ulang order penutupan dengan ukuran presisi: ${retryFormattedQty} (Side: ${correctSide})`);
             const client = await this.getHttpClient();
             const retryParams: Record<string, any> = {
               symbol,
-              side,
+              side: correctSide,
               type: 'MARKET',
               quantity: retryFormattedQty,
             };
             if (this.isDualSidePosition) {
-              retryParams.positionSide = side === 'BUY' ? 'SHORT' : 'LONG';
+              retryParams.positionSide = correctSide === 'BUY' ? 'SHORT' : 'LONG';
             } else {
               retryParams.positionSide = 'BOTH';
               retryParams.reduceOnly = 'true';
@@ -948,25 +952,11 @@ export class BinanceFuturesClient {
       }
 
       // AUTO-RECOVERY 2: Error -2022 (ReduceOnly reject)
+      // Proteksi Ketat: JANGAN PERNAH mencoba ulang order tanpa reduceOnly!
+      // Menghapus reduceOnly pada order BUY akan membuka posisi LONG liar di One-Way Mode jika harga tersentuh.
       if (errCode === -2022) {
-        try {
-          console.log(`🔄 [Auto-Recovery -2022] Mencoba tanpa reduceOnly untuk ${symbol}...`);
-          const client = await this.getHttpClient();
-          const retryParams: Record<string, any> = {
-            symbol,
-            side,
-            type: 'LIMIT',
-            timeInForce: 'GTC',
-            quantity: this.formatQty(symbol, qty),
-            price: this.formatPrice(symbol, price),
-            positionSide: this.isDualSidePosition ? (side === 'BUY' ? 'SHORT' : 'LONG') : 'BOTH',
-          };
-          const retryData = this.signParams(retryParams);
-          const retryRes = await client.post('/fapi/v1/order', retryData);
-          return retryRes?.data || null;
-        } catch (retryErr: any) {
-          return { error: true, code: retryErr.response?.data?.code, msg: retryErr.response?.data?.msg || retryErr.message };
-        }
+        console.warn(`⚠️ [Order Ditolak -2022] ${symbol} (${side} @ ${price}) ditolak Binance: ${errMsg}. Order reduceOnly dibatalkan demi keselamatan agar tidak membuka posisi berlawanan.`);
+        return { error: true, code: -2022, msg: errMsg };
       }
 
       // AUTO-RECOVERY 3: Error -4014 atau -1111 (Price not increased by tick size / filter failure)

@@ -1798,8 +1798,11 @@ export class WickSniperEngine {
           }
         }
 
+        const isRealLong = realPos ? (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0)) : false;
+        const actualClosingSide: 'BUY' | 'SELL' = isRealLong ? 'SELL' : 'BUY';
+
         this.auditTradeLifecycle(pos.symbol, 'FULL_CLOSE_REQUESTED', {
-          side: 'BUY',
+          side: actualClosingSide,
           qty: closeQty,
           reason,
           closePrice,
@@ -1810,14 +1813,14 @@ export class WickSniperEngine {
         let execQty = 0;
 
         if (!isPositionAlreadyClosed && closeQty > 0) {
-          this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_REQUESTED', {
-            side: 'BUY',
+          this.auditOrderEvent(pos.symbol, 'CLOSE_POSITION_REQUESTED', {
+            side: actualClosingSide,
             qty: closeQty,
             reason,
             closePrice,
             status: 'SENT',
           });
-          const closeRes = await binanceFutures.closePositionMarket(pos.symbol, 'BUY', closeQty);
+          const closeRes = await binanceFutures.closePositionMarket(pos.symbol, actualClosingSide, closeQty);
           if (closeRes?.orderId) {
             closeResOrderId = String(closeRes.orderId);
           }
@@ -1880,7 +1883,8 @@ export class WickSniperEngine {
               pos.symbol
             );
             try {
-              await binanceFutures.closePositionMarket(pos.symbol, 'BUY', leftoverQty);
+              const sweepSide: 'BUY' | 'SELL' = realPosAfterClose.positionAmt > 0 ? 'SELL' : 'BUY';
+              await binanceFutures.closePositionMarket(pos.symbol, sweepSide, leftoverQty);
               await new Promise((resolve) => setTimeout(resolve, 600));
               realPosAfterClose = await binanceFutures.getOpenPosition(pos.symbol);
               if (!realPosAfterClose || Math.abs(realPosAfterClose.positionAmt) === 0) {
@@ -2312,6 +2316,16 @@ export class WickSniperEngine {
 
           // Sinkronisasi kuantitas & avg entry price jika ada layer tambahan atau TP1 terisi di Binance
           if (realPos && Math.abs(realPos.positionAmt) > 0) {
+            const isLiveLong = realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0);
+            if (isLiveLong && pos.side === 'SHORT') {
+              logger.log(
+                'ERROR',
+                `🚨 [ANOMALI ARAH POSISI] ${symbol}: Di Binance terdeteksi posisi LONG (${realPos.positionAmt}), sedangkan bot memegang SHORT. Menolak sinkronisasi grid/TP agar tidak merusak posisi!`,
+                symbol
+              );
+              continue;
+            }
+
             const liveQty = Math.abs(realPos.positionAmt);
             if (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6) {
               const oldQty = pos.totalQty;
@@ -2366,7 +2380,8 @@ export class WickSniperEngine {
           }
 
           // Pastikan posisi aktif SELALU memiliki order Limit Take Profit di Binance
-          if (realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol)) {
+          const isLiveLongPos = realPos && (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0));
+          if (!isLiveLongPos && realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol)) {
             try {
               const openOrders = await binanceFutures.getOpenOrders(symbol);
               const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
@@ -2394,6 +2409,12 @@ export class WickSniperEngine {
           !this.deployingSymbols.has(livePos.symbol) &&
           Math.abs(livePos.positionAmt) > 0
         ) {
+          const isLiveLong = livePos.positionSide === 'LONG' || (livePos.positionSide === 'BOTH' && livePos.positionAmt > 0);
+          if (isLiveLong) {
+            // Wick Sniper murni bot SHORT spike reversal. Jangan mengadopsi posisi LONG di Binance!
+            continue;
+          }
+
           logger.log(
             'WARN',
             `🔄 [RE-ADOPSI POSISI] Menemukan posisi aktif ${livePos.symbol} di Binance (Qty: ${Math.abs(livePos.positionAmt)}, Entry: $${livePos.entryPrice}). Memulihkan ke radar bot & memasang proteksi TP...`,
