@@ -1121,8 +1121,12 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 }
 
 function closeTradeDetailModal() {
-  document.getElementById('trade-detail-modal').classList.remove('open');
+  document.getElementById('trade-detail-modal')?.classList.remove('open');
 }
+
+window.openTradeDetailModal = openTradeDetailModal;
+window.closeTradeDetailModal = closeTradeDetailModal;
+window.applySnapshotParamsToConfig = applySnapshotParamsToConfig;
 
 function applySnapshotParamsToConfig() {
   if (!selectedTradeForDetail) return;

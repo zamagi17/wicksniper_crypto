@@ -606,20 +606,20 @@ body {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10000;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: calc(16px + var(--sat)) 12px calc(16px + var(--sab)) 12px;
 }
 
 .modal-backdrop.open {
-  display: flex;
+  display: flex !important;
 }
 
 .modal-card {
