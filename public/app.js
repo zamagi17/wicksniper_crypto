@@ -831,18 +831,25 @@ function renderSpikesTable(spikes) {
       const timeStr = new Date(s.timestamp).toLocaleTimeString('id-ID');
       const statusBadge =
         s.status === 'EXECUTING'
-          ? `<span class="badge-hft" style="background:rgba(0,230,118,0.2);color:#00e676;border-color:#00e676">SNIPED 🎯</span>`
+          ? `<span class="badge-radar-status sniped">SNIPED 🎯</span>`
           : s.status === 'SKIPPED'
-          ? `<span class="badge-hft" style="background:rgba(255,179,0,0.2);color:#ffb300;border-color:#ffb300" title="${s.skipReason || 'Dilewati filter'}">DILEWATI</span>`
-          : `<span class="badge-hft">TERDETEKSI</span>`;
+          ? `<span class="badge-radar-status skipped" title="${s.skipReason || 'Dilewati filter'}">DILEWATI</span>`
+          : `<span class="badge-radar-status pending">TERDETEKSI</span>`;
+
+      const startPrice = Number(s.startPrice || 0);
+      const currPrice = Number(s.currentPrice || 0);
+      const surgePct = Number(s.surgePct || 0);
 
       return `
         <tr>
           <td>${timeStr}</td>
-          <td><b>${s.symbol}</b></td>
-          <td>$${s.startPrice.toFixed(4)}</td>
-          <td>$${s.currentPrice.toFixed(4)}</td>
-          <td class="text-green"><b>+${s.surgePct.toFixed(2)}%</b></td>
+          <td>
+            <b>${s.symbol}</b>
+            <span class="mobile-spike-sub">$${startPrice.toFixed(4)} ➜ $${currPrice.toFixed(4)}</span>
+          </td>
+          <td>$${startPrice.toFixed(4)}</td>
+          <td>$${currPrice.toFixed(4)}</td>
+          <td class="text-green"><b>+${surgePct.toFixed(2)}%</b></td>
           <td>${statusBadge}</td>
         </tr>
       `;
@@ -860,26 +867,33 @@ function renderClosedTradesTable(trades) {
 
   tbody.innerHTML = trades
     .slice(0, 25)
-    .map((t) => {
-      const isWin = t.realizedPnl >= 0;
+    .map((t, idx) => {
+      const realizedPnl = Number(t.realizedPnl || 0);
+      const pnlPct = Number(t.pnlPct || 0);
+      const isWin = realizedPnl >= 0;
       const pnlColor = isWin ? 'text-green' : 'text-red';
       const sign = isWin ? '+' : '';
       const layerBadge = t.layersFilled
         ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
         : '';
 
-      const feeIndicator = (t.fee && t.fee > 0)
-        ? `<br><span style="font-size: 10px; color: var(--color-text-muted);" title="Gross PnL: ${t.grossPnl !== undefined ? (t.grossPnl >= 0 ? '+' : '') + '$' + t.grossPnl.toFixed(2) : '-'} | Fee: -$${t.fee.toFixed(3)}">Fee: -$${t.fee.toFixed(3)}</span>`
+      const feeNum = t.fee !== undefined && t.fee !== null ? Number(t.fee) : null;
+      const grossPnlNum = t.grossPnl !== undefined && t.grossPnl !== null ? Number(t.grossPnl) : null;
+
+      const feeIndicator = (feeNum && feeNum > 0)
+        ? `<br><span style="font-size: 10px; color: var(--color-text-muted);" title="Gross PnL: ${grossPnlNum !== null ? (grossPnlNum >= 0 ? '+' : '') + '$' + grossPnlNum.toFixed(2) : '-'} | Fee: -$${feeNum.toFixed(3)}">Fee: -$${feeNum.toFixed(3)}</span>`
         : '';
 
+      const safeTradeId = t.id ? String(t.id).replace(/'/g, "\\'") : '';
+
       return `
-        <tr class="clickable-trade-row" onclick="openTradeDetailModal('${t.id}')" title="Klik untuk melihat rincian trade & perbandingan parameter">
-          <td>${t.closedAt}</td>
+        <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
+          <td>${t.closedAt || '-'}</td>
           <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span> ${layerBadge}</td>
-          <td><span class="text-cyan font-mono"><b>$${(t.marginUsed || 0).toFixed(2)}</b></span></td>
-          <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
-          <td><b>${t.durationSeconds}s</b></td>
-          <td class="${pnlColor}"><b>${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
+          <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
+          <td>$${t.entryPrice || 0} ➜ $${t.exitPrice || 0}</td>
+          <td><b>${t.durationSeconds || 0}s</b></td>
+          <td class="${pnlColor}"><b>${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
           <td>
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
               <small class="${t.exitReason === 'HARD_STOP_LOSS' ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
@@ -892,7 +906,7 @@ function renderClosedTradesTable(trades) {
                 t.exitReason === 'MANUAL_CLOSE' ? '⚡ Manual' :
                 (t.exitReason || '-')
               }</b></small>
-              <button type="button" class="btn btn-xs" onclick="event.stopPropagation(); openTradeDetailModal('${t.id}')" style="font-size: 10px; padding: 2px 7px;">🔍 Detail</button>
+              <button type="button" class="btn btn-xs" onclick="event.stopPropagation(); openTradeDetailModal('${safeTradeId}', ${idx})" style="font-size: 10px; padding: 2px 7px; cursor: pointer; touch-action: manipulation;">🔍 Detail</button>
             </div>
           </td>
         </tr>
@@ -901,166 +915,209 @@ function renderClosedTradesTable(trades) {
     .join('');
 }
 
-function openTradeDetailModal(tradeId) {
-  const t = recentClosedTrades.find((x) => x.id === tradeId);
-  if (!t) return;
-  selectedTradeForDetail = t;
+function openTradeDetailModal(tradeId, tradeIndex) {
+  try {
+    let t = null;
+    if (tradeId && tradeId !== 'undefined' && tradeId !== 'null') {
+      t = recentClosedTrades.find((x) => String(x.id) === String(tradeId));
+    }
+    if (!t && tradeIndex !== undefined && recentClosedTrades[tradeIndex]) {
+      t = recentClosedTrades[tradeIndex];
+    }
+    if (!t && tradeId) {
+      t = recentClosedTrades.find((x) => String(x.symbol).toUpperCase() === String(tradeId).toUpperCase());
+    }
+    if (!t) {
+      console.warn('[Modal] Trade tidak ditemukan:', { tradeId, tradeIndex, count: recentClosedTrades.length });
+      return;
+    }
+    selectedTradeForDetail = t;
 
-  const isWin = t.realizedPnl >= 0;
-  const pnlColor = isWin ? 'text-green' : 'text-red';
-  const sign = isWin ? '+' : '';
+    const realizedPnl = Number(t.realizedPnl || 0);
+    const pnlPct = Number(t.pnlPct || 0);
+    const isWin = realizedPnl >= 0;
+    const pnlColor = isWin ? 'text-green' : 'text-red';
+    const sign = isWin ? '+' : '';
 
-  // Header Title & Badge
-  document.getElementById('td-title').innerText = `🔍 Detail Trade: ${t.symbol} SHORT (${t.isPaper ? 'Paper' : 'Live'})`;
-  const badge = document.getElementById('td-pnl-badge');
-  badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
-  badge.innerText = `${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)`;
+    // Header Title & Badge
+    const titleEl = document.getElementById('td-title');
+    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} SHORT (${t.isPaper ? 'Paper' : 'Live'})`;
+    const badge = document.getElementById('td-pnl-badge');
+    if (badge) {
+      badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
+      badge.innerText = `${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)`;
+    }
 
-  // Fallback snapshot jika trade lama belum memiliki snapshot
-  const snap = t.paramsSnapshot || {
-    marginPerLayerUsdt: 3,
-    totalLayers: 6,
-    layerSpacingPct: 1.0,
-    martingaleMultiplier: 1.15,
-    maxTotalMarginPerCoin: 80,
-    takeProfitPct: 1.2,
-    hardStopLossPct: 4.5,
-    maxHoldMinutes: 10,
-    spikeMinPercent: 3.2,
-    leverage: 5,
-    marginType: 'CROSSED',
-  };
+    // Fallback snapshot jika trade lama belum memiliki snapshot
+    let snap = t.paramsSnapshot;
+    if (typeof snap === 'string') {
+      try { snap = JSON.parse(snap); } catch (_) { snap = null; }
+    }
+    snap = snap || {
+      marginPerLayerUsdt: 3,
+      totalLayers: 6,
+      layerSpacingPct: 1.0,
+      martingaleMultiplier: 1.15,
+      maxTotalMarginPerCoin: 80,
+      takeProfitPct: 1.2,
+      hardStopLossPct: 4.5,
+      maxHoldMinutes: 10,
+      spikeMinPercent: 3.2,
+      leverage: 5,
+      marginType: 'CROSSED',
+    };
 
-  const curr = currentConfig || {};
-  const currGrid = curr.grid || {};
-  const currExit = curr.exit || {};
-  const currScanner = curr.scanner || {};
+    const curr = currentConfig || {};
+    const currGrid = curr.grid || {};
+    const currExit = curr.exit || {};
+    const currScanner = curr.scanner || {};
 
-  // Helper render baris perbandingan
-  const renderCompareRow = (name, valSnap, valCurr, unit = '') => {
-    const isSame = String(valSnap) === String(valCurr);
-    const statusBadge = isSame
-      ? `<span class="badge-same">Sama</span>`
-      : `<span class="badge-diff">Berbeda</span>`;
-    const valCurrStyle = isSame ? '' : 'color: var(--color-cyan); font-weight: 700;';
-    return `
-      <tr>
-        <td class="param-name">${name}</td>
-        <td><b>${valSnap !== undefined ? valSnap : '-'}${unit}</b></td>
-        <td style="${valCurrStyle}">${valCurr !== undefined ? valCurr : '-'}${unit}</td>
-        <td>${statusBadge}</td>
-      </tr>
-    `;
-  };
+    // Helper render baris perbandingan
+    const renderCompareRow = (name, valSnap, valCurr, unit = '') => {
+      const isSame = String(valSnap) === String(valCurr);
+      const statusBadge = isSame
+        ? `<span class="badge-same">Sama</span>`
+        : `<span class="badge-diff">Berbeda</span>`;
+      const valCurrStyle = isSame ? '' : 'color: var(--color-cyan); font-weight: 700;';
+      return `
+        <tr>
+          <td class="param-name">${name}</td>
+          <td><b>${valSnap !== undefined && valSnap !== null ? valSnap : '-'}${unit}</b></td>
+          <td style="${valCurrStyle}">${valCurr !== undefined && valCurr !== null ? valCurr : '-'}${unit}</td>
+          <td>${statusBadge}</td>
+        </tr>
+      `;
+    };
 
-  // Layers breakdown
-  let layersHtml = '';
-  if (t.layersDetail && t.layersDetail.length > 0) {
-    layersHtml = `
-      <div class="td-section-title">🧱 Rincian Layer Jaring Terisi (${t.layersFilled || 'Grid'})</div>
-      <div class="td-layers-wrap">
-        ${t.layersDetail
-          .map(
-            (l) => `
-          <div class="td-layer-row ${l.status === 'FILLED' ? 'filled' : ''}">
-            <span><b>Layer #${l.layerIndex}</b>: $${l.price.toFixed(4)}</span>
-            <span>Margin: $${l.marginUsdt.toFixed(2)} USDT</span>
-            <span class="${l.status === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${l.status}]</b></span>
-          </div>
-        `
-          )
-          .join('')}
-      </div>
-    `;
-  }
+    // Layers breakdown
+    let layers = t.layersDetail;
+    if (typeof layers === 'string') {
+      try { layers = JSON.parse(layers); } catch (_) { layers = []; }
+    }
 
-  const body = document.getElementById('td-body');
-  body.innerHTML = `
-    <!-- KPI SUMMARY -->
-    <div class="td-kpi-grid">
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Net Realized PnL</div>
-        <div class="td-kpi-val ${pnlColor}">${sign}$${t.realizedPnl.toFixed(2)} (${sign}${t.pnlPct.toFixed(1)}%)</div>
-      </div>
-      ${(t.fee && t.fee > 0) ? `
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Fee Binance (Riil)</div>
-        <div class="td-kpi-val text-red">-$${t.fee.toFixed(4)} USDT</div>
-      </div>
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Gross PnL (Sebelum Fee)</div>
-        <div class="td-kpi-val ${t.grossPnl !== undefined && t.grossPnl >= 0 ? 'text-green' : 'text-red'}">
-          ${t.grossPnl !== undefined ? (t.grossPnl >= 0 ? '+' : '') + '$' + t.grossPnl.toFixed(2) : '-'} USDT
+    let layersHtml = '';
+    if (Array.isArray(layers) && layers.length > 0) {
+      layersHtml = `
+        <div class="td-section-title">🧱 Rincian Layer Jaring Terisi (${t.layersFilled || 'Grid'})</div>
+        <div class="td-layers-wrap">
+          ${layers
+            .map((l) => {
+              const priceNum = Number(l.price || 0);
+              const marginNum = Number(l.marginUsdt || 0);
+              const layerIdx = l.layerIndex !== undefined ? l.layerIndex : '-';
+              const statusStr = l.status || 'PENDING';
+              return `
+                <div class="td-layer-row ${statusStr === 'FILLED' ? 'filled' : ''}">
+                  <span><b>Layer #${layerIdx}</b>: $${priceNum.toFixed(4)}</span>
+                  <span>Margin: $${marginNum.toFixed(2)} USDT</span>
+                  <span class="${statusStr === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${statusStr}]</b></span>
+                </div>
+              `;
+            })
+            .join('')}
         </div>
-      </div>
-      ` : ''}
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Entry ➜ Exit</div>
-        <div class="td-kpi-val" style="font-size: 12.5px;">$${t.entryPrice} ➜ $${t.exitPrice}</div>
-      </div>
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Total Margin Terpakai</div>
-        <div class="td-kpi-val text-cyan">$${(t.marginUsed || 0).toFixed(2)} USDT</div>
-      </div>
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Durasi & Waktu</div>
-        <div class="td-kpi-val">${t.durationSeconds} detik <small style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(${t.closedAt})</small></div>
-      </div>
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Alasan Selesai</div>
-        <div class="td-kpi-val" style="font-size: 12px; color: ${
-          t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' ? 'var(--green)' :
-          t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
-          t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
-          'var(--text-muted)'
-        }">${
-          t.exitReason === 'TAKE_PROFIT' ? '🎯 Take Profit' :
-          t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
-          t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
-          t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
-          t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
-          t.exitReason === 'EARLY_MOMENTUM_EXIT' ? '⚠️ Early Momentum' :
-          t.exitReason === 'MANUAL_CLOSE' ? '⚡ Tutup Manual' :
-          t.exitReason
-        }</div>
-      </div>
-      <div class="td-kpi-card">
-        <div class="td-kpi-label">Layer Terisi</div>
-        <div class="td-kpi-val text-purple">${t.layersFilled || '-'}</div>
-      </div>
-    </div>
+      `;
+    }
 
-    <!-- PARAMETER COMPARISON TABLE -->
-    <div class="td-section-title">⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)</div>
-    <div style="overflow-x: auto;">
-      <table class="param-compare-table">
-        <thead>
-          <tr>
-            <th>Parameter Bot</th>
-            <th>Saat Trade Ini Berjalan</th>
-            <th>Konfigurasi Aktif Sekarang</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${renderCompareRow('Modal Per Layer', snap.marginPerLayerUsdt ?? 3, currGrid.marginPerLayerUsdt ?? 3, ' USDT')}
-          ${renderCompareRow('Jumlah Layer', snap.totalLayers ?? 6, currGrid.totalLayers ?? 6, ' Lapis')}
-          ${renderCompareRow('Jarak Antar Jaring (Spacing)', snap.layerSpacingPct ?? 1.0, currGrid.layerSpacingPct ?? 1.0, '%')}
-          ${renderCompareRow('Pengali Martingale', snap.martingaleMultiplier ?? 1.15, currGrid.martingaleMultiplier ?? 1.15, 'x')}
-          ${renderCompareRow('Target Take Profit', snap.takeProfitPct ?? 1.2, currExit.takeProfitPct ?? 1.2, '%')}
-          ${renderCompareRow('Hard Stop Loss', snap.hardStopLossPct ?? 4.5, currExit.hardStopLossPct ?? 4.5, '%')}
-          ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes ?? 10, currExit.maxHoldMinutes ?? 10, ' Menit')}
-          ${renderCompareRow('Minimal Spike', snap.spikeMinPercent ?? 3.2, currScanner.spikeMinPercent ?? 3.2, '%')}
-          ${renderCompareRow('Leverage', snap.leverage ?? 5, curr.leverage ?? 5, 'x')}
-          ${renderCompareRow('Maks Margin Per Koin', snap.maxTotalMarginPerCoin ?? 80, currGrid.maxTotalMarginPerCoin ?? 80, ' USDT')}
-        </tbody>
-      </table>
-    </div>
+    const feeNum = t.fee !== undefined && t.fee !== null ? Number(t.fee) : null;
+    const grossPnlNum = t.grossPnl !== undefined && t.grossPnl !== null ? Number(t.grossPnl) : null;
+    const marginUsedNum = Number(t.marginUsed || 0);
 
-    ${layersHtml}
-  `;
+    const body = document.getElementById('td-body');
+    if (body) {
+      body.innerHTML = `
+        <!-- KPI SUMMARY -->
+        <div class="td-kpi-grid">
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Net Realized PnL</div>
+            <div class="td-kpi-val ${pnlColor}">${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</div>
+          </div>
+          ${(feeNum && feeNum > 0) ? `
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Fee Binance (Riil)</div>
+            <div class="td-kpi-val text-red">-$${feeNum.toFixed(4)} USDT</div>
+          </div>
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Gross PnL (Sebelum Fee)</div>
+            <div class="td-kpi-val ${grossPnlNum !== null && grossPnlNum >= 0 ? 'text-green' : 'text-red'}">
+              ${grossPnlNum !== null ? (grossPnlNum >= 0 ? '+' : '') + '$' + grossPnlNum.toFixed(2) : '-'} USDT
+            </div>
+          </div>
+          ` : ''}
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Entry ➜ Exit</div>
+            <div class="td-kpi-val" style="font-size: 12.5px;">$${t.entryPrice || 0} ➜ $${t.exitPrice || 0}</div>
+          </div>
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Total Margin Terpakai</div>
+            <div class="td-kpi-val text-cyan">$${marginUsedNum.toFixed(2)} USDT</div>
+          </div>
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Durasi & Waktu</div>
+            <div class="td-kpi-val">${t.durationSeconds || 0} detik <small style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(${t.closedAt || '-'})</small></div>
+          </div>
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Alasan Selesai</div>
+            <div class="td-kpi-val" style="font-size: 12px; color: ${
+              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' ? 'var(--green)' :
+              t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
+              t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
+              'var(--text-muted)'
+            }">${
+              t.exitReason === 'TAKE_PROFIT' ? '🎯 Take Profit' :
+              t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
+              t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
+              t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
+              t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
+              t.exitReason === 'EARLY_MOMENTUM_EXIT' ? '⚠️ Early Momentum' :
+              t.exitReason === 'MANUAL_CLOSE' ? '⚡ Tutup Manual' :
+              (t.exitReason || '-')
+            }</div>
+          </div>
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Layer Terisi</div>
+            <div class="td-kpi-val text-purple">${t.layersFilled || '-'}</div>
+          </div>
+        </div>
 
-  document.getElementById('trade-detail-modal').classList.add('open');
+        <!-- PARAMETER COMPARISON TABLE -->
+        <div class="td-section-title">⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)</div>
+        <div style="overflow-x: auto;">
+          <table class="param-compare-table">
+            <thead>
+              <tr>
+                <th>Parameter Bot</th>
+                <th>Saat Trade Ini Berjalan</th>
+                <th>Konfigurasi Aktif Sekarang</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderCompareRow('Modal Per Layer', snap.marginPerLayerUsdt ?? 3, currGrid.marginPerLayerUsdt ?? 3, ' USDT')}
+              ${renderCompareRow('Jumlah Layer', snap.totalLayers ?? 6, currGrid.totalLayers ?? 6, ' Lapis')}
+              ${renderCompareRow('Jarak Antar Jaring (Spacing)', snap.layerSpacingPct ?? 1.0, currGrid.layerSpacingPct ?? 1.0, '%')}
+              ${renderCompareRow('Pengali Martingale', snap.martingaleMultiplier ?? 1.15, currGrid.martingaleMultiplier ?? 1.15, 'x')}
+              ${renderCompareRow('Target Take Profit', snap.takeProfitPct ?? 1.2, currExit.takeProfitPct ?? 1.2, '%')}
+              ${renderCompareRow('Hard Stop Loss', snap.hardStopLossPct ?? 4.5, currExit.hardStopLossPct ?? 4.5, '%')}
+              ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes ?? 10, currExit.maxHoldMinutes ?? 10, ' Menit')}
+              ${renderCompareRow('Minimal Spike', snap.spikeMinPercent ?? 3.2, currScanner.spikeMinPercent ?? 3.2, '%')}
+              ${renderCompareRow('Leverage', snap.leverage ?? 5, curr.leverage ?? 5, 'x')}
+              ${renderCompareRow('Maks Margin Per Koin', snap.maxTotalMarginPerCoin ?? 80, currGrid.maxTotalMarginPerCoin ?? 80, ' USDT')}
+            </tbody>
+          </table>
+        </div>
+
+        ${layersHtml}
+      `;
+    }
+
+    const modalEl = document.getElementById('trade-detail-modal');
+    if (modalEl) modalEl.classList.add('open');
+  } catch (err) {
+    console.error('[TradeDetailModal] Error rendering trade detail modal:', err);
+    const modalEl = document.getElementById('trade-detail-modal');
+    if (modalEl) modalEl.classList.add('open');
+  }
 }
 
 function closeTradeDetailModal() {

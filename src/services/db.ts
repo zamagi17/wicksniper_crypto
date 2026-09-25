@@ -115,6 +115,9 @@ export class DatabaseService {
           CREATE INDEX IF NOT EXISTS idx_wicksniper_trades_timestamp ON wicksniper_trades (timestamp DESC);
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS params_snapshot JSONB;
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS layers_detail JSONB;
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS fee NUMERIC;
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS gross_pnl NUMERIC;
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS layers_filled VARCHAR(32);
         `);
 
         // 4. Tabel Riwayat Spike Lonjakan Harga
@@ -233,8 +236,8 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_trades (
-           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
          ON CONFLICT (id) DO NOTHING;`,
         [
           t.id,
@@ -253,6 +256,9 @@ export class DatabaseService {
           t.timestamp,
           t.paramsSnapshot ? JSON.stringify(t.paramsSnapshot) : null,
           t.layersDetail ? JSON.stringify(t.layersDetail) : null,
+          t.fee !== undefined ? t.fee : null,
+          t.grossPnl !== undefined ? t.grossPnl : null,
+          t.layersFilled || null,
         ]
       );
     } catch (e: any) {
@@ -270,7 +276,8 @@ export class DatabaseService {
                 exit_reason AS "exitReason", is_paper AS "isPaper",
                 closed_at AS "closedAt", timestamp,
                 params_snapshot AS "paramsSnapshot",
-                layers_detail AS "layersDetail"
+                layers_detail AS "layersDetail",
+                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled"
          FROM wicksniper_trades
          ORDER BY timestamp DESC
          LIMIT $1;`,
@@ -285,14 +292,17 @@ export class DatabaseService {
         qty: parseFloat(r.qty),
         marginUsed: parseFloat(r.marginUsed),
         realizedPnl: parseFloat(r.realizedPnl),
+        grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
+        fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
         pnlPct: parseFloat(r.pnlPct),
         durationSeconds: parseInt(r.durationSeconds, 10),
         exitReason: r.exitReason,
         isPaper: r.isPaper,
         closedAt: r.closedAt,
         timestamp: parseInt(r.timestamp, 10),
-        paramsSnapshot: r.paramsSnapshot || null,
-        layersDetail: r.layersDetail || null,
+        layersFilled: r.layersFilled || undefined,
+        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
+        layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
       }));
     } catch (e: any) {
       console.error('[Database] Gagal load trades dari DB:', e.message);
@@ -425,7 +435,8 @@ export class DatabaseService {
                 exit_reason AS "exitReason", is_paper AS "isPaper",
                 closed_at AS "closedAt", timestamp,
                 params_snapshot AS "paramsSnapshot",
-                layers_detail AS "layersDetail"
+                layers_detail AS "layersDetail",
+                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled"
          FROM wicksniper_trades
          ${whereClause}
          ORDER BY timestamp DESC
@@ -442,14 +453,17 @@ export class DatabaseService {
         qty: parseFloat(r.qty),
         marginUsed: parseFloat(r.marginUsed),
         realizedPnl: parseFloat(r.realizedPnl),
+        grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
+        fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
         pnlPct: parseFloat(r.pnlPct),
         durationSeconds: parseInt(r.durationSeconds, 10),
         exitReason: r.exitReason,
         isPaper: r.isPaper,
         closedAt: r.closedAt,
         timestamp: parseInt(r.timestamp, 10),
-        paramsSnapshot: r.paramsSnapshot || null,
-        layersDetail: r.layersDetail || null,
+        layersFilled: r.layersFilled || undefined,
+        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
+        layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
       }));
 
       return { trades, total, page, totalPages };

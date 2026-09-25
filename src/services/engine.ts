@@ -711,19 +711,29 @@ export class WickSniperEngine {
       }
 
       // Jika avgPrice masih 0 (karena Binance Futures API merespon status NEW seketika sebelum pembukuan fill selesai),
-      // tunggu sejenak (120ms) lalu query posisi riil dari positionRisk atau userTrades
+      // gunakan getOrder() dan query posisi riil untuk memastikan harga modal bot 100% SAMA PERSIS dengan Binance
       if (!realEntryPrice || realEntryPrice <= 0) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await new Promise((resolve) => setTimeout(resolve, 300));
         try {
-          const realPos = await binanceFutures.getOpenPosition(symbol);
-          if (realPos && Math.abs(realPos.positionAmt) > 0 && realPos.entryPrice > 0) {
-            realEntryPrice = realPos.entryPrice;
-            executedQty = Math.abs(realPos.positionAmt);
-          } else {
-            const recentTrades = await binanceFutures.getUserTrades(symbol, 3);
+          if (res0.orderId) {
+            const filledOrder = await binanceFutures.getOrder(symbol, res0.orderId);
+            if (filledOrder && parseFloat(filledOrder.avgPrice || '0') > 0) {
+              realEntryPrice = parseFloat(filledOrder.avgPrice);
+              executedQty = parseFloat(filledOrder.executedQty || '0');
+            }
+          }
+          if (!realEntryPrice || realEntryPrice <= 0) {
+            const realPos = await binanceFutures.getOpenPosition(symbol);
+            if (realPos && Math.abs(realPos.positionAmt) > 0 && realPos.entryPrice > 0) {
+              realEntryPrice = realPos.entryPrice;
+              executedQty = Math.abs(realPos.positionAmt);
+            }
+          }
+          if (!realEntryPrice || realEntryPrice <= 0) {
+            const recentTrades = await binanceFutures.getUserTrades(symbol, 5);
             const entryTrade = recentTrades.find(
               (t: any) => t.side === 'SELL' && (!res0.orderId || String(t.orderId) === String(res0.orderId))
-            );
+            ) || recentTrades.find((t: any) => t.side === 'SELL');
             if (entryTrade && parseFloat(entryTrade.price) > 0) {
               realEntryPrice = parseFloat(entryTrade.price);
               executedQty = parseFloat(entryTrade.qty || '0');
@@ -1837,8 +1847,8 @@ export class WickSniperEngine {
 
         let confirmedClose = false;
         try {
-          const minTime = pos.openedAt - 10000;
-          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 20, minTime);
+          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 20);
+          const minTime = pos.openedAt - 120000;
           const freshBuyTrades = recentTrades.filter((tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime));
 
           if (pos.tpOrderId || pos.tp2OrderId) {
@@ -2288,8 +2298,24 @@ export class WickSniperEngine {
               } catch { }
             }
             if (!verifiedPos || Math.abs(verifiedPos.positionAmt) === 0) {
+              let detectedReason: ClosedTrade['exitReason'] = 'TAKE_PROFIT';
+              let detectedClosePrice = pos.targetTpPrice || pos.currentPrice;
+              try {
+                const trades = await binanceFutures.getUserTrades(symbol, 5);
+                const latestBuy = trades.find((t: any) => t.side === 'BUY');
+                if (latestBuy) {
+                  const bPrice = parseFloat(latestBuy.price || '0');
+                  const bPnl = parseFloat(latestBuy.realizedPnl || '0');
+                  if (bPrice > 0) detectedClosePrice = bPrice;
+                  if (bPnl < 0) {
+                    detectedReason = 'HARD_STOP_LOSS';
+                  } else if (pos.tpOrderId && String(latestBuy.orderId) === String(pos.tpOrderId)) {
+                    detectedReason = 'TAKE_PROFIT';
+                  }
+                }
+              } catch {}
               logger.log('SUCCESS', `🎯 [REKONSILIASI LIVE] Posisi ${symbol} telah tertutup di Binance! Menyinkronkan eksekusi riil...`, symbol);
-              await this.closePosition(pos, 'TAKE_PROFIT', pos.targetTpPrice || pos.currentPrice);
+              await this.closePosition(pos, detectedReason, detectedClosePrice);
               continue;
             }
           }
