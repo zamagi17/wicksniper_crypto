@@ -45,6 +45,11 @@ export class HistoricalDataFetcher {
           return parsed;
         }
       } catch { }
+    } else if (!useCache && fs.existsSync(cacheFilePath)) {
+      // Jika bypass cache aktif, hapus file cache lama agar data lama tidak lagi tersisa
+      try {
+        fs.unlinkSync(cacheFilePath);
+      } catch { }
     }
 
     const client = await binanceFutures.getHttpClient();
@@ -106,8 +111,8 @@ export class HistoricalDataFetcher {
       new Map(allCandles.map((c) => [c.openTime, c])).values()
     ).sort((a, b) => a.openTime - b.openTime);
 
-    // Hanya simpan cache jika proses pengambilan berhasil penuh tanpa error
-    if (useCache && !fetchErrorOccurred && uniqueCandles.length > 0) {
+    // Simpan cache terbaru jika proses pengambilan dari Binance berhasil tanpa error
+    if (!fetchErrorOccurred && uniqueCandles.length > 0) {
       try {
         fs.writeFileSync(cacheFilePath, JSON.stringify(uniqueCandles), 'utf-8');
       } catch (err: any) {
@@ -116,6 +121,30 @@ export class HistoricalDataFetcher {
     }
 
     return uniqueCandles;
+  }
+
+  /**
+   * Menghapus seluruh cache klines lokal dari disk
+   */
+  public clearAllCache(): number {
+    try {
+      if (fs.existsSync(this.cacheDir)) {
+        const files = fs.readdirSync(this.cacheDir);
+        let count = 0;
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            try {
+              fs.unlinkSync(path.join(this.cacheDir, file));
+              count++;
+            } catch { }
+          }
+        }
+        return count;
+      }
+    } catch (err: any) {
+      console.warn(`[DataFetcher] Gagal menghapus cache: ${err.message}`);
+    }
+    return 0;
   }
 }
 

@@ -65,7 +65,7 @@ body {
 }
 
 .btn-mobile-menu {
-  display: none;
+  display: none !important;
 }
 
 .nav-brand {
@@ -307,7 +307,7 @@ body {
   gap: 20px;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1023px) {
   .dashboard-columns {
     grid-template-columns: 1fr;
   }
@@ -959,13 +959,6 @@ body {
     -webkit-tap-highlight-color: transparent;
     flex-shrink: 0;
   }
-    font-weight: 700;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-  }
 
   .seg-tab:active {
     transform: scale(0.96);
@@ -995,7 +988,7 @@ body {
     box-shadow: 0 0 6px var(--color-cyan);
   }
 
-  /* PANEL TAB VISIBILITY FILTERING (< 1024px) */
+  /* PANEL TAB VISIBILITY FILTERING (STRICTLY < 1024px ONLY) */
   .dashboard-columns[data-active-tab="pos"] .mobile-tab-panel:not([data-tab-name="pos"]),
   .dashboard-columns[data-active-tab="radar"] .mobile-tab-panel:not([data-tab-name="radar"]),
   .dashboard-columns[data-active-tab="trades"] .mobile-tab-panel:not([data-tab-name="trades"]),
@@ -1008,7 +1001,12 @@ body {
   }
 }
 
+/* DESKTOP (>= 1024px): ALWAYS SHOW ALL PANELS SIMULTANEOUSLY */
 @media (min-width: 1024px) {
+  .dashboard-columns .mobile-tab-panel,
+  .dashboard-columns .panel,
+  .col-left .panel,
+  .col-right .panel,
   .mobile-tab-panel {
     display: flex !important;
   }

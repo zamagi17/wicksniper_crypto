@@ -21,6 +21,9 @@ export interface BotConfig {
     skipBottomRejectionEnabled?: boolean;
     bottomRejectionMinRangePct?: number;
     bottomRejectionWickRatio?: number;
+    upperWickPullbackEnabled?: boolean;
+    upperWickPullbackMinPct?: number;
+    upperWickPullbackMaxWaitSeconds?: number;
   };
   grid: {
     maxConcurrentCoins: number;
@@ -194,6 +197,7 @@ export interface EngineStatus {
   marginType?: 'CROSSED' | 'ISOLATED';
   usedWeight1m?: number;
   orderCount10s?: number;
+  wsConnected?: boolean;
 }
 
 export interface LogEntry {

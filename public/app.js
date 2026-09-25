@@ -268,6 +268,10 @@ function connectWebSocket() {
   socket.onopen = () => {
     indicator.className = 'status-pill online';
     statusText.innerText = 'TERHUBUNG';
+    const drawerWsStatus = document.getElementById('drawer-ws-status');
+    if (drawerWsStatus) {
+      drawerWsStatus.innerHTML = '<span class="text-green">ONLINE 🟢</span>';
+    }
   };
 
   socket.onmessage = (event) => {
@@ -315,6 +319,10 @@ function connectWebSocket() {
   socket.onclose = () => {
     indicator.className = 'status-pill offline';
     statusText.innerText = 'TERPUTUS';
+    const drawerWsStatus = document.getElementById('drawer-ws-status');
+    if (drawerWsStatus) {
+      drawerWsStatus.innerHTML = '<span class="text-red">OFFLINE 🔴</span>';
+    }
     setTimeout(connectWebSocket, 3000);
   };
 }
@@ -460,9 +468,13 @@ function renderStatus(status) {
 
   const drawerWsStatus = document.getElementById('drawer-ws-status');
   if (drawerWsStatus) {
-    drawerWsStatus.innerHTML = status.wsConnected
-      ? '<span class="text-green">ONLINE 🟢</span>'
-      : '<span class="text-red">OFFLINE 🔴</span>';
+    if (!status.isRunning) {
+      drawerWsStatus.innerHTML = '<span class="text-yellow">PAUSED 🟡</span>';
+    } else if (status.wsConnected !== false) {
+      drawerWsStatus.innerHTML = '<span class="text-green">ONLINE 🟢</span>';
+    } else {
+      drawerWsStatus.innerHTML = '<span class="text-red">OFFLINE 🔴</span>';
+    }
   }
 
   const pnlEl = document.getElementById('metric-pnl');
@@ -1077,6 +1089,13 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-bottom-rejection-range', cfg.scanner?.bottomRejectionMinRangePct || 1.5);
   setVal('cfg-bottom-rejection-ratio', cfg.scanner?.bottomRejectionWickRatio || 2.0);
+  const uwpCheckbox = document.getElementById('cfg-upper-wick-pullback-enabled');
+  if (uwpCheckbox) {
+    uwpCheckbox.checked = !!cfg.scanner?.upperWickPullbackEnabled;
+    toggleUpperWickInput();
+  }
+  setVal('cfg-upper-wick-pullback-min', cfg.scanner?.upperWickPullbackMinPct ?? 0.3);
+  setVal('cfg-upper-wick-pullback-wait', cfg.scanner?.upperWickPullbackMaxWaitSeconds ?? 5);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
   setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 3);
@@ -1166,6 +1185,9 @@ function getSettingsFormData() {
       skipBottomRejectionEnabled: !!document.getElementById('cfg-bottom-rejection-enabled')?.checked,
       bottomRejectionMinRangePct: parseFloat(getVal('cfg-bottom-rejection-range', '1.5')) || 1.5,
       bottomRejectionWickRatio: parseFloat(getVal('cfg-bottom-rejection-ratio', '2.0')) || 2.0,
+      upperWickPullbackEnabled: !!document.getElementById('cfg-upper-wick-pullback-enabled')?.checked,
+      upperWickPullbackMinPct: parseFloat(getVal('cfg-upper-wick-pullback-min', '0.3')) || 0.3,
+      upperWickPullbackMaxWaitSeconds: parseInt(getVal('cfg-upper-wick-pullback-wait', '5'), 10) || 5,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
@@ -1426,6 +1448,15 @@ function toggleBottomRejectionInput() {
 }
 window.toggleBottomRejectionInput = toggleBottomRejectionInput;
 
+function toggleUpperWickInput() {
+  const checkbox = document.getElementById('cfg-upper-wick-pullback-enabled');
+  const group = document.getElementById('cfg-upper-wick-pullback-params');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleUpperWickInput = toggleUpperWickInput;
+
 function toggleExtendHoldRedInput() {
   const checkbox = document.getElementById('cfg-extend-hold-red-enabled');
   const group = document.getElementById('cfg-extend-hold-params');
@@ -1622,6 +1653,14 @@ function applyConfigToBacktestInputs(cfg) {
     btbrRatio.value = cfg.scanner.bottomRejectionWickRatio;
   }
   toggleBtBottomRejection();
+
+  const btuwpCheckbox = document.getElementById('bt-upper-wick-pullback-enabled');
+  if (btuwpCheckbox) btuwpCheckbox.checked = !!cfg.scanner?.upperWickPullbackEnabled;
+  const btuwpMin = document.getElementById('bt-upper-wick-pullback-min');
+  if (btuwpMin && cfg.scanner?.upperWickPullbackMinPct !== undefined) {
+    btuwpMin.value = cfg.scanner.upperWickPullbackMinPct;
+  }
+  toggleBtUpperWick();
 }
 
 async function openBacktestModal() {
@@ -1690,6 +1729,30 @@ function toggleBtBottomRejection() {
   }
 }
 window.toggleBtBottomRejection = toggleBtBottomRejection;
+
+function toggleBtUpperWick() {
+  const isChecked = document.getElementById('bt-upper-wick-pullback-enabled')?.checked;
+  const container = document.getElementById('bt-upper-wick-container');
+  if (container) {
+    container.style.display = isChecked ? 'inline-flex' : 'none';
+  }
+}
+window.toggleBtUpperWick = toggleBtUpperWick;
+
+async function clearBacktestCache() {
+  if (!confirm('Hapus semua file cache klines yang tersimpan di disk lokal?')) return;
+  try {
+    const res = await authFetch('/api/backtest/clear-cache', { method: 'POST' }).then((r) => r.json());
+    if (res.success) {
+      alert(`✅ Cache klines berhasil dibersihkan! (${res.deletedCount || 0} file dihapus)`);
+    } else {
+      alert(`⚠️ Gagal membersihkan cache: ${res.message}`);
+    }
+  } catch (err) {
+    alert(`❌ Error membersihkan cache: ${err.message}`);
+  }
+}
+window.clearBacktestCache = clearBacktestCache;
 
 function toggleBtPartialTp() {
   const isChecked = document.getElementById('bt-partial-tp-enabled')?.checked;
@@ -1770,6 +1833,8 @@ async function executeBacktest() {
     skipBottomRejectionEnabled: !!document.getElementById('bt-bottom-rejection-enabled')?.checked,
     bottomRejectionMinRangePct: getNum('bt-bottom-rejection-range', 1.5),
     bottomRejectionWickRatio: getNum('bt-bottom-rejection-ratio', 2.0),
+    upperWickPullbackEnabled: !!document.getElementById('bt-upper-wick-pullback-enabled')?.checked,
+    upperWickPullbackMinPct: getNum('bt-upper-wick-pullback-min', 0.3),
     marginPerLayerUsdt: getNum('bt-margin', 3),
     layerSpacingPct: getNum('bt-spacing', 1.2),
     totalLayers: getInt('bt-total-layers', 25),
@@ -1830,6 +1895,9 @@ async function executeBacktest() {
     }
     if (r.bottomRejectionSkips > 0) {
       candleSub += ` • 🛡️ ${r.bottomRejectionSkips} Sweep Ditolak`;
+    }
+    if (r.upperWickSkips > 0) {
+      candleSub += ` • 🎯 ${r.upperWickSkips} Monster Pump Ditolak`;
     }
     document.getElementById('bt-res-candles').innerText = candleSub;
 

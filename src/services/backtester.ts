@@ -30,6 +30,8 @@ export interface BacktestParams {
   bottomRejectionMinRangePct?: number;
   bottomRejectionWickRatio?: number;
   bottomRejectionDominanceRatio?: number;
+  upperWickPullbackEnabled?: boolean;
+  upperWickPullbackMinPct?: number;
   bypassCache?: boolean;
 }
 
@@ -72,6 +74,7 @@ export interface BacktestResult {
   avgTradeDurationMinutes: number;
   partialTpTrades: number;
   bottomRejectionSkips: number;
+  upperWickSkips: number;
   totalFeesUsdt: number;
   trades: BacktestTrade[];
   equityCurve: { time: string; balance: number }[];
@@ -172,6 +175,7 @@ export class WickSniperBacktester {
     const allTrades: BacktestTrade[] = [];
     let totalCandlesAnalyzed = 0;
     let totalBottomRejectionSkips = 0;
+    let totalUpperWickSkips = 0;
     const equityCurve: { time: string; balance: number }[] = [
       { time: new Date(params.startTime).toLocaleDateString('id-ID'), balance: initialBalance },
     ];
@@ -213,10 +217,33 @@ export class WickSniperBacktester {
           }
         }
 
+        // Konfirmasi Ekor Atas / Pullback Mikro (Mencegah Monster Pump Runaway)
+        let entryPriceConfirmed = c.open + (c.high - c.open) * 0.7;
+        if (params.upperWickPullbackEnabled) {
+          const minPullbackPct = params.upperWickPullbackMinPct ?? 0.3;
+          // Hitung seberapa dalam harga terkoreksi (pullback) dari High candle
+          const wickPullbackPct = ((c.high - c.close) / c.high) * 100;
+          let hasReversal = wickPullbackPct >= minPullbackPct;
+
+          // Jika candle spike ini ditutup sangat dekat pucuk (marubozu), periksa candle 1m berikutnya apakah ada pullback
+          if (!hasReversal && i + 1 < candles.length) {
+            const nextC = candles[i + 1];
+            const nextPullbackPct = ((c.high - nextC.low) / c.high) * 100;
+            if (nextPullbackPct >= minPullbackPct) {
+              hasReversal = true;
+            }
+          }
+
+          if (!hasReversal) {
+            totalUpperWickSkips++;
+            continue;
+          }
+          entryPriceConfirmed = c.high * (1 - minPullbackPct / 100);
+        }
+
         // --- SIMULASI PENEMBAKAN JARING WICK SNIPER ---
         const entryTime = c.openTime;
-        // Layer 0 terisi di sekitar 70% dari tinggi lonjakan candle
-        const layer0Price = c.open + (c.high - c.open) * 0.7;
+        const layer0Price = entryPriceConfirmed;
 
         interface SimLayer {
           layerIndex: number;
@@ -569,6 +596,7 @@ export class WickSniperBacktester {
       avgTradeDurationMinutes: avgDuration,
       partialTpTrades,
       bottomRejectionSkips: totalBottomRejectionSkips,
+      upperWickSkips: totalUpperWickSkips,
       totalFeesUsdt,
       trades: allTrades,
       equityCurve,

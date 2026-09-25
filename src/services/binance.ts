@@ -22,7 +22,7 @@ export class BinanceFuturesClient {
   private restBaseUrl: string = 'https://fapi.binance.com';
   private wsDomainIndex: number = 0;
   private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me', 'fstream.binance.je'];
-  private wsUrl: string = `wss://${this.wsDomains[0]}/ws/!ticker@arr`;
+  private wsUrl: string = `wss://${this.wsDomains[0]}/market/ws/!ticker@arr`;
   private currentDataSource: 'WEBSOCKET' | 'POLLING' = 'WEBSOCKET';
   private wsClient: WebSocket | null = null;
   private httpClient: AxiosInstance | null = null;
@@ -72,11 +72,11 @@ export class BinanceFuturesClient {
 
     if (isTestnet) {
       this.restBaseUrl = 'https://testnet.binancefuture.com';
-      this.wsUrl = 'wss://stream.binancefuture.com/ws/!ticker@arr';
+      this.wsUrl = 'wss://stream.binancefuture.com/market/ws/!ticker@arr';
     } else {
       this.restBaseUrl = 'https://fapi.binance.com';
       this.wsDomainIndex = 0;
-      this.wsUrl = `wss://${this.wsDomains[this.wsDomainIndex]}/ws/!ticker@arr`;
+      this.wsUrl = `wss://${this.wsDomains[this.wsDomainIndex]}/market/ws/!ticker@arr`;
     }
 
     if (this.httpClient) {
@@ -1058,7 +1058,7 @@ export class BinanceFuturesClient {
     if (this.isTestnet) return;
     this.wsDomainIndex = (this.wsDomainIndex + 1) % this.wsDomains.length;
     const newDomain = this.wsDomains[this.wsDomainIndex];
-    this.wsUrl = `wss://${newDomain}/ws/!ticker@arr`;
+    this.wsUrl = `wss://${newDomain}/market/ws/!ticker@arr`;
     logger.log('INFO', `🔄 [AUTO-ROTATION] Memutar URL WebSocket ke domain cadangan: ${newDomain}`);
   }
 

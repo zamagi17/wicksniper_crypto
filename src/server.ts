@@ -6,6 +6,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { WickSniperEngine } from './services/engine';
 import { logger } from './services/logger';
 import { backtester } from './services/backtester';
+import { dataFetcher } from './services/dataFetcher';
 import { binanceFutures } from './services/binance';
 import { telegram } from './services/telegram';
 
@@ -232,6 +233,16 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
       ...customParams,
     });
     res.json({ success: true, result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/backtest/clear-cache', requireAuth, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const deletedCount = dataFetcher.clearAllCache();
+    res.json({ success: true, deletedCount, message: `Berhasil membersihkan ${deletedCount} file cache klines.` });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

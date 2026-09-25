@@ -75,6 +75,9 @@ export class WickSniperEngine {
         excludeSymbols: ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT'],
         cooldownMinutes: 20,
         pollingIntervalMs: 1000,
+        upperWickPullbackEnabled: false,
+        upperWickPullbackMinPct: 0.3,
+        upperWickPullbackMaxWaitSeconds: 5,
       },
       grid: {
         maxConcurrentCoins: 2,
@@ -492,11 +495,57 @@ export class WickSniperEngine {
         }
       }
 
+      // Filter Konfirmasi Ekor Atas / Pullback Mikro (Mencegah Monster Pump Runaway)
+      let confirmedEntryPrice = alert.currentPrice;
+      if (this.config.scanner?.upperWickPullbackEnabled) {
+        const minPullbackPct = this.config.scanner.upperWickPullbackMinPct ?? 0.3;
+        const maxWaitSec = this.config.scanner.upperWickPullbackMaxWaitSeconds ?? 5;
+        const deadline = Date.now() + maxWaitSec * 1000;
+        let peakPrice = alert.currentPrice;
+        let isConfirmed = false;
+
+        logger.log(
+          'INFO',
+          `⏳ [UPPER WICK WAIT] ${symbol}: Menunggu konfirmasi ekor atas (pullback min ${minPullbackPct}% dari puncak) maks ${maxWaitSec}s...`,
+          symbol
+        );
+
+        while (Date.now() < deadline) {
+          const livePrice = this.scanner.getCurrentPrice(symbol);
+          if (livePrice > peakPrice) {
+            peakPrice = livePrice; // Pompa masih berlangsung, perbarui puncak
+          } else if (livePrice > 0 && livePrice <= peakPrice * (1 - minPullbackPct / 100)) {
+            const actualPullbackPct = (((peakPrice - livePrice) / peakPrice) * 100).toFixed(2);
+            isConfirmed = true;
+            confirmedEntryPrice = livePrice;
+            logger.log(
+              'SNIPER',
+              `🎯 [UPPER WICK CONFIRMED] ${symbol}: Terkonfirmasi pantulan ekor atas! Puncak $${peakPrice.toFixed(4)} → Reversal $${livePrice.toFixed(4)} (-${actualPullbackPct}%). Menembakkan jaring SHORT...`,
+              symbol
+            );
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
+
+        if (!isConfirmed) {
+          alert.status = 'SKIPPED';
+          alert.skipReason = `Monster Pump / Runaway: Tidak ada konfirmasi ekor atas (-${minPullbackPct}%) dalam ${maxWaitSec}s`;
+          logger.log(
+            'WARN',
+            `🛡️ [UPPER WICK FILTER] Lonjakan ${symbol} dilewati: Harga terus melaju tanpa pullback ${minPullbackPct}% dalam ${maxWaitSec}s. Saldo aman dari monster pump.`,
+            symbol
+          );
+          db.saveSpike(alert).catch(() => { });
+          return;
+        }
+      }
+
       alert.status = 'EXECUTING';
       logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
       db.saveSpike(alert).catch(() => { });
 
-      await this.deployGridLadder(symbol, alert.currentPrice, alert.surgePct, alert.lookbackSeconds);
+      await this.deployGridLadder(symbol, confirmedEntryPrice, alert.surgePct, alert.lookbackSeconds);
     } finally {
       // Lepaskan kunci konkurensi (slot kini sudah resmi tercatat di this.activePositions atau dibatalkan)
       this.deployingSymbols.delete(symbol);
@@ -2474,6 +2523,7 @@ export class WickSniperEngine {
       marginType: this.config.marginType || 'CROSSED',
       usedWeight1m: binanceFutures.lastUsedWeight,
       orderCount10s: binanceFutures.getOrderCount10s(),
+      wsConnected: this.isRunning && (this.config.scanner?.dataSource === 'POLLING' || binanceFutures.isConnected()),
     };
   }
 
