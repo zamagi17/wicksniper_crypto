@@ -864,6 +864,25 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Mengambil data spread Bid/Ask terkini langsung dari Binance matching engine
+   */
+  public async getOrderbookSpread(symbol: string): Promise<{ bidPrice: number; askPrice: number; spreadPct: number } | null> {
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get(`/fapi/v1/ticker/bookTicker?symbol=${symbol}`);
+      const bid = parseFloat(res?.data?.bidPrice || '0');
+      const ask = parseFloat(res?.data?.askPrice || '0');
+      if (bid > 0 && ask > 0) {
+        const spreadPct = ((ask - bid) / bid) * 100;
+        return { bidPrice: bid, askPrice: ask, spreadPct };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Mengambil detail order Binance berdasarkan orderId untuk memeriksa harga eksekusi (avgPrice)
    */
   public async getOrder(symbol: string, orderId: string | number): Promise<any> {

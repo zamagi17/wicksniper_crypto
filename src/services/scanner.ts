@@ -123,6 +123,14 @@ export class SpikeScanner {
         if (!this.config.whitelistSymbols.includes(symbol)) continue;
       }
 
+      // Filter Volume 24 Jam Minimal (Turnover USDT): Hanya saring koin aktif, buang koin mati suri/zombie
+      if (this.config.min24hVolumeUsdt && this.config.min24hVolumeUsdt > 0 && t.q !== undefined) {
+        const quoteVol24h = parseFloat(t.q || '0');
+        if (quoteVol24h < this.config.min24hVolumeUsdt) {
+          continue;
+        }
+      }
+
       const currentPrice = parseFloat(t.c || t.p || '0');
       if (currentPrice <= 0) continue;
       if (currentPrice < this.config.minPriceUsdt || currentPrice > this.config.maxPriceUsdt) continue;

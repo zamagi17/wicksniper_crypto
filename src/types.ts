@@ -24,6 +24,8 @@ export interface BotConfig {
     upperWickPullbackEnabled?: boolean;
     upperWickPullbackMinPct?: number;
     upperWickPullbackMaxWaitSeconds?: number;
+    min24hVolumeUsdt?: number;
+    maxSpreadPct?: number;
   };
   grid: {
     maxConcurrentCoins: number;

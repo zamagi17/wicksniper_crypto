@@ -79,6 +79,8 @@ export class WickSniperEngine {
         upperWickPullbackEnabled: false,
         upperWickPullbackMinPct: 0.3,
         upperWickPullbackMaxWaitSeconds: 5,
+        min24hVolumeUsdt: 1500000,
+        maxSpreadPct: 0.25,
       },
       grid: {
         maxConcurrentCoins: 2,
@@ -531,6 +533,24 @@ export class WickSniperEngine {
           db.saveSpike(alert).catch(() => { });
           return;
         }
+      }
+
+      // Proteksi Spread Guard: Cek apakah selisih Ask - Bid terlalu renggang (likuiditas tipis/orderbook kosong)
+      if (this.config.tradingMode === 'LIVE' && this.config.scanner?.maxSpreadPct && this.config.scanner.maxSpreadPct > 0) {
+        try {
+          const spreadInfo = await binanceFutures.getOrderbookSpread(symbol);
+          if (spreadInfo && spreadInfo.spreadPct > this.config.scanner.maxSpreadPct) {
+            alert.status = 'SKIPPED';
+            alert.skipReason = `Spread Bid-Ask terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%)`;
+            logger.log(
+              'WARN',
+              `🛡️ [SPREAD GUARD] ${symbol} dilewati: Spread pasar terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%). Orderbook tipis, aman dari jebakan slippage.`,
+              symbol
+            );
+            db.saveSpike(alert).catch(() => {});
+            return;
+          }
+        } catch {}
       }
 
       alert.status = 'EXECUTING';

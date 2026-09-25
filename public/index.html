@@ -490,6 +490,19 @@
           </div>
         </div>
 
+        <div class="form-row" style="background: rgba(10, 132, 255, 0.04); border: 1px dashed rgba(10, 132, 255, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label>🛡️ Min Volume 24 Jam (USDT)</label>
+            <input type="number" id="cfg-min-24h-vol" min="0" step="100000" class="form-control" placeholder="1500000">
+            <small class="form-hint">Filter koin mati suri/zombie (Standar: 1.500.000 USDT). Isi 0 untuk mematikan filter.</small>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label>🛡️ Maksimal Spread Bid-Ask (%)</label>
+            <input type="number" id="cfg-max-spread" min="0.05" max="2.0" step="0.05" class="form-control" placeholder="0.25">
+            <small class="form-hint">Proteksi orderbook kosong. Lewati jika selisih Ask - Bid > X% (Standar: 0.25%).</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Hard Stop Loss (%)</label>

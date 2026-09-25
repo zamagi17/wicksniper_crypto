@@ -1291,6 +1291,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-leverage', cfg.leverage || 5);
   setVal('cfg-margin-type', cfg.marginType || 'CROSSED');
   setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 2.0);
+  setVal('cfg-min-24h-vol', cfg.scanner?.min24hVolumeUsdt ?? 1500000);
+  setVal('cfg-max-spread', cfg.scanner?.maxSpreadPct ?? 0.25);
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
@@ -1403,6 +1405,8 @@ function getSettingsFormData() {
     scanner: {
       ...(currentConfig?.scanner || {}),
       spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '2.0')) || 2.0,
+      min24hVolumeUsdt: parseFloat(getVal('cfg-min-24h-vol', '1500000')) || 0,
+      maxSpreadPct: parseFloat(getVal('cfg-max-spread', '0.25')) || 0,
       skipBottomRejectionEnabled: !!document.getElementById('cfg-bottom-rejection-enabled')?.checked,
       bottomRejectionMinRangePct: parseFloat(getVal('cfg-bottom-rejection-range', '1.5')) || 1.5,
       bottomRejectionWickRatio: parseFloat(getVal('cfg-bottom-rejection-ratio', '2.0')) || 2.0,
