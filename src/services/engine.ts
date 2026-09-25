@@ -341,27 +341,17 @@ export class WickSniperEngine {
           await this.syncConfigFromDb();
         }
 
-        // Tampilkan log pemakaian Kuota API (Weight) setiap 15 detik jika ada aktivitas REST
-        if (tickCount % 15 === 0) {
-          const weight = binanceFutures.lastUsedWeight;
-          if (weight > 0) {
-            const ord10s = binanceFutures.getOrderCount10s();
-            const pct = Math.round((weight / 2400) * 100);
-            const level = pct >= 80 ? 'WARN' : 'INFO';
-            logger.log(
-              level,
-              `📊 [API WEIGHT] Binance REST Quota: ${weight}/2400 (${pct}%) | Orders 10s: ${ord10s}/300`
-            );
-          }
-        }
-
-        // Peringatan otomatis jika kuota mendekati batas kritis (>= 1900 weight / ~80%)
+        // Peringatan Kuota API (Weight): Hanya muncul jika pemakaian kuota sudah >= 80% agar terminal tetap bersih
         const currentWeight = binanceFutures.lastUsedWeight;
-        if (currentWeight >= 1900 && (!this.lastWeightWarnAt || Date.now() - this.lastWeightWarnAt > 20000)) {
+        const ord10s = binanceFutures.getOrderCount10s();
+        const weightPct = Math.round((currentWeight / 2400) * 100);
+        const ordPct = Math.round((ord10s / 300) * 100);
+
+        if ((weightPct >= 80 || ordPct >= 80) && (!this.lastWeightWarnAt || Date.now() - this.lastWeightWarnAt > 20000)) {
           this.lastWeightWarnAt = Date.now();
           logger.log(
             'WARN',
-            `⚠️ [RATE LIMIT ALERT] Pemakaian kuota API Binance mencapai ${currentWeight}/2400 (${Math.round((currentWeight / 2400) * 100)}%)! Kurangi frekuensi request agar tidak terkena HTTP 429.`
+            `⚠️ [API WEIGHT ALERT] Pemakaian kuota API Binance tinggi: REST ${currentWeight}/2400 (${weightPct}%) | Orders 10s: ${ord10s}/300 (${ordPct}%)!`
           );
         }
         // Jika bot dihentikan dan semua posisi sudah tertutup, bersihkan interval
