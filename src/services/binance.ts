@@ -1264,12 +1264,19 @@ export class BinanceFuturesClient {
       }
     }).catch(() => {});
 
+    let isPolling = false;
     this.fastPollInterval = setInterval(async () => {
-      const tickers = await this.fetchAllTickerPrices();
-      if (tickers.length > 0) {
-        for (const listener of this.tickerListeners) {
-          listener(tickers);
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const tickers = await this.fetchAllTickerPrices();
+        if (tickers.length > 0) {
+          for (const listener of this.tickerListeners) {
+            listener(tickers);
+          }
         }
+      } finally {
+        isPolling = false;
       }
     }, effectiveInterval);
   }
