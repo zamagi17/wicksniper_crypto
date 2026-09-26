@@ -43,24 +43,29 @@ export class TelegramService {
   public async sendMessage(htmlText: string): Promise<boolean> {
     if (!this.isConfigured()) return false;
 
-    try {
-      const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
-      await axios.post(
-        url,
-        {
-          chat_id: this.config.chatId,
-          text: htmlText,
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-        },
-        { timeout: 7000 }
-      );
-      return true;
-    } catch (err: any) {
-      const msg = err.response?.data?.description || err.message;
-      logger.log('WARN', `⚠️ [TELEGRAM] Gagal mengirim pesan: ${msg}`);
-      return false;
+    const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
+    const payload = {
+      chat_id: this.config.chatId,
+      text: htmlText,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+    };
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await axios.post(url, payload, { timeout: 10000 });
+        return true;
+      } catch (err: any) {
+        if (attempt === 1 && (err.code === 'ECONNABORTED' || err.message?.includes('timeout'))) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        const msg = err.response?.data?.description || err.message;
+        logger.log('WARN', `⚠️ [TELEGRAM] Gagal mengirim pesan: ${msg}`);
+        return false;
+      }
     }
+    return false;
   }
 
   public async testConnection(botToken: string, chatId: string): Promise<{ success: boolean; botName?: string; error?: string }> {
