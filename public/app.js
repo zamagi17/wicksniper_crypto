@@ -1219,11 +1219,16 @@ function appendLog(log) {
   }
   div.className = `log-entry ${log.level.toLowerCase()}`;
   div.innerText = `[${log.timestamp}] [${log.level}] ${formatLogMessage(log.message)}`;
-  terminal.insertBefore(div, terminal.firstChild);
+  
+  // Log baru ditambahkan di bawah (normal chronological order)
+  terminal.appendChild(div);
+  
+  // Auto-scroll ke bawah untuk menampilkan log terbaru
+  terminal.scrollTop = terminal.scrollHeight;
 
-  // Batasi 100 baris DOM
+  // Batasi 100 baris DOM (hapus yang paling atas/lama)
   if (terminal.children.length > 100) {
-    terminal.removeChild(terminal.lastChild);
+    terminal.removeChild(terminal.firstChild);
   }
 }
 
