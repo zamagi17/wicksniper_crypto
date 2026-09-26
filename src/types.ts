@@ -58,6 +58,10 @@ export interface BotConfig {
   paperTrading: {
     initialVirtualBalance: number;
   };
+  risk?: {
+    maxDailyLossUsdt?: number;
+    minSafetyBalanceUsdt?: number;
+  };
   telegram?: {
     enabled?: boolean;
     botToken?: string;
@@ -65,6 +69,8 @@ export interface BotConfig {
     notifyOnNewOrder?: boolean;
     notifyOnLayerFill?: boolean;
     notifyOnClose?: boolean;
+    notifyOnEmergency?: boolean;
+    heartbeatIntervalHours?: number;
   };
   security?: {
     password?: string;

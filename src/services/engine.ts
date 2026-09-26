@@ -42,6 +42,7 @@ export class WickSniperEngine {
   private realBalance: number = 0;
   private liveAvailableBalance: number = 0;
   private lastWeightWarnAt: number = 0;
+  private lastHeartbeatAt: number = Date.now();
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
 
   constructor(configPath: string) {
@@ -352,6 +353,13 @@ export class WickSniperEngine {
           await this.syncTradesFromDb();
         }
 
+        // Heartbeat Telegram Berkala (Laporan Status Rutin)
+        const hbHours = this.config.telegram?.heartbeatIntervalHours ?? 6;
+        if (hbHours > 0 && Date.now() - this.lastHeartbeatAt >= hbHours * 3600 * 1000) {
+          this.lastHeartbeatAt = Date.now();
+          this.sendHeartbeatReport().catch(() => {});
+        }
+
         // Peringatan Kuota API (Weight): Hanya muncul jika pemakaian kuota sudah >= 80% agar terminal tetap bersih
         const currentWeight = binanceFutures.lastUsedWeight;
         const ord10s = binanceFutures.getOrderCount10s();
@@ -403,6 +411,53 @@ export class WickSniperEngine {
       logger.log('INFO', `⏳ [COOLDOWN SKIP] Lonjakan pada ${symbol} diabaikan karena masih dalam masa cooldown.`, symbol);
       db.saveSpike(alert).catch(() => { });
       return;
+    }
+
+    // Proteksi Circuit Breaker (Rem Kerugian Harian Maksimal)
+    const maxDailyLoss = this.config.risk?.maxDailyLossUsdt ?? 0;
+    if (maxDailyLoss > 0) {
+      const todayStartTs = this.getStartOfDayWibTimestamp();
+      const currentDailyPnl = this.cachedDbStats
+        ? this.cachedDbStats.dailyPnl
+        : Math.round(this.closedTrades.filter(t => t.timestamp >= todayStartTs).reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
+
+      if (currentDailyPnl <= -Math.abs(maxDailyLoss)) {
+        alert.status = 'SKIPPED';
+        alert.skipReason = `Circuit Breaker: Rugi harian ($${currentDailyPnl.toFixed(2)}) mencapai batas maks (-$${maxDailyLoss})`;
+        logger.log(
+          'WARN',
+          `🛑 [CIRCUIT BREAKER] Penembakan spike ${symbol} dibatalkan! Rugi hari ini: $${currentDailyPnl.toFixed(2)} USDT <= -$${maxDailyLoss} USDT.`,
+          symbol
+        );
+        telegram.notifyEmergencyAlert(
+          'Circuit Breaker Harian Terpicu 🛑',
+          `Akumulasi kerugian hari ini mencapai $${currentDailyPnl.toFixed(2)} USDT (Batas Maksimal: -$${maxDailyLoss} USDT).\n\nBot otomatis menghentikan penembakan koin baru sampai 00:00 WIB demi mengamankan sisa modal Anda.`,
+          symbol
+        );
+        db.saveSpike(alert).catch(() => {});
+        return;
+      }
+    }
+
+    // Proteksi Batas Saldo Bebas Minimal (Min Safety Balance Floor)
+    const minSafetyBalance = this.config.risk?.minSafetyBalanceUsdt ?? 0;
+    if (this.config.tradingMode === 'LIVE' && minSafetyBalance > 0 && this.liveAvailableBalance > 0) {
+      if (this.liveAvailableBalance < minSafetyBalance) {
+        alert.status = 'SKIPPED';
+        alert.skipReason = `Saldo bebas ($${this.liveAvailableBalance.toFixed(2)}) di bawah batas aman ($${minSafetyBalance})`;
+        logger.log(
+          'WARN',
+          `🛡️ [MIN BALANCE SKIP] Saldo bebas ($${this.liveAvailableBalance.toFixed(2)} USDT) kurang dari batas aman ($${minSafetyBalance} USDT). Lonjakan ${symbol} dilewati.`,
+          symbol
+        );
+        telegram.notifyEmergencyAlert(
+          'Saldo Bebas di Bawah Batas Aman 🛡️',
+          `Saldo bebas saat ini $${this.liveAvailableBalance.toFixed(2)} USDT kurang dari batas aman ($${minSafetyBalance} USDT).\n\nPenembakan spike dibatalkan agar tidak membuka posisi tanpa jaring pengaman.`,
+          symbol
+        );
+        db.saveSpike(alert).catch(() => {});
+        return;
+      }
     }
 
     // Proteksi Lapis 1 (SYNCHRONOUS ATOMIC LOCK):
@@ -1911,6 +1966,11 @@ export class WickSniperEngine {
               `🧹 [ORPHAN SWEEPER] ${pos.symbol}: Masih tersisa ${leftoverQty} kontrak di Binance setelah close. Menjalankan emergency sweep...`,
               pos.symbol
             );
+            telegram.notifyEmergencyAlert(
+              'Orphan Sweeper Terpicu 🧹',
+              `Tersisa ${leftoverQty} kontrak pada ${pos.symbol} di Binance setelah close. Bot menjalankan emergency sweep market order.`,
+              pos.symbol
+            );
             try {
               const sweepSide: 'BUY' | 'SELL' = realPosAfterClose.positionAmt > 0 ? 'SELL' : 'BUY';
               await binanceFutures.closePositionMarket(pos.symbol, sweepSide, leftoverQty);
@@ -1934,6 +1994,11 @@ export class WickSniperEngine {
             logger.log(
               'WARN',
               `⚠️ [CLOSE NOT CONFIRMED] Posisi ${pos.symbol} belum terkonfirmasi tertutup di Binance. Local state tetap aktif agar tidak orphan.`,
+              pos.symbol
+            );
+            telegram.notifyEmergencyAlert(
+              'Posisi Belum Terkonfirmasi Tertutup di Binance ⚠️',
+              `Order close untuk ${pos.symbol} belum terkonfirmasi di Binance. Local state tetap aktif agar tidak menjadi orphan. Bot akan mencoba rekonsiliasi otomatis.`,
               pos.symbol
             );
             this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_NOT_CONFIRMED', {
@@ -2696,6 +2761,7 @@ export class WickSniperEngine {
           exit: { ...this.config.exit, ...(dbCfg.exit || {}) },
           scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
           grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
+          risk: { ...this.config.risk, ...(dbCfg.risk || {}) },
           telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
           security: { ...this.config.security, ...(dbCfg.security || {}) },
         };
@@ -2774,5 +2840,25 @@ export class WickSniperEngine {
     db.saveState(this.virtualBalance, [], 0).catch(() => { });
     logger.log('INFO', '🧹 Saldo dan riwayat trade demo berhasil di-reset.');
     this.broadcastStatus();
+  }
+
+  public async sendHeartbeatReport(): Promise<void> {
+    if (!telegram.isConfigured()) return;
+    const isLive = this.config.tradingMode === 'LIVE';
+    const balanceStr = isLive
+      ? `$${this.realBalance.toFixed(2)} USDT (Bebas: $${this.liveAvailableBalance.toFixed(2)})`
+      : `$${this.virtualBalance.toFixed(2)} USDT`;
+    const status = this.getStatus();
+    await telegram.notifyHeartbeat({
+      tradingMode: this.config.tradingMode,
+      balanceStr,
+      dailyPnl: status.dailyPnl ?? 0,
+      dailyWins: status.dailyWinsCount || 0,
+      dailyLosses: status.dailyLossesCount || 0,
+      activePositionsCount: this.activePositions.size,
+      monitoredCoins: this.scanner.getTotalMonitoredSymbols(),
+      ticksPerSecond: this.scanner.getTicksPerSecond(),
+      marketDataStale: (status.marketDataAgeMs ?? 0) >= 3000,
+    });
   }
 }

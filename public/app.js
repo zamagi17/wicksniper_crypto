@@ -1378,6 +1378,12 @@ function populateSettingsForm(cfg) {
   setChecked('cfg-tg-on-new', tg.notifyOnNewOrder);
   setChecked('cfg-tg-on-layer', tg.notifyOnLayerFill);
   setChecked('cfg-tg-on-close', tg.notifyOnClose);
+  setChecked('cfg-tg-on-emergency', tg.notifyOnEmergency !== false);
+  setVal('cfg-tg-heartbeat-hours', tg.heartbeatIntervalHours ?? 6);
+
+  // Risk Management
+  setVal('cfg-risk-max-daily-loss', cfg.risk?.maxDailyLossUsdt ?? 30);
+  setVal('cfg-risk-min-balance', cfg.risk?.minSafetyBalanceUsdt ?? 15);
 
   // Whitelist
   const wlCheckbox = document.getElementById('cfg-whitelist-enabled');
@@ -1453,6 +1459,10 @@ function getSettingsFormData() {
     },
     apiKey: (getVal('cfg-api-key', '') || '').trim(),
     apiSecret: (getVal('cfg-api-secret', '') || '').trim(),
+    risk: {
+      maxDailyLossUsdt: parseFloat(getVal('cfg-risk-max-daily-loss', '30')) || 0,
+      minSafetyBalanceUsdt: parseFloat(getVal('cfg-risk-min-balance', '15')) || 0,
+    },
     telegram: {
       enabled: !!document.getElementById('cfg-tg-enabled')?.checked,
       botToken: (getVal('cfg-tg-token', '') || '').trim(),
@@ -1460,6 +1470,8 @@ function getSettingsFormData() {
       notifyOnNewOrder: !!document.getElementById('cfg-tg-on-new')?.checked,
       notifyOnLayerFill: !!document.getElementById('cfg-tg-on-layer')?.checked,
       notifyOnClose: !!document.getElementById('cfg-tg-on-close')?.checked,
+      notifyOnEmergency: !!document.getElementById('cfg-tg-on-emergency')?.checked,
+      heartbeatIntervalHours: parseInt(getVal('cfg-tg-heartbeat-hours', '6'), 10) || 0,
     },
   };
 }

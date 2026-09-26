@@ -9,6 +9,8 @@ export interface TelegramConfig {
   notifyOnNewOrder?: boolean;
   notifyOnLayerFill?: boolean;
   notifyOnClose?: boolean;
+  notifyOnEmergency?: boolean;
+  heartbeatIntervalHours?: number;
 }
 
 export class TelegramService {
@@ -19,7 +21,10 @@ export class TelegramService {
     notifyOnNewOrder: true,
     notifyOnLayerFill: false,
     notifyOnClose: true,
+    notifyOnEmergency: true,
+    heartbeatIntervalHours: 6,
   };
+  private emergencyAlertCooldown: Map<string, number> = new Map();
 
   public updateConfig(cfg?: Partial<TelegramConfig>) {
     if (!cfg) return;
@@ -226,6 +231,64 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
 💰 <b>Saldo Bebas (Available):</b> <b>${balanceStr}</b>${reqStr}${reasonStr}
 
 ⚠️ <i>Perhatian: Sebagian/seluruh jaring limit tidak terpasang di Binance! Cek saldo wallet Futures Anda untuk menghindari posisi berjalan tanpa jaring pengaman.</i>`;
+
+    this.sendMessage(msg).catch(() => {});
+  }
+
+  /**
+   * Notifikasi Anomali Kritis / Darurat (Emergency Alert)
+   */
+  public async notifyEmergencyAlert(title: string, details: string, symbol?: string) {
+    if (this.config.notifyOnEmergency === false) return;
+    const key = `${symbol || 'GLOBAL'}_${title}`;
+    const now = Date.now();
+    const last = this.emergencyAlertCooldown.get(key) || 0;
+    if (now - last < 60000) return; // Cooldown 1 menit per topik agar tidak spam
+    this.emergencyAlertCooldown.set(key, now);
+
+    const symLine = symbol ? `\n🪙 <b>Koin:</b> <code>${symbol}</code>` : '';
+    const msg =
+`🚨 <b>[PERINGATAN DARURAT / ANOMALI SISTEM]</b> 🚨
+
+⚠️ <b>${title}</b>${symLine}
+📝 <b>Detail:</b>
+${details}
+
+⏱️ <i>Waktu: ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</i>`;
+
+    this.sendMessage(msg).catch(() => {});
+  }
+
+  /**
+   * Laporan Status Berkala (Heartbeat Status)
+   */
+  public async notifyHeartbeat(status: {
+    tradingMode: string;
+    balanceStr: string;
+    dailyPnl: number;
+    dailyWins: number;
+    dailyLosses: number;
+    activePositionsCount: number;
+    monitoredCoins: number;
+    ticksPerSecond: number;
+    marketDataStale: boolean;
+  }) {
+    const isProfit = status.dailyPnl >= 0;
+    const pnlSign = isProfit ? '+' : '';
+    const modeTag = status.tradingMode === 'LIVE' ? '🟢 LIVE FUTURES' : '🧪 PAPER TRADING';
+    const marketStatus = status.marketDataStale ? '⚠️ WebSocket Lambat / Stale' : `🟢 Normal (${status.ticksPerSecond} tick/s)`;
+
+    const msg =
+`💓 <b>[WICK SNIPER HEARTBEAT]</b> 💓
+
+🟢 <b>Status Bot:</b> ONLINE & MEMINDAI
+⚙️ <b>Mode:</b> ${modeTag}
+💰 <b>Saldo:</b> <b>${status.balanceStr}</b>
+📊 <b>PnL Hari Ini:</b> <b>${pnlSign}$${status.dailyPnl.toFixed(2)} USDT</b> (${status.dailyWins}W / ${status.dailyLosses}L)
+⚡ <b>Posisi Aktif:</b> ${status.activePositionsCount} Koin
+📡 <b>Sensor Pasar:</b> Memindai ${status.monitoredCoins} Koin | ${marketStatus}
+
+⏱️ <i>Laporan Berkala • ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</i>`;
 
     this.sendMessage(msg).catch(() => {});
   }
