@@ -1571,9 +1571,6 @@ export class WickSniperEngine {
             symbol
           );
 
-          // KRITIKAL: Batalkan seluruh order sisa (<30ms) agar layer tidak terisi jika ada spike balik
-          await binanceFutures.cancelAllOrders(symbol).catch(() => {});
-
           // Tandai seluruh layer pending tersisa sebagai CANCELLED
           if (pos.layers) {
             for (const l of pos.layers) {
@@ -1581,7 +1578,7 @@ export class WickSniperEngine {
             }
           }
 
-          // Tutup trade secara resmi dan catat realized profit
+          // Tutup trade secara resmi (closePosition langsung mengunci closingSymbols, mengubah status ke CLOSING, dan membatalkan seluruh order di Binance)
           await this.closePosition(pos, exitReason, fillPrice > 0 ? fillPrice : pos.targetTpPrice);
           return;
         }
@@ -1669,6 +1666,7 @@ export class WickSniperEngine {
    */
   public async syncLiveTakeProfitOrder(pos: ActivePosition) {
     if (this.config.tradingMode !== 'LIVE' || !pos.targetTpPrice || pos.totalQty <= 0) return;
+    if (pos.status === 'CLOSING' || pos.status === 'CLOSED' || this.closingSymbols.has(pos.symbol)) return;
     if (this.syncingTpSymbols.has(pos.symbol)) return;
     this.syncingTpSymbols.add(pos.symbol);
 
@@ -1682,6 +1680,10 @@ export class WickSniperEngine {
           await binanceFutures.cancelOrder(pos.symbol, bo.orderId).catch(() => {});
         }
       } catch { }
+
+      if ((pos.status as string) === 'CLOSING' || (pos.status as string) === 'CLOSED' || this.closingSymbols.has(pos.symbol)) {
+        return;
+      }
 
       pos.tpOrderId = undefined;
       pos.tp2OrderId = undefined;
@@ -2609,11 +2611,11 @@ export class WickSniperEngine {
 
           // Pastikan posisi aktif SELALU memiliki order Limit Take Profit di Binance
           const isLiveLongPos = realPos && (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0));
-          if (!isLiveLongPos && realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol)) {
+          if (!isLiveLongPos && realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol) && !this.closingSymbols.has(symbol)) {
             try {
               const openOrders = await binanceFutures.getOpenOrders(symbol);
               const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
-              if (!hasTpOrder) {
+              if (!hasTpOrder && pos.status === 'SNIPING' && !this.closingSymbols.has(symbol)) {
                 const now = Date.now();
                 if (!pos.lastTpAttempt || now - pos.lastTpAttempt >= 10000) {
                   pos.lastTpAttempt = now;
