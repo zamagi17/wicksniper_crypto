@@ -1263,10 +1263,10 @@ export class WickSniperEngine {
     const tradeAgeSeconds = (Date.now() - pos.openedAt) / 1000;
 
     const bepDefenseActive = exitCfg.bepDefenseEnabled !== false; // Default aktif demi keselamatan modal
-    // Ambang batas layer: jika tidak diset (atau 0), gunakan layer maksimal (totalConfiguredLayers)
+    // Ambang batas layer statis: jika 0 atau tidak diset, pemicu statis dinonaktifkan (hanya aktif saat Velocity Shock kilat)
     const maxLayersThreshold = exitCfg.bepMaxLayersTrigger && exitCfg.bepMaxLayersTrigger > 0
       ? exitCfg.bepMaxLayersTrigger
-      : totalConfiguredLayers;
+      : 0;
 
     // Batas waktu & minimal layer untuk deteksi Velocity Shock
     const fastFillSeconds = exitCfg.bepFastFillSeconds || 120;
@@ -1274,14 +1274,14 @@ export class WickSniperEngine {
       ? exitCfg.bepFastFillMinLayers
       : Math.max(2, Math.ceil(totalConfiguredLayers * 0.65)); // Default adaptif: 65% dari total layer
 
-    const bepBufferPct = exitCfg.bepBufferPct ?? 0.08;
+    const bepBufferPct = exitCfg.bepBufferPct ?? 0.10;
 
     let isBep = false;
     let reason = '';
 
     if (bepDefenseActive && !pos.partialTpDone) {
-      // Kondisi 1: Mencapai ambang batas layer penuh (misal 6/6 layer)
-      if (filledLayersCount >= maxLayersThreshold) {
+      // Kondisi 1: Hanya aktif jika user secara eksplisit menyetel ambang layer statis (> 0)
+      if (maxLayersThreshold > 0 && filledLayersCount >= maxLayersThreshold) {
         isBep = true;
         reason = `Kapasitas Jaring Terpenuhi (${filledLayersCount}/${totalConfiguredLayers} Layer)`;
       }
