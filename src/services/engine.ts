@@ -123,6 +123,13 @@ export class WickSniperEngine {
         hardStopCooldownMinutes: 180,
         partialTpEnabled: false,
         partialTpRatio: 0.5,
+        bepDefenseEnabled: true,
+        bepMaxLayersTrigger: 0,
+        bepFastFillEnabled: true,
+        bepFastFillSeconds: 120,
+        bepFastFillMinLayers: 0,
+        bepBufferPct: 0.08,
+        bepCooldownMinutes: 15,
         extendHoldOnRedCandleEnabled: true,
         extendHoldSeconds: 30,
         maxHoldExtensions: 6,
@@ -307,7 +314,9 @@ export class WickSniperEngine {
             ? this.config.exit.earlyExitCooldownMinutes || 60
             : t.exitReason === 'HARD_STOP_LOSS'
               ? this.config.exit.hardStopCooldownMinutes || 180
-              : this.config.scanner.cooldownMinutes || 10;
+              : t.exitReason === 'BEP_DEFENSE'
+                ? this.config.exit.bepCooldownMinutes || 15
+                : this.config.scanner.cooldownMinutes || 10;
         const expiry = t.timestamp + cooldownMins * 60 * 1000;
         if (expiry > now) {
           const remainingMinutes = Math.ceil((expiry - now) / 60000);
@@ -1244,6 +1253,66 @@ export class WickSniperEngine {
     return rising && risePct >= (exitCfg.earlyExitMinRisePct || 0.5);
   }
 
+  /**
+   * Menghitung target TP (baik TP normal maupun BEP Defense darurat jika terisi cepat / penuh)
+   */
+  private calculatePositionTpPrices(pos: ActivePosition): { targetTpPrice: number; targetTp2Price: number; isBepActive: boolean; bepReason?: string } {
+    const exitCfg = this.config.exit;
+    const totalConfiguredLayers = this.config.grid.totalLayers || 6;
+    const filledLayersCount = (pos.layers || []).filter((l) => l.status === 'FILLED').length;
+    const tradeAgeSeconds = (Date.now() - pos.openedAt) / 1000;
+
+    const bepDefenseActive = exitCfg.bepDefenseEnabled !== false; // Default aktif demi keselamatan modal
+    // Ambang batas layer: jika tidak diset (atau 0), gunakan layer maksimal (totalConfiguredLayers)
+    const maxLayersThreshold = exitCfg.bepMaxLayersTrigger && exitCfg.bepMaxLayersTrigger > 0
+      ? exitCfg.bepMaxLayersTrigger
+      : totalConfiguredLayers;
+
+    // Batas waktu & minimal layer untuk deteksi Velocity Shock
+    const fastFillSeconds = exitCfg.bepFastFillSeconds || 120;
+    const fastFillMinLayers = exitCfg.bepFastFillMinLayers && exitCfg.bepFastFillMinLayers > 0
+      ? exitCfg.bepFastFillMinLayers
+      : Math.max(2, Math.ceil(totalConfiguredLayers * 0.65)); // Default adaptif: 65% dari total layer
+
+    const bepBufferPct = exitCfg.bepBufferPct ?? 0.08;
+
+    let isBep = false;
+    let reason = '';
+
+    if (bepDefenseActive && !pos.partialTpDone) {
+      // Kondisi 1: Mencapai ambang batas layer penuh (misal 6/6 layer)
+      if (filledLayersCount >= maxLayersThreshold) {
+        isBep = true;
+        reason = `Kapasitas Jaring Terpenuhi (${filledLayersCount}/${totalConfiguredLayers} Layer)`;
+      }
+      // Kondisi 2: Kecepatan Pengisian Ekstrem (Velocity Shock)
+      else if (exitCfg.bepFastFillEnabled !== false && tradeAgeSeconds <= fastFillSeconds && filledLayersCount >= fastFillMinLayers) {
+        isBep = true;
+        reason = `Velocity Shock: ${filledLayersCount}/${totalConfiguredLayers} Layer tertelan kilat dlm ${Math.round(tradeAgeSeconds)}s (Batas: ${fastFillSeconds}s)`;
+      }
+    }
+
+    if (isBep) {
+      // JAMINAN PASTI NET PROFIT >= 0 (TIDAK BOLEH MINUS FEE):
+      // Untuk posisi SHORT, harga exit BUY harus turun minimal sebesar biaya komisi round-trip Binance
+      // (Maker fee 0.02% entry + 0.02% exit = 0.04% plus safety buffer = 0.08% s/d 0.10%).
+      const effectiveBufferPct = Math.max(0.08, bepBufferPct || 0.10);
+      const safeBufferPrice = pos.avgEntryPrice * (1 - effectiveBufferPct / 100);
+
+      // Jika Binance menyediakan breakEvenPrice riil, pastikan tidak lebih tinggi dari safeBufferPrice
+      let bepTarget = safeBufferPrice;
+      if (pos.breakEvenPrice && pos.breakEvenPrice > 0 && pos.breakEvenPrice < pos.avgEntryPrice) {
+        bepTarget = Math.min(safeBufferPrice, pos.breakEvenPrice);
+      }
+
+      return { targetTpPrice: bepTarget, targetTp2Price: bepTarget, isBepActive: true, bepReason: reason };
+    }
+
+    const normalTp1 = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+    const normalTp2 = pos.avgEntryPrice * (1 - (exitCfg.takeProfitPct * 2) / 100);
+    return { targetTpPrice: normalTp1, targetTp2Price: normalTp2, isBepActive: false };
+  }
+
   private recalculatePositionAverage(pos: ActivePosition) {
     const filledLayers = pos.layers.filter((l) => l.status === 'FILLED');
     let totalNotional = 0;
@@ -1262,13 +1331,27 @@ export class WickSniperEngine {
       pos.totalMarginUsed = totalMargin;
 
       const exitCfg = this.config.exit;
-      pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-      pos.targetTp2Price = pos.avgEntryPrice * (1 - (exitCfg.takeProfitPct * 2) / 100);
+      const tpCalc = this.calculatePositionTpPrices(pos);
+      pos.targetTpPrice = tpCalc.targetTpPrice;
+      pos.targetTp2Price = tpCalc.targetTp2Price;
+
+      if (tpCalc.isBepActive && !pos.isBepDefenseActive) {
+        pos.isBepDefenseActive = true;
+        pos.bepDefenseReason = tpCalc.bepReason;
+        logger.log(
+          'WARN',
+          `🛡️ [BEP DEFENSE DIAKTIFKAN] ${pos.symbol}: ${tpCalc.bepReason}. Target TP dipindahkan ke BEP ($${pos.targetTpPrice.toFixed(6)}) demi mengamankan modal dari monster pump!`,
+          pos.symbol
+        );
+      } else if (!tpCalc.isBepActive) {
+        pos.isBepDefenseActive = false;
+      }
+
       pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
 
       logger.log(
         'INFO',
-        `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${pos.avgEntryPrice.toFixed(4)} | Volume: ${pos.totalQty} | TP1 Baru: $${pos.targetTpPrice.toFixed(4)}`,
+        `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${pos.avgEntryPrice.toFixed(4)} | Volume: ${pos.totalQty} | TP: $${pos.targetTpPrice.toFixed(4)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`,
         pos.symbol
       );
 
@@ -1479,9 +1562,12 @@ export class WickSniperEngine {
           }
 
           // Full Take Profit Hit!
+          const exitReason = pos.isBepDefenseActive ? 'BEP_DEFENSE' : 'TAKE_PROFIT';
           logger.log(
             'SUCCESS',
-            `🎯 [USER STREAM INSTANT TP] ${symbol} Take Profit FILLED @ $${fillPrice}! Realized PnL: +$${realizedProfit.toFixed(4)}. Seketika membatalkan SELURUH antrean order di Binance!`,
+            pos.isBepDefenseActive
+              ? `🛡️ [BEP DEFENSE TERISI INSTAN] ${symbol}: Modal berhasil diselamatkan di BEP @ $${fillPrice}! Realized PnL: +$${realizedProfit.toFixed(4)}. Seketika membatalkan SELURUH antrean order di Binance!`
+              : `🎯 [USER STREAM INSTANT TP] ${symbol} Take Profit FILLED @ $${fillPrice}! Realized PnL: +$${realizedProfit.toFixed(4)}. Seketika membatalkan SELURUH antrean order di Binance!`,
             symbol
           );
 
@@ -1496,7 +1582,7 @@ export class WickSniperEngine {
           }
 
           // Tutup trade secara resmi dan catat realized profit
-          await this.closePosition(pos, 'TAKE_PROFIT', fillPrice > 0 ? fillPrice : pos.targetTpPrice);
+          await this.closePosition(pos, exitReason, fillPrice > 0 ? fillPrice : pos.targetTpPrice);
           return;
         }
       }
@@ -1531,8 +1617,22 @@ export class WickSniperEngine {
             pos.breakEvenPrice = livePos.breakEvenPrice;
           }
           const exitCfg = this.config.exit;
-          pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-          pos.targetTp2Price = pos.avgEntryPrice * (1 - (exitCfg.takeProfitPct * 2) / 100);
+          const tpCalc = this.calculatePositionTpPrices(pos);
+          pos.targetTpPrice = tpCalc.targetTpPrice;
+          pos.targetTp2Price = tpCalc.targetTp2Price;
+
+          if (tpCalc.isBepActive && !pos.isBepDefenseActive) {
+            pos.isBepDefenseActive = true;
+            pos.bepDefenseReason = tpCalc.bepReason;
+            logger.log(
+              'WARN',
+              `🛡️ [BEP DEFENSE DIAKTIFKAN] ${pos.symbol}: ${tpCalc.bepReason}. Target TP dipindahkan ke BEP ($${pos.targetTpPrice.toFixed(6)}) demi mengamankan modal dari monster pump!`,
+              pos.symbol
+            );
+          } else if (!tpCalc.isBepActive) {
+            pos.isBepDefenseActive = false;
+          }
+
           if (!pos.partialTpDone) {
             pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
           }
@@ -1599,7 +1699,7 @@ export class WickSniperEngine {
       const exitCfg = this.config.exit;
 
       // KASUS A: Partial TP Aktif dan Tahap 1 belum selesai -> Pasang DUAL LIMIT ORDER (TP1 50% & TP2 50%)
-      if (exitCfg.partialTpEnabled && !pos.partialTpDone) {
+      if (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive) {
         const ratio = exitCfg.partialTpRatio || 0.5;
         const plannedTp1Qty = pos.totalQty * ratio;
         const tp1Qty = parseFloat(binanceFutures.formatQty(pos.symbol, plannedTp1Qty));
@@ -1715,7 +1815,9 @@ export class WickSniperEngine {
         });
         logger.log(
           'SUCCESS',
-          `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Order Limit Take Profit terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`,
+          pos.isBepDefenseActive
+            ? `🛡️ [BEP DEFENSE LIMIT TP AKTIF] ${pos.symbol}: Order Limit Penyelamat Modal BEP terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`
+            : `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Order Limit Take Profit terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`,
           pos.symbol
         );
       } else {
@@ -2121,12 +2223,12 @@ export class WickSniperEngine {
               if (reason === 'TAKE_PROFIT' && isPositionAlreadyClosed && !isTpOrderMatch) {
                 reason = 'MANUAL_CLOSE';
                 logger.log('INFO', `⚡ [MANUAL CLOSE TERDETEKSI] ${pos.symbol}: Posisi ditutup secara manual di Binance.`, pos.symbol);
-              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP') && actualRealizedPnl < 0) {
+              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP' || reason === 'BEP_DEFENSE') && actualRealizedPnl < 0) {
                 const origReason = reason;
                 reason = 'FEE_LOSS_EXIT';
                 logger.log(
                   'WARN',
-                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
+                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'BEP_DEFENSE' ? 'BEP Defense' : origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
                   pos.symbol
                 );
               }
@@ -2237,7 +2339,9 @@ export class WickSniperEngine {
           ? this.config.exit.earlyExitCooldownMinutes || 60
           : trade.exitReason === 'HARD_STOP_LOSS'
             ? this.config.exit.hardStopCooldownMinutes || 180
-            : this.config.scanner.cooldownMinutes || 10;
+            : trade.exitReason === 'BEP_DEFENSE'
+              ? this.config.exit.bepCooldownMinutes || 15
+              : this.config.scanner.cooldownMinutes || 10;
       this.scanner.setCooldown(pos.symbol, cooldownMinutes);
       logger.log(
         'INFO',
@@ -2251,6 +2355,8 @@ export class WickSniperEngine {
           ? '🎯 Take Profit (Pullback Wick)'
           : trade.exitReason === 'TRAILING_TP'
             ? '📈 Trailing Take Profit'
+            : trade.exitReason === 'BEP_DEFENSE'
+              ? '🛡️ BEP Defense (Penyelamatan Modal)'
             : trade.exitReason === 'HARD_STOP_LOSS'
               ? '🛑 Hard Stop Loss (Cut-Off)'
                   : trade.exitReason === 'EARLY_MOMENTUM_EXIT'
@@ -2411,6 +2517,8 @@ export class WickSniperEngine {
                   if (bPrice > 0) detectedClosePrice = bPrice;
                   if (bPnl < 0) {
                     detectedReason = 'HARD_STOP_LOSS';
+                  } else if (pos.isBepDefenseActive) {
+                    detectedReason = 'BEP_DEFENSE';
                   } else if (pos.tpOrderId && String(latestBuy.orderId) === String(pos.tpOrderId)) {
                     detectedReason = 'TAKE_PROFIT';
                   }
@@ -2448,8 +2556,20 @@ export class WickSniperEngine {
                     pos.breakEvenPrice = realPos.breakEvenPrice;
                   }
                   const exitCfg = this.config.exit;
-                  pos.targetTpPrice = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-                  pos.targetTp2Price = pos.avgEntryPrice * (1 - (exitCfg.takeProfitPct * 2) / 100);
+                  const tpCalc = this.calculatePositionTpPrices(pos);
+                  pos.targetTpPrice = tpCalc.targetTpPrice;
+                  pos.targetTp2Price = tpCalc.targetTp2Price;
+                  if (tpCalc.isBepActive && !pos.isBepDefenseActive) {
+                    pos.isBepDefenseActive = true;
+                    pos.bepDefenseReason = tpCalc.bepReason;
+                    logger.log(
+                      'WARN',
+                      `🛡️ [BEP DEFENSE DIAKTIFKAN] ${pos.symbol}: ${tpCalc.bepReason}. Target TP dipindahkan ke BEP ($${pos.targetTpPrice.toFixed(6)}) demi mengamankan modal dari monster pump!`,
+                      pos.symbol
+                    );
+                  } else if (!tpCalc.isBepActive) {
+                    pos.isBepDefenseActive = false;
+                  }
                   if (!pos.partialTpDone) {
                     pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
                   } else {

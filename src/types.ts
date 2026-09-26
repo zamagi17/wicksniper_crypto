@@ -52,6 +52,13 @@ export interface BotConfig {
     hardStopCooldownMinutes?: number;
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)
+    bepDefenseEnabled?: boolean;
+    bepMaxLayersTrigger?: number;
+    bepFastFillEnabled?: boolean;
+    bepFastFillSeconds?: number;
+    bepFastFillMinLayers?: number;
+    bepBufferPct?: number;
+    bepCooldownMinutes?: number;
     extendHoldOnRedCandleEnabled?: boolean;
     extendHoldSeconds?: number;
     maxHoldExtensions?: number;
@@ -137,6 +144,8 @@ export interface ActivePosition {
   status: 'SNIPING' | 'HOLDING' | 'CLOSING' | 'CLOSED';
   partialTpDone?: boolean;
   partialRealizedPnl?: number;
+  isBepDefenseActive?: boolean;
+  bepDefenseReason?: string;
   trailingTpActive?: boolean;
   lowestPrice?: number;
   tpOrderId?: string;
@@ -157,7 +166,7 @@ export interface ClosedTrade {
   fee?: number;
   pnlPct: number;
   durationSeconds: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'MANUAL_CLOSE';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'MANUAL_CLOSE';
   isPaper: boolean;
   closedAt: string;
   timestamp: number;

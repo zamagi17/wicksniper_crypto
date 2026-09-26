@@ -899,6 +899,7 @@ function renderClosedTradesTable(trades) {
               <small class="${t.exitReason === 'HARD_STOP_LOSS' ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
                 t.exitReason === 'TAKE_PROFIT' ? '🎯 TP' :
                 t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
+                t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense' :
                 t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard SL' :
                 t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
                 t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
@@ -1059,13 +1060,14 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           <div class="td-kpi-card">
             <div class="td-kpi-label">Alasan Selesai</div>
             <div class="td-kpi-val" style="font-size: 12px; color: ${
-              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' ? 'var(--green)' :
+              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' ? 'var(--green)' :
               t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
               t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
               'var(--text-muted)'
             }">${
               t.exitReason === 'TAKE_PROFIT' ? '🎯 Take Profit' :
               t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
+              t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense (Penyelamatan Modal)' :
               t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
               t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
               t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
@@ -1335,6 +1337,18 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 50);
 
+  // Emergency BEP Defense
+  const bepDefCheckbox = document.getElementById('cfg-bep-defense-enabled');
+  if (bepDefCheckbox) {
+    bepDefCheckbox.checked = cfg.exit?.bepDefenseEnabled !== false;
+    toggleBepDefenseInput();
+  }
+  setVal('cfg-bep-max-layers-trigger', cfg.exit?.bepMaxLayersTrigger ?? 0);
+  setVal('cfg-bep-fast-fill-seconds', cfg.exit?.bepFastFillSeconds ?? 120);
+  setVal('cfg-bep-fast-fill-layers', cfg.exit?.bepFastFillMinLayers ?? 0);
+  setVal('cfg-bep-buffer-pct', cfg.exit?.bepBufferPct ?? 0.08);
+  setVal('cfg-bep-cooldown', cfg.exit?.bepCooldownMinutes ?? 15);
+
   // Trailing Stop Loss
   const tsCheckbox = document.getElementById('cfg-trailing-sl-enabled');
   if (tsCheckbox) {
@@ -1441,6 +1455,13 @@ function getSettingsFormData() {
       earlyExitMinRisePct: parseFloat(getVal('cfg-early-exit-rise', '0.5')) || 0.5,
       earlyExitCooldownMinutes: parseInt(getVal('cfg-early-exit-cooldown', '60')) || 60,
       hardStopCooldownMinutes: parseInt(getVal('cfg-hard-sl-cooldown', '180')) || 180,
+      bepDefenseEnabled: !!document.getElementById('cfg-bep-defense-enabled')?.checked,
+      bepMaxLayersTrigger: parseInt(getVal('cfg-bep-max-layers-trigger', '0'), 10) || 0,
+      bepFastFillEnabled: true,
+      bepFastFillSeconds: parseInt(getVal('cfg-bep-fast-fill-seconds', '120'), 10) || 120,
+      bepFastFillMinLayers: parseInt(getVal('cfg-bep-fast-fill-layers', '0'), 10) || 0,
+      bepBufferPct: parseFloat(getVal('cfg-bep-buffer-pct', '0.08')) || 0.08,
+      bepCooldownMinutes: parseInt(getVal('cfg-bep-cooldown', '15'), 10) || 15,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '50')) || 50) / 100,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
@@ -1704,6 +1725,15 @@ function toggleExtendHoldRedInput() {
   }
 }
 window.toggleExtendHoldRedInput = toggleExtendHoldRedInput;
+
+function toggleBepDefenseInput() {
+  const checkbox = document.getElementById('cfg-bep-defense-enabled');
+  const group = document.getElementById('cfg-bep-defense-params');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleBepDefenseInput = toggleBepDefenseInput;
 
 function toggleTrailingTpInput() {
   const checkbox = document.getElementById('cfg-trailing-tp-enabled');
@@ -2159,6 +2189,7 @@ async function executeBacktest() {
           let exitReasonLabel = t.exitReason;
           if (t.exitReason === 'TAKE_PROFIT') exitReasonLabel = '🎯 Take Profit';
           else if (t.exitReason === 'TRAILING_TP') exitReasonLabel = t.partialTpTaken ? '🎯 Stage 2 TP / BEP' : '📈 Trailing TP';
+          else if (t.exitReason === 'BEP_DEFENSE') exitReasonLabel = '🛡️ BEP Defense';
           else if (t.exitReason === 'HARD_STOP_LOSS') exitReasonLabel = '🛑 Hard SL';
           else if (t.exitReason === 'TIME_LIMIT_EXIT') exitReasonLabel = '⏰ Batas Waktu';
           else if (t.exitReason === 'EARLY_MOMENTUM_EXIT') exitReasonLabel = '⚠️ Early Momentum';
