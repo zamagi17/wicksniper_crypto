@@ -263,6 +263,7 @@ app.get('/api/trades', async (req, res) => {
 
   if (db.isConnected) {
     const result = await db.queryTrades({ page, limit, symbol, outcome, mode });
+    engine.syncTradesFromDb().catch(() => {});
     return res.json({ success: true, ...result });
   }
 

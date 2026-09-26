@@ -266,9 +266,12 @@ export class DatabaseService {
     }
   }
 
-  public async loadRecentTrades(limit: number = 50): Promise<ClosedTrade[]> {
+  public async loadRecentTrades(limit: number = 50, isPaper?: boolean): Promise<ClosedTrade[]> {
     if (!this.isConnected || !this.pool) return [];
     try {
+      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $2' : '';
+      const params: any[] = [limit];
+      if (isPaper !== undefined) params.push(isPaper);
       const res = await this.pool.query(
         `SELECT id, symbol, side, entry_price AS "entryPrice", exit_price AS "exitPrice",
                 qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
@@ -279,9 +282,10 @@ export class DatabaseService {
                 layers_detail AS "layersDetail",
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled"
          FROM wicksniper_trades
+         ${whereMode}
          ORDER BY timestamp DESC
          LIMIT $1;`,
-        [limit]
+        params
       );
       return res.rows.map((r: any) => ({
         id: r.id,
@@ -307,6 +311,58 @@ export class DatabaseService {
     } catch (e: any) {
       console.error('[Database] Gagal load trades dari DB:', e.message);
       return [];
+    }
+  }
+
+  public async getTradeStats(todayStartTs: number, isPaper?: boolean): Promise<{
+    totalTrades: number;
+    totalWins: number;
+    accumulatedPnl: number;
+    winRate: number;
+    dailyTrades: number;
+    dailyWinsCount: number;
+    dailyLossesCount: number;
+    dailyWinRate: number;
+    dailyPnl: number;
+  } | null> {
+    if (!this.isConnected || !this.pool) return null;
+    try {
+      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $2' : '';
+      const params: any[] = [todayStartTs];
+      if (isPaper !== undefined) params.push(isPaper);
+
+      const res = await this.pool.query(
+        `SELECT 
+           COUNT(*)::int AS total_trades,
+           COALESCE(SUM(CASE WHEN realized_pnl >= 0 THEN 1 ELSE 0 END), 0)::int AS total_wins,
+           COALESCE(SUM(realized_pnl), 0)::float AS accumulated_pnl,
+           COALESCE(SUM(CASE WHEN timestamp >= $1 THEN 1 ELSE 0 END), 0)::int AS daily_trades,
+           COALESCE(SUM(CASE WHEN timestamp >= $1 AND realized_pnl >= 0 THEN 1 ELSE 0 END), 0)::int AS daily_wins,
+           COALESCE(SUM(CASE WHEN timestamp >= $1 THEN realized_pnl ELSE 0 END), 0)::float AS daily_pnl
+         FROM wicksniper_trades
+         ${whereMode};`,
+        params
+      );
+      const r = res.rows[0];
+      if (!r) return null;
+      const totalTrades = r.total_trades || 0;
+      const totalWins = r.total_wins || 0;
+      const dailyTrades = r.daily_trades || 0;
+      const dailyWins = r.daily_wins || 0;
+      return {
+        totalTrades,
+        totalWins,
+        accumulatedPnl: Math.round((r.accumulated_pnl || 0) * 100) / 100,
+        winRate: totalTrades > 0 ? Math.round((totalWins / totalTrades) * 1000) / 10 : 0,
+        dailyTrades,
+        dailyWinsCount: dailyWins,
+        dailyLossesCount: dailyTrades - dailyWins,
+        dailyWinRate: dailyTrades > 0 ? Math.round((dailyWins / dailyTrades) * 1000) / 10 : 0,
+        dailyPnl: Math.round((r.daily_pnl || 0) * 100) / 100,
+      };
+    } catch (e: any) {
+      console.error('[Database] Gagal hitung trade stats:', e.message);
+      return null;
     }
   }
 

@@ -22,6 +22,17 @@ export class WickSniperEngine {
   private syncingTpSymbols: Set<string> = new Set();
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
+  private cachedDbStats: {
+    totalTrades: number;
+    totalWins: number;
+    accumulatedPnl: number;
+    winRate: number;
+    dailyTrades: number;
+    dailyWinsCount: number;
+    dailyLossesCount: number;
+    dailyWinRate: number;
+    dailyPnl: number;
+  } | null = null;
   private spikesDetectedToday: number = 0;
   private lastResetDateWib: string = '';
   private statusListeners: ((status: EngineStatus) => void)[] = [];
@@ -268,10 +279,7 @@ export class WickSniperEngine {
           }
         }
       }
-      const dbTrades = await db.loadRecentTrades(50);
-      if (dbTrades.length > 0) {
-        this.closedTrades = dbTrades;
-      }
+      await this.syncTradesFromDb();
       const dbSpikes = await db.loadRecentSpikes(50);
       if (dbSpikes.length > 0) {
         this.scanner.setRecentSpikes(dbSpikes);
@@ -341,6 +349,7 @@ export class WickSniperEngine {
         }
         if (tickCount % 5 === 0) {
           await this.syncConfigFromDb();
+          await this.syncTradesFromDb();
         }
 
         // Peringatan Kuota API (Weight): Hanya muncul jika pemakaian kuota sudah >= 80% agar terminal tetap bersih
@@ -2136,7 +2145,7 @@ export class WickSniperEngine {
         exitReason: trade.exitReason,
         status: 'PERSISTED',
       });
-      db.saveTrade(trade).catch(() => { });
+      db.saveTrade(trade).then(() => this.syncTradesFromDb()).catch(() => { });
       db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
 
       telegram.notifyTradeClosed(
@@ -2598,17 +2607,17 @@ export class WickSniperEngine {
 
     // Metrik Hari Ini (Sejak 00:00 WIB)
     const dailyTrades = this.closedTrades.filter((t) => t.timestamp >= todayStartTs);
-    const dailyTradesCount = dailyTrades.length;
-    const dailyWinsCount = dailyTrades.filter((t) => t.realizedPnl >= 0).length;
-    const dailyLossesCount = dailyTradesCount - dailyWinsCount;
-    const dailyWinRate = dailyTradesCount > 0 ? Math.round((dailyWinsCount / dailyTradesCount) * 1000) / 10 : 0;
-    const dailyPnl = Math.round(dailyTrades.reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
+    const dailyTradesCount = this.cachedDbStats ? this.cachedDbStats.dailyTrades : dailyTrades.length;
+    const dailyWinsCount = this.cachedDbStats ? this.cachedDbStats.dailyWinsCount : dailyTrades.filter((t) => t.realizedPnl >= 0).length;
+    const dailyLossesCount = this.cachedDbStats ? this.cachedDbStats.dailyLossesCount : (dailyTradesCount - dailyWinsCount);
+    const dailyWinRate = this.cachedDbStats ? this.cachedDbStats.dailyWinRate : (dailyTradesCount > 0 ? Math.round((dailyWinsCount / dailyTradesCount) * 1000) / 10 : 0);
+    const dailyPnl = this.cachedDbStats ? this.cachedDbStats.dailyPnl : Math.round(dailyTrades.reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
 
     // Metrik All-Time (Riwayat Berjalan)
-    const totalTrades = this.closedTrades.length;
-    const wins = this.closedTrades.filter((t) => t.realizedPnl >= 0).length;
-    const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 1000) / 10 : 0;
-    const accumulatedPnl = Math.round(this.closedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
+    const totalTrades = this.cachedDbStats ? this.cachedDbStats.totalTrades : this.closedTrades.length;
+    const wins = this.cachedDbStats ? this.cachedDbStats.totalWins : this.closedTrades.filter((t) => t.realizedPnl >= 0).length;
+    const winRate = this.cachedDbStats ? this.cachedDbStats.winRate : (totalTrades > 0 ? Math.round((wins / totalTrades) * 1000) / 10 : 0);
+    const accumulatedPnl = this.cachedDbStats ? this.cachedDbStats.accumulatedPnl : Math.round(this.closedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
 
     if (this.config.tradingMode === 'LIVE' && this.realBalance === 0 && this.config.apiKey && this.config.apiSecret) {
       this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => { });
@@ -2737,9 +2746,29 @@ export class WickSniperEngine {
     return false;
   }
 
+  public async syncTradesFromDb(): Promise<void> {
+    if (!db.isConnected) return;
+    try {
+      const isPaper = this.config.tradingMode === 'PAPER';
+      const [recentTrades, dbStats] = await Promise.all([
+        db.loadRecentTrades(50, isPaper),
+        db.getTradeStats(this.getStartOfDayWibTimestamp(), isPaper),
+      ]);
+      if (recentTrades && recentTrades.length >= 0) {
+        this.closedTrades = recentTrades;
+      }
+      if (dbStats) {
+        this.cachedDbStats = dbStats;
+      }
+    } catch (e: any) {
+      // ignore
+    }
+  }
+
   public resetDemoWallet() {
     this.virtualBalance = this.config.paperTrading?.initialVirtualBalance || 245;
     this.closedTrades = [];
+    this.cachedDbStats = null;
     this.activePositions.clear();
     db.clearAllTrades().catch(() => { });
     db.saveState(this.virtualBalance, [], 0).catch(() => { });
