@@ -539,9 +539,11 @@ export class WickSniperEngine {
               const rangePct = (((prevCandle.high - prevCandle.low) / prevCandle.low) * 100).toFixed(1);
               alert.status = 'SKIPPED';
               alert.skipReason = `Candle 1m sebelumnya Bottom Rejection / Sweep ekstrem (Rentang: ${rangePct}%)`;
+              const sweepCooldownMins = this.config.scanner.cooldownMinutes || 10;
+              this.scanner.setCooldown(symbol, sweepCooldownMins);
               logger.log(
                 'INFO',
-                `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada candle 1m sebelumnya (Rentang: ${rangePct}%).`,
+                `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada candle 1m sebelumnya (Rentang: ${rangePct}%). Diistirahatkan ${sweepCooldownMins}m.`,
                 symbol
               );
               db.saveSpike(alert).catch(() => { });
@@ -561,6 +563,7 @@ export class WickSniperEngine {
         const deadline = Date.now() + maxWaitSec * 1000;
         let peakPrice = alert.currentPrice;
         let isConfirmed = false;
+        let pullbackTicks = 0;
 
         logger.log(
           'INFO',
@@ -572,16 +575,23 @@ export class WickSniperEngine {
           const livePrice = this.scanner.getCurrentPrice(symbol);
           if (livePrice > peakPrice) {
             peakPrice = livePrice; // Pompa masih berlangsung, perbarui puncak
+            pullbackTicks = 0;
           } else if (livePrice > 0 && livePrice <= peakPrice * (1 - minPullbackPct / 100)) {
-            const actualPullbackPct = (((peakPrice - livePrice) / peakPrice) * 100).toFixed(2);
-            isConfirmed = true;
-            confirmedEntryPrice = livePrice;
-            logger.log(
-              'SNIPER',
-              `🎯 [UPPER WICK CONFIRMED] ${symbol}: Terkonfirmasi pantulan ekor atas! Puncak $${peakPrice.toFixed(4)} → Reversal $${livePrice.toFixed(4)} (-${actualPullbackPct}%). Menembakkan jaring SHORT...`,
-              symbol
-            );
-            break;
+            pullbackTicks++;
+            // Tunggu konfirmasi bertahan setidaknya 2 tick polling (~300ms) untuk memastikan bukan noise/flick sesaat
+            if (pullbackTicks >= 2) {
+              const actualPullbackPct = (((peakPrice - livePrice) / peakPrice) * 100).toFixed(2);
+              isConfirmed = true;
+              confirmedEntryPrice = livePrice;
+              logger.log(
+                'SNIPER',
+                `🎯 [UPPER WICK CONFIRMED] ${symbol}: Terkonfirmasi pantulan ekor atas stabil! Puncak $${peakPrice.toFixed(4)} → Reversal $${livePrice.toFixed(4)} (-${actualPullbackPct}%). Menembakkan jaring SHORT...`,
+                symbol
+              );
+              break;
+            }
+          } else {
+            pullbackTicks = 0;
           }
           await new Promise((r) => setTimeout(r, 150));
         }
@@ -589,9 +599,11 @@ export class WickSniperEngine {
         if (!isConfirmed) {
           alert.status = 'SKIPPED';
           alert.skipReason = `Monster Pump / Runaway: Tidak ada konfirmasi ekor atas (-${minPullbackPct}%) dalam ${maxWaitSec}s`;
+          const runawayCooldownMins = this.config.scanner.upperWickCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
+          this.scanner.setCooldown(symbol, runawayCooldownMins);
           logger.log(
             'WARN',
-            `🛡️ [UPPER WICK FILTER] Lonjakan ${symbol} dilewati: Harga terus melaju tanpa pullback ${minPullbackPct}% dalam ${maxWaitSec}s. Saldo aman dari monster pump.`,
+            `🛡️ [UPPER WICK FILTER] Lonjakan ${symbol} dilewati: Harga terus melaju tanpa pullback ${minPullbackPct}% dalam ${maxWaitSec}s. Saldo aman dari monster pump (cooldown ${runawayCooldownMins}m).`,
             symbol
           );
           db.saveSpike(alert).catch(() => { });
@@ -606,9 +618,11 @@ export class WickSniperEngine {
           if (spreadInfo && spreadInfo.spreadPct > this.config.scanner.maxSpreadPct) {
             alert.status = 'SKIPPED';
             alert.skipReason = `Spread Bid-Ask terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%)`;
+            const spreadCooldownMins = Math.min(this.config.scanner.cooldownMinutes || 5, 5);
+            this.scanner.setCooldown(symbol, spreadCooldownMins);
             logger.log(
               'WARN',
-              `🛡️ [SPREAD GUARD] ${symbol} dilewati: Spread pasar terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%). Orderbook tipis, aman dari jebakan slippage.`,
+              `🛡️ [SPREAD GUARD] ${symbol} dilewati: Spread pasar terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%). Orderbook tipis, aman dari jebakan slippage (cooldown ${spreadCooldownMins}m).`,
               symbol
             );
             db.saveSpike(alert).catch(() => {});

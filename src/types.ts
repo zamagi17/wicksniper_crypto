@@ -24,6 +24,7 @@ export interface BotConfig {
     upperWickPullbackEnabled?: boolean;
     upperWickPullbackMinPct?: number;
     upperWickPullbackMaxWaitSeconds?: number;
+    upperWickCooldownMinutes?: number;
     min24hVolumeUsdt?: number;
     maxSpreadPct?: number;
   };

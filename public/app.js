@@ -1319,6 +1319,7 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-upper-wick-pullback-min', cfg.scanner?.upperWickPullbackMinPct ?? 0.3);
   setVal('cfg-upper-wick-pullback-wait', cfg.scanner?.upperWickPullbackMaxWaitSeconds ?? 5);
+  setVal('cfg-upper-wick-pullback-cooldown', cfg.scanner?.upperWickCooldownMinutes ?? cfg.scanner?.cooldownMinutes ?? 10);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
   setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 3);
@@ -1419,6 +1420,7 @@ function getSettingsFormData() {
       upperWickPullbackEnabled: !!document.getElementById('cfg-upper-wick-pullback-enabled')?.checked,
       upperWickPullbackMinPct: parseFloat(getVal('cfg-upper-wick-pullback-min', '0.3')) || 0.3,
       upperWickPullbackMaxWaitSeconds: parseInt(getVal('cfg-upper-wick-pullback-wait', '5'), 10) || 5,
+      upperWickCooldownMinutes: parseInt(getVal('cfg-upper-wick-pullback-cooldown', '10'), 10) || 10,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
