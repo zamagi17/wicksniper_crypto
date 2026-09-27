@@ -130,11 +130,12 @@ export class DatabaseService {
             surge_pct NUMERIC NOT NULL,
             lookback_seconds INT NOT NULL,
             status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
-            skip_reason VARCHAR(128),
+            skip_reason TEXT,
             timestamp BIGINT NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
           CREATE INDEX IF NOT EXISTS idx_wicksniper_spikes_timestamp ON wicksniper_spikes (timestamp DESC);
+          ALTER TABLE wicksniper_spikes ALTER COLUMN skip_reason TYPE TEXT;
         `);
 
         this.isConnected = true;
@@ -599,6 +600,16 @@ export class DatabaseService {
     } catch (e: any) {
       console.error('[Database] Gagal query spikes:', e.message);
       return { spikes: [], total: 0, page, totalPages: 0 };
+    }
+  }
+
+  public async getSpikesCount(): Promise<number> {
+    if (!this.isConnected || !this.pool) return 0;
+    try {
+      const res = await this.pool.query('SELECT COUNT(*)::int AS total FROM wicksniper_spikes;');
+      return res.rows[0]?.total || 0;
+    } catch (e: any) {
+      return 0;
     }
   }
 

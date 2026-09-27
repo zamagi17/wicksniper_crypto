@@ -272,6 +272,8 @@ function connectWebSocket() {
     if (drawerWsStatus) {
       drawerWsStatus.innerHTML = '<span class="text-green">ONLINE 🟢</span>';
     }
+    fetchPaginatedSpikes(1);
+    fetchPaginatedTrades(1);
   };
 
   socket.onmessage = (event) => {
@@ -410,6 +412,47 @@ async function fetchInitialData() {
   } catch (err) {
     console.error('Gagal mengambil data awal:', err);
   }
+}
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatDateTime(val, splitLines = false) {
+  if (!val) return '-';
+  let ts = val;
+  if (typeof val === 'string' && !isNaN(Number(val))) {
+    ts = Number(val);
+  }
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return String(val);
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const day = pad(d.getDate());
+  const month = pad(d.getMonth() + 1);
+  const year = d.getFullYear();
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  const seconds = pad(d.getSeconds());
+
+  if (splitLines) {
+    return `<div class="datetime-cell"><span class="datetime-date">${day}/${month}/${year}</span><span class="datetime-time text-muted">${hours}:${minutes}:${seconds}</span></div>`;
+  }
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+}
+
+function formatDurationHms(totalSeconds) {
+  const sec = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${h} jam ${m} menit ${s} detik`;
 }
 
 function renderStatus(status) {
@@ -560,8 +603,12 @@ function renderStatus(status) {
 
   // 5. Render Spikes Radar
   if (radarState.page === 1 && !radarState.symbol && radarState.status === 'ALL') {
-    radarState.total = status.recentSpikes?.length || 0;
-    renderSpikesTable(status.recentSpikes || []);
+    const totalSpikes = typeof status.totalSpikes === 'number' && status.totalSpikes > 0
+      ? status.totalSpikes
+      : (status.recentSpikes?.length || 0);
+    radarState.total = totalSpikes;
+    radarState.totalPages = Math.ceil(totalSpikes / radarState.limit) || 1;
+    renderSpikesTable((status.recentSpikes || []).slice(0, radarState.limit));
     updateRadarPaginationUI();
   }
 
@@ -593,9 +640,7 @@ function renderActivePositions(positions) {
       const pnlColor = isProfit ? 'text-green' : 'text-red';
       const pnlSign = isProfit ? '+' : '';
       const remainingSeconds = Math.max(0, Number(pos.holdRemainingSeconds ?? 0));
-      const remainingMinutes = Math.floor(remainingSeconds / 60);
-      const remainingSecs = remainingSeconds % 60;
-      const holdCountdown = `${String(remainingMinutes).padStart(2, '0')}:${String(remainingSecs).padStart(2, '0')}`;
+      const holdCountdown = formatDurationHms(remainingSeconds);
       let holdAction = pos.holdAction === 'CLOSE_NOW' ? '⚠️ Jangan perpanjang' : '👀 Masih bisa dipantau';
       if (pos.extensionCount && pos.extensionCount > 0) {
         const extSec = currentConfig?.exit?.extendHoldSeconds || 30;
@@ -827,14 +872,23 @@ function renderSpikesTable(spikes) {
   }
 
   tbody.innerHTML = spikes
+    .slice(0, radarState.limit)
     .map((s) => {
-      const timeStr = new Date(s.timestamp).toLocaleTimeString('id-ID');
-      const statusBadge =
-        s.status === 'EXECUTING'
-          ? `<span class="badge-radar-status sniped">SNIPED 🎯</span>`
-          : s.status === 'SKIPPED'
-          ? `<span class="badge-radar-status skipped" title="${s.skipReason || 'Dilewati filter'}">DILEWATI</span>`
-          : `<span class="badge-radar-status pending">TERDETEKSI</span>`;
+      const timeStr = formatDateTime(s.timestamp, true);
+      let statusBadge = '';
+      if (s.status === 'EXECUTING') {
+        statusBadge = `<span class="badge-radar-status sniped">SNIPED 🎯</span>`;
+      } else if (s.status === 'SKIPPED') {
+        const reason = s.skipReason || 'Dilewati filter proteksi';
+        statusBadge = `
+          <div class="radar-status-cell">
+            <span class="badge-radar-status skipped" title="${escapeHtml(reason)}">DILEWATI 🛡️</span>
+            <span class="radar-skip-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</span>
+          </div>
+        `;
+      } else {
+        statusBadge = `<span class="badge-radar-status pending">TERDETEKSI ⏳</span>`;
+      }
 
       const startPrice = Number(s.startPrice || 0);
       const currPrice = Number(s.currentPrice || 0);
@@ -844,7 +898,7 @@ function renderSpikesTable(spikes) {
         <tr>
           <td>${timeStr}</td>
           <td>
-            <b>${s.symbol}</b>
+            <b>${escapeHtml(s.symbol)}</b>
             <span class="mobile-spike-sub">$${startPrice.toFixed(4)} ➜ $${currPrice.toFixed(4)}</span>
           </td>
           <td>$${startPrice.toFixed(4)}</td>
@@ -888,11 +942,11 @@ function renderClosedTradesTable(trades) {
 
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
-          <td>${t.closedAt || '-'}</td>
+          <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
           <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span> ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${t.entryPrice || 0} ➜ $${t.exitPrice || 0}</td>
-          <td><b>${t.durationSeconds || 0}s</b></td>
+          <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
           <td class="${pnlColor}"><b>${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
           <td>
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
@@ -1055,7 +1109,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           </div>
           <div class="td-kpi-card">
             <div class="td-kpi-label">Durasi & Waktu</div>
-            <div class="td-kpi-val">${t.durationSeconds || 0} detik <small style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(${t.closedAt || '-'})</small></div>
+            <div class="td-kpi-val">${formatDurationHms(t.durationSeconds)} <small style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(${formatDateTime(t.timestamp || t.closedAt)})</small></div>
           </div>
           <div class="td-kpi-card">
             <div class="td-kpi-label">Alasan Selesai</div>
@@ -1327,6 +1381,13 @@ function populateSettingsForm(cfg) {
   setVal('cfg-upper-wick-pullback-min', cfg.scanner?.upperWickPullbackMinPct ?? 0.3);
   setVal('cfg-upper-wick-pullback-wait', cfg.scanner?.upperWickPullbackMaxWaitSeconds ?? 5);
   setVal('cfg-upper-wick-pullback-cooldown', cfg.scanner?.upperWickCooldownMinutes ?? cfg.scanner?.cooldownMinutes ?? 10);
+  const tgCheckbox = document.getElementById('cfg-trade-gap-enabled');
+  if (tgCheckbox) {
+    tgCheckbox.checked = cfg.scanner?.tradeGapFilterEnabled !== false;
+    toggleTradeGapInput();
+  }
+  setVal('cfg-max-trade-gap-seconds', cfg.scanner?.maxTradeGapSeconds ?? 10);
+  setVal('cfg-trade-gap-cooldown', cfg.scanner?.tradeGapCooldownMinutes ?? 5);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
   setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 3);
@@ -1440,6 +1501,9 @@ function getSettingsFormData() {
       upperWickPullbackMinPct: parseFloat(getVal('cfg-upper-wick-pullback-min', '0.3')) || 0.3,
       upperWickPullbackMaxWaitSeconds: parseInt(getVal('cfg-upper-wick-pullback-wait', '5'), 10) || 5,
       upperWickCooldownMinutes: parseInt(getVal('cfg-upper-wick-pullback-cooldown', '10'), 10) || 10,
+      tradeGapFilterEnabled: !!document.getElementById('cfg-trade-gap-enabled')?.checked,
+      maxTradeGapSeconds: parseFloat(getVal('cfg-max-trade-gap-seconds', '10')) || 10,
+      tradeGapCooldownMinutes: parseInt(getVal('cfg-trade-gap-cooldown', '5'), 10) || 5,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
@@ -1730,6 +1794,15 @@ function toggleExtendHoldRedInput() {
   }
 }
 window.toggleExtendHoldRedInput = toggleExtendHoldRedInput;
+
+function toggleTradeGapInput() {
+  const checkbox = document.getElementById('cfg-trade-gap-enabled');
+  const group = document.getElementById('cfg-trade-gap-params');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleTradeGapInput = toggleTradeGapInput;
 
 function toggleBepDefenseInput() {
   const checkbox = document.getElementById('cfg-bep-defense-enabled');
@@ -2210,7 +2283,7 @@ async function executeBacktest() {
               <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span>${partialBadge}</td>
               <td><span class="text-cyan font-mono"><b>$${t.marginUsed.toFixed(2)}</b></span></td>
               <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
-              <td><b>${t.durationMinutes}m</b></td>
+              <td><b>${formatDurationHms((t.durationMinutes || 0) * 60)}</b></td>
               <td class="${tColor}"><b>${tSign}$${t.realizedPnl.toFixed(2)} (${tSign}${t.pnlPct.toFixed(1)}%)</b>${btFeeTag}</td>
               <td><small>${exitReasonLabel}</small></td>
             </tr>

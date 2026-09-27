@@ -883,6 +883,34 @@ export class BinanceFuturesClient {
   }
 
   /**
+   * Mengambil riwayat transaksi pasar publik terkini (Recent Trades / Tape)
+   * Berguna untuk mengecek jeda/gap waktu antar trade dan mendeteksi koin sepi / illiquid.
+   */
+  public async getRecentTrades(
+    symbol: string,
+    limit: number = 20
+  ): Promise<Array<{ id: number; price: number; qty: number; time: number }> | null> {
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get(`/fapi/v1/trades`, {
+        params: { symbol, limit },
+        timeout: 2000,
+      });
+      if (Array.isArray(res?.data)) {
+        return res.data.map((t: any) => ({
+          id: t.id,
+          price: parseFloat(t.price),
+          qty: parseFloat(t.qty),
+          time: Number(t.time),
+        }));
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Mengambil detail order Binance berdasarkan orderId untuk memeriksa harga eksekusi (avgPrice)
    */
   public async getOrder(symbol: string, orderId: string | number): Promise<any> {

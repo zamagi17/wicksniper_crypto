@@ -137,6 +137,45 @@ body {
   border: 1px solid rgba(0, 240, 255, 0.4);
 }
 
+.radar-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  white-space: normal;
+}
+
+.radar-skip-reason {
+  font-size: 10px;
+  color: #ffb84d;
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.25);
+  border-radius: 4px;
+  padding: 2px 6px;
+  line-height: 1.3;
+  max-width: 240px;
+  word-break: break-word;
+  white-space: normal;
+  display: block;
+}
+
+.datetime-cell {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.datetime-date {
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.datetime-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
 .mobile-spike-sub {
   display: none;
 }
@@ -1587,6 +1626,17 @@ body {
     font-weight: normal;
     margin-top: 1px;
     font-family: var(--font-mono);
+  }
+
+  .radar-status-cell {
+    max-width: 160px;
+  }
+
+  .radar-skip-reason {
+    font-size: 9px;
+    max-width: 150px;
+    padding: 1px 4px;
+    line-height: 1.2;
   }
 
   .data-table th {

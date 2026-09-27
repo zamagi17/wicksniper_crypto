@@ -174,9 +174,10 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
         ? '⏰ Batas Waktu Hold'
         : '⚡ Tutup Manual';
 
-    const durationMin = Math.floor(trade.durationSeconds / 60);
+    const durationHours = Math.floor(trade.durationSeconds / 3600);
+    const durationMin = Math.floor((trade.durationSeconds % 3600) / 60);
     const durationSec = trade.durationSeconds % 60;
-    const durationStr = durationMin > 0 ? `${durationMin}m ${durationSec}s` : `${durationSec}s`;
+    const durationStr = `${durationHours} jam ${durationMin} menit ${durationSec} detik`;
 
     const balanceLine = currentBalance !== undefined ? `\n💼 <b>Saldo Akun:</b> $${currentBalance.toFixed(2)} USDT` : '';
     const feeLine = trade.fee && trade.fee > 0 ? `\n💸 <b>Fee Binance:</b> -$${trade.fee.toFixed(4)} USDT` : '';

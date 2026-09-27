@@ -34,6 +34,7 @@ export class WickSniperEngine {
     dailyPnl: number;
   } | null = null;
   private spikesDetectedToday: number = 0;
+  private totalSpikesCount: number = 0;
   private lastResetDateWib: string = '';
   private statusListeners: ((status: EngineStatus) => void)[] = [];
   private configListeners: ((config: BotConfig) => void)[] = [];
@@ -293,6 +294,7 @@ export class WickSniperEngine {
         this.scanner.setRecentSpikes(dbSpikes);
         logger.log('INFO', `📡 [DATABASE] ${dbSpikes.length} riwayat spike dimuat dari PostgreSQL.`);
       }
+      this.totalSpikesCount = await db.getSpikesCount();
     }
 
     logger.log('SUCCESS', `🚀 [WICK SNIPER ENGINE AKTIF] Mode: ${this.config.tradingMode} | Leverage: ${this.config.leverage}x`);
@@ -410,6 +412,7 @@ export class WickSniperEngine {
   private async handleSpikeAlert(alert: SpikeAlert) {
     if (!this.isRunning) return;
     this.spikesDetectedToday++;
+    this.totalSpikesCount++;
 
     const symbol = alert.symbol;
 
@@ -561,6 +564,47 @@ export class WickSniperEngine {
           }
         } catch (e: any) {
           logger.log('INFO', `[BOTTOM REJECTION FILTER] Lewati cek kline cepat ${symbol}: ${e.message}`);
+        }
+      }
+
+      // Filter Jeda Transaksi / Gap Tape (Anti Koin Sepi / Likuiditas Tipis)
+      if (this.config.scanner?.tradeGapFilterEnabled !== false) {
+        try {
+          const maxAllowedGapSec = this.config.scanner?.maxTradeGapSeconds ?? 10;
+          const trades = await binanceFutures.getRecentTrades(symbol, 20);
+          if (trades && trades.length > 0) {
+            trades.sort((a, b) => a.time - b.time);
+            const now = Date.now();
+            const latestTrade = trades[trades.length - 1];
+            const timeSinceLastTradeSec = Math.max(0, (now - latestTrade.time) / 1000);
+
+            let maxGapSec = timeSinceLastTradeSec;
+            for (let i = 1; i < trades.length; i++) {
+              const gap = (trades[i].time - trades[i - 1].time) / 1000;
+              if (gap > maxGapSec) {
+                maxGapSec = gap;
+              }
+            }
+
+            if (trades.length < 5 || maxGapSec >= maxAllowedGapSec) {
+              const gapDesc = trades.length < 5
+                ? `Hanya ada ${trades.length} transaksi di riwayat tape (pasar sepi)`
+                : `Jeda transaksi ${maxGapSec.toFixed(1)}s (batas maks ${maxAllowedGapSec}s)`;
+              alert.status = 'SKIPPED';
+              alert.skipReason = `Koin sepi / jeda trade renggang: ${gapDesc}`;
+              const gapCooldownMins = this.config.scanner?.tradeGapCooldownMinutes ?? Math.min(this.config.scanner?.cooldownMinutes || 5, 5);
+              this.scanner.setCooldown(symbol, gapCooldownMins);
+              logger.log(
+                'WARN',
+                `🛡️ [TRADE GAP FILTER] Lonjakan ${symbol} dilewati: ${gapDesc}. Menghindari risiko koin sepi & slippage (cooldown ${gapCooldownMins}m).`,
+                symbol
+              );
+              db.saveSpike(alert).catch(() => { });
+              return;
+            }
+          }
+        } catch (e: any) {
+          logger.log('INFO', `[TRADE GAP FILTER] Lewati cek trades ${symbol}: ${e.message}`);
         }
       }
 
@@ -2291,7 +2335,11 @@ export class WickSniperEngine {
         durationSeconds,
         exitReason: reason,
         isPaper: this.config.tradingMode === 'PAPER',
-        closedAt: new Date().toLocaleTimeString('id-ID'),
+        closedAt: (() => {
+          const d = new Date();
+          const p = (n: number) => String(n).padStart(2, '0');
+          return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        })(),
         timestamp: Date.now(),
         layersFilled: `${filledLayersCount}/${totalLayersCount}`,
         layersDetail: (pos.layers || []).map((l) => ({
@@ -2369,9 +2417,14 @@ export class WickSniperEngine {
                   ? '⏰ Batas Waktu Hold'
                   : 'Tutup Manual';
 
+      const durH = Math.floor(durationSeconds / 3600);
+      const durM = Math.floor((durationSeconds % 3600) / 60);
+      const durS = durationSeconds % 60;
+      const durText = `${durH} jam ${durM} menit ${durS} detik`;
+
       logger.log(
         isProfit ? 'SUCCESS' : 'WARN',
-        `🏁 [POSISI DITUTUP] ${pos.symbol} SHORT | Aksi: ${reasonLabel} | Entry: $${trade.entryPrice} ➜ Exit: $${trade.exitPrice} | PnL: ${trade.realizedPnl >= 0 ? '+' : ''}$${trade.realizedPnl} USDT (${trade.pnlPct >= 0 ? '+' : ''}${trade.pnlPct}%) | Durasi: ${durationSeconds} detik`,
+        `🏁 [POSISI DITUTUP] ${pos.symbol} SHORT | Aksi: ${reasonLabel} | Entry: $${trade.entryPrice} ➜ Exit: $${trade.exitPrice} | PnL: ${trade.realizedPnl >= 0 ? '+' : ''}$${trade.realizedPnl} USDT (${trade.pnlPct >= 0 ? '+' : ''}${trade.pnlPct}%) | Durasi: ${durText}`,
         pos.symbol
       );
 
@@ -2832,6 +2885,7 @@ export class WickSniperEngine {
       liveAvailableBalance: this.config.tradingMode === 'LIVE' ? Math.round(this.liveAvailableBalance * 100) / 100 : undefined,
       activePositionsCount: this.activePositions.size,
       spikesDetectedToday: this.spikesDetectedToday,
+      totalSpikes: db.isConnected ? this.totalSpikesCount : this.scanner.getRecentSpikes().length,
       totalTrades,
       winRate,
       accumulatedPnl,
@@ -2952,15 +3006,19 @@ export class WickSniperEngine {
     if (!db.isConnected) return;
     try {
       const isPaper = this.config.tradingMode === 'PAPER';
-      const [recentTrades, dbStats] = await Promise.all([
+      const [recentTrades, dbStats, spikesCount] = await Promise.all([
         db.loadRecentTrades(50, isPaper),
         db.getTradeStats(this.getStartOfDayWibTimestamp(), isPaper),
+        db.getSpikesCount(),
       ]);
       if (recentTrades && recentTrades.length >= 0) {
         this.closedTrades = recentTrades;
       }
       if (dbStats) {
         this.cachedDbStats = dbStats;
+      }
+      if (typeof spikesCount === 'number' && spikesCount > 0) {
+        this.totalSpikesCount = spikesCount;
       }
     } catch (e: any) {
       // ignore

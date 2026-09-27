@@ -27,6 +27,9 @@ export interface BotConfig {
     upperWickCooldownMinutes?: number;
     min24hVolumeUsdt?: number;
     maxSpreadPct?: number;
+    tradeGapFilterEnabled?: boolean;
+    maxTradeGapSeconds?: number;
+    tradeGapCooldownMinutes?: number;
   };
   grid: {
     maxConcurrentCoins: number;
@@ -201,6 +204,7 @@ export interface EngineStatus {
   liveAvailableBalance?: number;
   activePositionsCount: number;
   spikesDetectedToday: number;
+  totalSpikes?: number;
   totalTrades: number;
   winRate: number;
   accumulatedPnl: number;
