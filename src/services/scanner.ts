@@ -131,6 +131,14 @@ export class SpikeScanner {
         }
       }
 
+      // Filter: Lewati koin yang kenaikan 24 jam terlalu ekstrem (mencegah Monster Parabolic Pump)
+      if (this.config.max24hChangePct && this.config.max24hChangePct > 0) {
+        const priceChange24h = parseFloat(t.P || '0'); // Field 'P' di Binance ticker stream = priceChangePercent
+        if (Math.abs(priceChange24h) > this.config.max24hChangePct) {
+          continue;
+        }
+      }
+
       const currentPrice = parseFloat(t.c || t.p || '0');
       if (currentPrice <= 0) continue;
       if (currentPrice < this.config.minPriceUsdt || currentPrice > this.config.maxPriceUsdt) continue;

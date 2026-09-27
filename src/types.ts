@@ -12,6 +12,7 @@ export interface BotConfig {
     volumeSpikeMultiplier: number;
     minPriceUsdt: number;
     maxPriceUsdt: number;
+    max24hChangePct?: number; // Batas maksimal kenaikan 24 jam untuk menghindari monster pump (misal: 40.0)
     excludeSymbols: string[];
     cooldownMinutes: number;
     whitelistEnabled?: boolean;
