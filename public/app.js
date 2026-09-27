@@ -1381,9 +1381,9 @@ function populateSettingsForm(cfg) {
   setVal('cfg-upper-wick-pullback-min', cfg.scanner?.upperWickPullbackMinPct ?? 0.3);
   setVal('cfg-upper-wick-pullback-wait', cfg.scanner?.upperWickPullbackMaxWaitSeconds ?? 5);
   setVal('cfg-upper-wick-pullback-cooldown', cfg.scanner?.upperWickCooldownMinutes ?? cfg.scanner?.cooldownMinutes ?? 10);
-  const tgCheckbox = document.getElementById('cfg-trade-gap-enabled');
-  if (tgCheckbox) {
-    tgCheckbox.checked = cfg.scanner?.tradeGapFilterEnabled !== false;
+  const tradeGapCheckbox = document.getElementById('cfg-trade-gap-enabled');
+  if (tradeGapCheckbox) {
+    tradeGapCheckbox.checked = cfg.scanner?.tradeGapFilterEnabled !== false;
     toggleTradeGapInput();
   }
   setVal('cfg-max-trade-gap-seconds', cfg.scanner?.maxTradeGapSeconds ?? 10);
