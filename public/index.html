@@ -503,6 +503,14 @@
           </div>
         </div>
 
+        <div class="form-row" style="background: rgba(255, 59, 48, 0.06); border: 1px dashed rgba(255, 59, 48, 0.4); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="flex: 1;">
+            <label>🚨 Max Perubahan 24 Jam (%)</label>
+            <input type="number" id="cfg-max-24h-change" min="0" step="5" class="form-control" placeholder="40">
+            <small class="form-hint">Blokir koin dengan perubahan harga 24 jam > X% untuk menghindari monster parabolic pump (Standar: 40%). Isi 0 untuk mematikan filter.</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Hard Stop Loss (%)</label>
