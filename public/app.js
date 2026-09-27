@@ -1026,23 +1026,88 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     const currGrid = curr.grid || {};
     const currExit = curr.exit || {};
     const currScanner = curr.scanner || {};
+    const currRisk = curr.risk || {};
+
+    let diffCount = 0;
+    let totalParamCount = 0;
+
+    // Helper formatters
+    const formatRatioPct = (v) => {
+      if (v === undefined || v === null) return '-';
+      const num = Number(v);
+      return (num <= 1 ? Math.round(num * 100) : Math.round(num)) + '%';
+    };
+    const formatVolumeUsdt = (v) => {
+      if (v === undefined || v === null) return '-';
+      const num = Number(v);
+      return num > 0 ? num.toLocaleString('en-US') + ' USDT' : '0 (Nonaktif)';
+    };
+    const formatZeroDisabled = (unit) => (v) => {
+      if (v === undefined || v === null) return '-';
+      return Number(v) === 0 ? '0 (Nonaktif)' : `${v}${unit}`;
+    };
 
     // Helper render baris perbandingan
-    const renderCompareRow = (name, valSnap, valCurr, unit = '') => {
-      const isSame = String(valSnap) === String(valCurr);
-      const statusBadge = isSame
-        ? `<span class="badge-same">Sama</span>`
-        : `<span class="badge-diff">Berbeda</span>`;
-      const valCurrStyle = isSame ? '' : 'color: var(--color-cyan); font-weight: 700;';
+    const renderCompareRow = (name, valSnap, valCurr, unit = '', formatFn = null) => {
+      totalParamCount++;
+      const hasSnap = valSnap !== undefined && valSnap !== null;
+      const hasCurr = valCurr !== undefined && valCurr !== null;
+
+      let displaySnap = '-';
+      let displayCurr = '-';
+
+      if (typeof formatFn === 'function') {
+        displaySnap = hasSnap ? formatFn(valSnap) : '-';
+        displayCurr = hasCurr ? formatFn(valCurr) : '-';
+      } else if (typeof valSnap === 'boolean' || typeof valCurr === 'boolean') {
+        const formatBool = (v) => (v === true ? 'Aktif (ON)' : v === false ? 'Nonaktif (OFF)' : '-');
+        displaySnap = hasSnap ? formatBool(valSnap) : '-';
+        displayCurr = hasCurr ? formatBool(valCurr) : '-';
+      } else {
+        displaySnap = hasSnap ? `${valSnap}${unit}` : '-';
+        displayCurr = hasCurr ? `${valCurr}${unit}` : '-';
+      }
+
+      let isSame = false;
+      if (!hasSnap && !hasCurr) {
+        isSame = true;
+      } else if (!hasSnap || !hasCurr) {
+        isSame = false;
+      } else if (typeof valSnap === 'number' && typeof valCurr === 'number') {
+        isSame = Math.abs(valSnap - valCurr) < 0.0001;
+      } else if (typeof valSnap === 'boolean' || typeof valCurr === 'boolean') {
+        isSame = Boolean(valSnap) === Boolean(valCurr);
+      } else {
+        isSame = String(valSnap).trim().toLowerCase() === String(valCurr).trim().toLowerCase();
+      }
+
+      let statusBadge = '';
+      if (!hasSnap) {
+        statusBadge = `<span class="badge-same" style="opacity: 0.65;" title="Parameter ini belum tersimpan pada log trade lama">N/A</span>`;
+      } else if (isSame) {
+        statusBadge = `<span class="badge-same">Sama</span>`;
+      } else {
+        diffCount++;
+        statusBadge = `<span class="badge-diff">Berbeda</span>`;
+      }
+
+      const valCurrStyle = (!isSame && hasSnap) ? 'color: var(--color-cyan); font-weight: 700;' : '';
+
       return `
-        <tr>
+        <tr class="${!isSame && hasSnap ? 'row-diff' : 'row-same'}">
           <td class="param-name">${name}</td>
-          <td><b>${valSnap !== undefined && valSnap !== null ? valSnap : '-'}${unit}</b></td>
-          <td style="${valCurrStyle}">${valCurr !== undefined && valCurr !== null ? valCurr : '-'}${unit}</td>
+          <td><b>${displaySnap}</b></td>
+          <td style="${valCurrStyle}">${displayCurr}</td>
           <td>${statusBadge}</td>
         </tr>
       `;
     };
+
+    const renderGroupHeader = (title) => `
+      <tr class="param-group-header">
+        <td colspan="4">${title}</td>
+      </tr>
+    `;
 
     // Layers breakdown
     let layers = t.layersDetail;
@@ -1077,6 +1142,71 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     const feeNum = t.fee !== undefined && t.fee !== null ? Number(t.fee) : null;
     const grossPnlNum = t.grossPnl !== undefined && t.grossPnl !== null ? Number(t.grossPnl) : null;
     const marginUsedNum = Number(t.marginUsed || 0);
+
+    // Siapkan baris perbandingan parameter terlebih dahulu untuk menghitung diffCount
+    const compareRowsHtml = `
+      ${renderGroupHeader('🧱 Grid & Martingale')}
+      ${renderCompareRow('Modal Per Layer (L0)', snap.marginPerLayerUsdt, currGrid.marginPerLayerUsdt, ' USDT')}
+      ${renderCompareRow('Jumlah Layer Jaring', snap.totalLayers, currGrid.totalLayers, ' Lapis')}
+      ${renderCompareRow('Jarak Antar Jaring (Spacing)', snap.layerSpacingPct, currGrid.layerSpacingPct, '%')}
+      ${renderCompareRow('Pengali Martingale', snap.martingaleMultiplier, currGrid.martingaleMultiplier, 'x')}
+      ${renderCompareRow('Maks Margin Per Koin', snap.maxTotalMarginPerCoin, currGrid.maxTotalMarginPerCoin, ' USDT')}
+      ${renderCompareRow('Maks Koin Bersamaan', snap.maxConcurrentCoins, currGrid.maxConcurrentCoins, ' Koin')}
+
+      ${renderGroupHeader('🎯 Exit & Take Profit / Stop Loss')}
+      ${renderCompareRow('Target Take Profit', snap.takeProfitPct, currExit.takeProfitPct, '%')}
+      ${renderCompareRow('Hard Stop Loss', snap.hardStopLossPct, currExit.hardStopLossPct, '%')}
+      ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes, currExit.maxHoldMinutes, ' Menit')}
+      ${renderCompareRow('Trailing TP (Callback)', snap.trailingTpEnabled, currExit.trailingTpEnabled)}
+      ${renderCompareRow('Jarak Callback Trailing TP', snap.trailingCallbackPct, currExit.trailingCallbackPct, '%')}
+      ${renderCompareRow('Stage 1 Partial TP', snap.partialTpEnabled, currExit.partialTpEnabled)}
+      ${renderCompareRow('Porsi Pencairan Partial TP', snap.partialTpRatio, currExit.partialTpRatio, '', formatRatioPct)}
+      ${renderCompareRow('Trailing Stop Loss', snap.trailingSlEnabled, currExit.trailingSlEnabled)}
+      ${renderCompareRow('Perpanjang Hold Saat Candle Merah', snap.extendHoldOnRedCandleEnabled, currExit.extendHoldOnRedCandleEnabled)}
+      ${renderCompareRow('Durasi Ekstensi Candle Merah', snap.extendHoldSeconds, currExit.extendHoldSeconds, ' Detik')}
+      ${renderCompareRow('Maks Ekstensi Candle Merah', snap.maxHoldExtensions, currExit.maxHoldExtensions, 'x')}
+      ${renderCompareRow('Early Exit Momentum', snap.earlyExitMomentumEnabled, currExit.earlyExitMomentumEnabled)}
+      ${renderCompareRow('Early Exit Min Candle Bullish', snap.earlyExitMinBullishCandles, currExit.earlyExitMinBullishCandles, ' Candle')}
+      ${renderCompareRow('Early Exit Kenaikan Min', snap.earlyExitMinRisePct, currExit.earlyExitMinRisePct, '%')}
+      ${renderCompareRow('Cooldown Early Exit', snap.earlyExitCooldownMinutes, currExit.earlyExitCooldownMinutes, ' Menit')}
+      ${renderCompareRow('Cooldown Hard SL', snap.hardStopCooldownMinutes, currExit.hardStopCooldownMinutes, ' Menit')}
+
+      ${renderGroupHeader('🛡️ Emergency BEP Defense (Penyelamat Modal)')}
+      ${renderCompareRow('Status BEP Defense', snap.bepDefenseEnabled, currExit.bepDefenseEnabled)}
+      ${renderCompareRow('Paksa BEP di Layer', snap.bepMaxLayersTrigger, currExit.bepMaxLayersTrigger, '', (v) => Number(v) === 0 ? '0 (Velocity Saja)' : `${v} Layer`)}
+      ${renderCompareRow('BEP Fast Fill / Velocity', snap.bepFastFillEnabled, currExit.bepFastFillEnabled)}
+      ${renderCompareRow('Batas Waktu Cepat (Velocity)', snap.bepFastFillSeconds, currExit.bepFastFillSeconds, ' Detik')}
+      ${renderCompareRow('Min Layer Tertelan Kilat', snap.bepFastFillMinLayers, currExit.bepFastFillMinLayers, '', (v) => Number(v) === 0 ? '0 (Otomatis 65%)' : `${v} Layer`)}
+      ${renderCompareRow('Buffer Profit BEP (Cover Fee)', snap.bepBufferPct, currExit.bepBufferPct, '%')}
+      ${renderCompareRow('Cooldown Pasca BEP', snap.bepCooldownMinutes, currExit.bepCooldownMinutes, ' Menit')}
+
+      ${renderGroupHeader('🔍 Scanner & Filter Spike')}
+      ${renderCompareRow('Minimal Spike Lonjakan', snap.spikeMinPercent, currScanner.spikeMinPercent, '%')}
+      ${renderCompareRow('Spike Lookback', snap.spikeLookbackSeconds, currScanner.spikeLookbackSeconds, ' Detik')}
+      ${renderCompareRow('Volume Spike Multiplier', snap.volumeSpikeMultiplier, currScanner.volumeSpikeMultiplier, 'x')}
+      ${renderCompareRow('Min Volume 24 Jam', snap.min24hVolumeUsdt, currScanner.min24hVolumeUsdt, '', formatVolumeUsdt)}
+      ${renderCompareRow('Maksimal Spread Bid-Ask', snap.maxSpreadPct, currScanner.maxSpreadPct, '%')}
+      ${renderCompareRow('Cooldown Antar Koin', snap.cooldownMinutes, currScanner.cooldownMinutes, ' Menit')}
+      ${renderCompareRow('Filter Bottom Rejection (Sweep)', snap.skipBottomRejectionEnabled, currScanner.skipBottomRejectionEnabled)}
+      ${renderCompareRow('Min Rentang Bottom Rejection', snap.bottomRejectionMinRangePct, currScanner.bottomRejectionMinRangePct, '%')}
+      ${renderCompareRow('Rasio Ekor Bottom Rejection', snap.bottomRejectionWickRatio, currScanner.bottomRejectionWickRatio, 'x')}
+      ${renderCompareRow('Filter Upper Wick Pullback', snap.upperWickPullbackEnabled, currScanner.upperWickPullbackEnabled)}
+      ${renderCompareRow('Min Pullback dari Puncak', snap.upperWickPullbackMinPct, currScanner.upperWickPullbackMinPct, '%')}
+      ${renderCompareRow('Batas Tunggu Pullback', snap.upperWickPullbackMaxWaitSeconds, currScanner.upperWickPullbackMaxWaitSeconds, ' Detik')}
+      ${renderCompareRow('Cooldown Monster Pump', snap.upperWickCooldownMinutes, currScanner.upperWickCooldownMinutes, ' Menit')}
+      ${renderCompareRow('Filter Jeda Tape / Trade Gap', snap.tradeGapFilterEnabled, currScanner.tradeGapFilterEnabled)}
+      ${renderCompareRow('Maksimal Jeda Trade (Gap)', snap.maxTradeGapSeconds, currScanner.maxTradeGapSeconds, ' Detik')}
+      ${renderCompareRow('Cooldown Koin Sepi (Gap)', snap.tradeGapCooldownMinutes, currScanner.tradeGapCooldownMinutes, ' Menit')}
+      ${renderCompareRow('Whitelist Koin', snap.whitelistEnabled, currScanner.whitelistEnabled)}
+
+      ${renderGroupHeader('⚙️ Mode Akun & Manajemen Risiko')}
+      ${renderCompareRow('Mode Trading', snap.tradingMode, curr.tradingMode, '', (v) => v === 'LIVE' ? '🟢 LIVE' : '🧪 PAPER')}
+      ${renderCompareRow('Leverage', snap.leverage, curr.leverage, 'x')}
+      ${renderCompareRow('Tipe Margin', snap.marginType, curr.marginType)}
+      ${renderCompareRow('Sumber Data Market', snap.dataSource, currScanner.dataSource)}
+      ${renderCompareRow('Rem Rugi Harian (Circuit Breaker)', snap.maxDailyLossUsdt, currRisk.maxDailyLossUsdt, ' USDT', formatZeroDisabled(' USDT'))}
+      ${renderCompareRow('Batas Saldo Pengaman (Floor)', snap.minSafetyBalanceUsdt, currRisk.minSafetyBalanceUsdt, ' USDT', formatZeroDisabled(' USDT'))}
+    `;
 
     const body = document.getElementById('td-body');
     if (body) {
@@ -1137,7 +1267,19 @@ function openTradeDetailModal(tradeId, tradeIndex) {
         </div>
 
         <!-- PARAMETER COMPARISON TABLE -->
-        <div class="td-section-title">⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)</div>
+        <div class="param-filter-bar">
+          <div class="td-section-title" style="margin: 0;">
+            ⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)
+            ${diffCount > 0 
+              ? `<span class="badge-diff" style="margin-left: 8px;">${diffCount} Parameter Berbeda</span>` 
+              : `<span class="badge-same" style="margin-left: 8px;">Semua Identik</span>`}
+          </div>
+          <label style="font-size: 11px; color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; user-select: none;">
+            <input type="checkbox" id="td-diff-only-checkbox" onchange="toggleDiffOnlyParams(this.checked)" style="accent-color: var(--color-cyan);">
+            Hanya tampilkan yang berbeda
+          </label>
+        </div>
+
         <div style="overflow-x: auto;">
           <table class="param-compare-table">
             <thead>
@@ -1149,16 +1291,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               </tr>
             </thead>
             <tbody>
-              ${renderCompareRow('Modal Per Layer', snap.marginPerLayerUsdt ?? 3, currGrid.marginPerLayerUsdt ?? 3, ' USDT')}
-              ${renderCompareRow('Jumlah Layer', snap.totalLayers ?? 6, currGrid.totalLayers ?? 6, ' Lapis')}
-              ${renderCompareRow('Jarak Antar Jaring (Spacing)', snap.layerSpacingPct ?? 1.0, currGrid.layerSpacingPct ?? 1.0, '%')}
-              ${renderCompareRow('Pengali Martingale', snap.martingaleMultiplier ?? 1.15, currGrid.martingaleMultiplier ?? 1.15, 'x')}
-              ${renderCompareRow('Target Take Profit', snap.takeProfitPct ?? 1.2, currExit.takeProfitPct ?? 1.2, '%')}
-              ${renderCompareRow('Hard Stop Loss', snap.hardStopLossPct ?? 4.5, currExit.hardStopLossPct ?? 4.5, '%')}
-              ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes ?? 10, currExit.maxHoldMinutes ?? 10, ' Menit')}
-              ${renderCompareRow('Minimal Spike', snap.spikeMinPercent ?? 3.2, currScanner.spikeMinPercent ?? 3.2, '%')}
-              ${renderCompareRow('Leverage', snap.leverage ?? 5, curr.leverage ?? 5, 'x')}
-              ${renderCompareRow('Maks Margin Per Koin', snap.maxTotalMarginPerCoin ?? 80, currGrid.maxTotalMarginPerCoin ?? 80, ' USDT')}
+              ${compareRowsHtml}
             </tbody>
           </table>
         </div>
@@ -1176,53 +1309,160 @@ function openTradeDetailModal(tradeId, tradeIndex) {
   }
 }
 
+function toggleDiffOnlyParams(diffOnly) {
+  const rows = document.querySelectorAll('.param-compare-table tbody tr');
+  rows.forEach((tr) => {
+    if (tr.classList.contains('param-group-header')) return;
+    const isDiff = tr.classList.contains('row-diff');
+    tr.style.display = (diffOnly && !isDiff) ? 'none' : '';
+  });
+
+  document.querySelectorAll('.param-group-header').forEach((header) => {
+    if (!diffOnly) {
+      header.style.display = '';
+      return;
+    }
+    let next = header.nextElementSibling;
+    let hasVisibleChild = false;
+    while (next && !next.classList.contains('param-group-header')) {
+      if (next.style.display !== 'none') {
+        hasVisibleChild = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    header.style.display = hasVisibleChild ? '' : 'none';
+  });
+}
+
 function closeTradeDetailModal() {
   document.getElementById('trade-detail-modal')?.classList.remove('open');
 }
 
 window.openTradeDetailModal = openTradeDetailModal;
 window.closeTradeDetailModal = closeTradeDetailModal;
+window.toggleDiffOnlyParams = toggleDiffOnlyParams;
 window.applySnapshotParamsToConfig = applySnapshotParamsToConfig;
 
 function applySnapshotParamsToConfig() {
   if (!selectedTradeForDetail) return;
-  const snap = selectedTradeForDetail.paramsSnapshot || {
-    marginPerLayerUsdt: 3,
-    totalLayers: 6,
-    layerSpacingPct: 1.0,
-    martingaleMultiplier: 1.15,
-    maxTotalMarginPerCoin: 80,
-    takeProfitPct: 1.2,
-    hardStopLossPct: 4.5,
-    maxHoldMinutes: 10,
-    spikeMinPercent: 3.2,
-    leverage: 5,
-    marginType: 'CROSSED',
-  };
+  const snap = selectedTradeForDetail.paramsSnapshot || {};
 
-  // Isi ke form modal pengaturan
+  // Helper set form values
   const setVal = (id, val) => {
     const el = document.getElementById(id);
     if (el && val !== undefined && val !== null) el.value = val;
   };
+  const setChecked = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.checked = !!val;
+  };
 
+  // 1. Grid & Martingale
   setVal('cfg-margin-layer', snap.marginPerLayerUsdt);
   setVal('cfg-total-layers', snap.totalLayers);
   setVal('cfg-layer-spacing', snap.layerSpacingPct);
   setVal('cfg-martingale', snap.martingaleMultiplier);
   setVal('cfg-max-margin', snap.maxTotalMarginPerCoin);
+  setVal('cfg-max-coins', snap.maxConcurrentCoins);
+
+  // 2. Exit, TP & SL
   setVal('cfg-tp-pct', snap.takeProfitPct);
   setVal('cfg-sl-pct', snap.hardStopLossPct);
   setVal('cfg-max-hold', snap.maxHoldMinutes);
+
+  if (snap.trailingTpEnabled !== undefined) {
+    setChecked('cfg-trailing-tp-enabled', snap.trailingTpEnabled);
+    if (typeof toggleTrailingTpInput === 'function') toggleTrailingTpInput();
+  }
+  setVal('cfg-trailing-tp-callback', snap.trailingCallbackPct);
+
+  if (snap.partialTpEnabled !== undefined) {
+    setChecked('cfg-partial-tp-enabled', snap.partialTpEnabled);
+    if (typeof togglePartialTpInput === 'function') togglePartialTpInput();
+  }
+  if (snap.partialTpRatio !== undefined) {
+    const r = snap.partialTpRatio;
+    setVal('cfg-partial-tp-ratio', r <= 1 ? Math.round(r * 100) : r);
+  }
+
+  if (snap.extendHoldOnRedCandleEnabled !== undefined) {
+    setChecked('cfg-extend-hold-red-enabled', snap.extendHoldOnRedCandleEnabled);
+    if (typeof toggleExtendHoldRedInput === 'function') toggleExtendHoldRedInput();
+  }
+  setVal('cfg-extend-hold-seconds', snap.extendHoldSeconds);
+  setVal('cfg-extend-hold-max-extensions', snap.maxHoldExtensions);
+
+  if (snap.bepDefenseEnabled !== undefined) {
+    setChecked('cfg-bep-defense-enabled', snap.bepDefenseEnabled);
+    if (typeof toggleBepDefenseInput === 'function') toggleBepDefenseInput();
+  }
+  setVal('cfg-bep-max-layers-trigger', snap.bepMaxLayersTrigger);
+  setVal('cfg-bep-fast-fill-seconds', snap.bepFastFillSeconds);
+  setVal('cfg-bep-fast-fill-layers', snap.bepFastFillMinLayers);
+  setVal('cfg-bep-buffer-pct', snap.bepBufferPct);
+  setVal('cfg-bep-cooldown', snap.bepCooldownMinutes);
+
+  if (snap.trailingSlEnabled !== undefined) {
+    setChecked('cfg-trailing-sl-enabled', snap.trailingSlEnabled);
+    if (typeof toggleTrailingSL === 'function') toggleTrailingSL();
+  }
+
+  if (snap.earlyExitMomentumEnabled !== undefined) {
+    setChecked('cfg-early-exit-momentum-enabled', snap.earlyExitMomentumEnabled);
+  }
+  setVal('cfg-early-exit-candles', snap.earlyExitMinBullishCandles);
+  setVal('cfg-early-exit-rise', snap.earlyExitMinRisePct);
+  setVal('cfg-early-exit-cooldown', snap.earlyExitCooldownMinutes);
+  setVal('cfg-hard-sl-cooldown', snap.hardStopCooldownMinutes);
+
+  // 3. Scanner & Filters
   setVal('cfg-spike-pct', snap.spikeMinPercent);
+  setVal('cfg-cooldown', snap.cooldownMinutes);
+  setVal('cfg-min-24h-vol', snap.min24hVolumeUsdt);
+  setVal('cfg-max-spread', snap.maxSpreadPct);
+
+  if (snap.skipBottomRejectionEnabled !== undefined) {
+    setChecked('cfg-bottom-rejection-enabled', snap.skipBottomRejectionEnabled);
+    if (typeof toggleBottomRejectionInput === 'function') toggleBottomRejectionInput();
+  }
+  setVal('cfg-bottom-rejection-range', snap.bottomRejectionMinRangePct);
+  setVal('cfg-bottom-rejection-ratio', snap.bottomRejectionWickRatio);
+
+  if (snap.upperWickPullbackEnabled !== undefined) {
+    setChecked('cfg-upper-wick-pullback-enabled', snap.upperWickPullbackEnabled);
+    if (typeof toggleUpperWickInput === 'function') toggleUpperWickInput();
+  }
+  setVal('cfg-upper-wick-pullback-min', snap.upperWickPullbackMinPct);
+  setVal('cfg-upper-wick-pullback-wait', snap.upperWickPullbackMaxWaitSeconds);
+  setVal('cfg-upper-wick-pullback-cooldown', snap.upperWickCooldownMinutes);
+
+  if (snap.tradeGapFilterEnabled !== undefined) {
+    setChecked('cfg-trade-gap-enabled', snap.tradeGapFilterEnabled);
+    if (typeof toggleTradeGapInput === 'function') toggleTradeGapInput();
+  }
+  setVal('cfg-max-trade-gap-seconds', snap.maxTradeGapSeconds);
+  setVal('cfg-trade-gap-cooldown', snap.tradeGapCooldownMinutes);
+
+  if (snap.whitelistEnabled !== undefined) {
+    setChecked('cfg-whitelist-enabled', snap.whitelistEnabled);
+    if (typeof toggleWhitelistInput === 'function') toggleWhitelistInput();
+  }
+
+  // 4. Mode Akun & Manajemen Risiko
+  setVal('cfg-mode', snap.tradingMode);
   setVal('cfg-leverage', snap.leverage);
   setVal('cfg-margin-type', snap.marginType);
+  setVal('cfg-data-source', snap.dataSource);
+  if (typeof toggleDataSourceGroup === 'function') toggleDataSourceGroup();
+  setVal('cfg-risk-max-daily-loss', snap.maxDailyLossUsdt);
+  setVal('cfg-risk-min-balance', snap.minSafetyBalanceUsdt);
 
   isFormModifiedByUser = true;
 
   closeTradeDetailModal();
   openSettingsModal(true); // skip reload agar snapshot yang baru diterapkan tidak tertimpa
-  alert('✅ Parameter dari trade ini berhasil dimuat ke formulir pengaturan! Silakan periksa lalu klik "Simpan Perubahan" jika ingin menggunakannya.');
+  alert('✅ Seluruh parameter dari trade ini berhasil dimuat ke formulir pengaturan! Silakan periksa lalu klik "Simpan Perubahan" jika ingin menggunakannya.');
 }
 
 function renderLogs(logs) {

@@ -154,6 +154,7 @@ export interface ActivePosition {
   tpOrderId?: string;
   tp2OrderId?: string;
   lastTpAttempt?: number;
+  paramsSnapshot?: Record<string, any>;
 }
 
 export interface ClosedTrade {
@@ -181,19 +182,7 @@ export interface ClosedTrade {
     marginUsdt: number;
     status: string;
   }[];
-  paramsSnapshot?: {
-    marginPerLayerUsdt: number;
-    totalLayers: number;
-    layerSpacingPct: number;
-    martingaleMultiplier: number;
-    maxTotalMarginPerCoin: number;
-    takeProfitPct: number;
-    hardStopLossPct: number;
-    maxHoldMinutes: number;
-    spikeMinPercent: number;
-    leverage: number;
-    marginType: string;
-  };
+  paramsSnapshot?: Record<string, any>;
 }
 
 export interface EngineStatus {

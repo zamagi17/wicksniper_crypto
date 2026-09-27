@@ -784,6 +784,7 @@ export class WickSniperEngine {
       targetTpPrice: currentPrice * (1 - exitCfg.takeProfitPct / 100),
       hardSlPrice: currentPrice * (1 + exitCfg.hardStopLossPct / 100),
       status: 'SNIPING',
+      paramsSnapshot: this.captureParamsSnapshot(),
     };
 
     if (this.config.tradingMode === 'LIVE') {
@@ -1948,6 +1949,70 @@ export class WickSniperEngine {
     return true;
   }
 
+  public captureParamsSnapshot(): Record<string, any> {
+    return {
+      // Grid & Martingale
+      marginPerLayerUsdt: this.config.grid?.marginPerLayerUsdt,
+      totalLayers: this.config.grid?.totalLayers,
+      layerSpacingPct: this.config.grid?.layerSpacingPct,
+      martingaleMultiplier: this.config.grid?.martingaleMultiplier,
+      maxTotalMarginPerCoin: this.config.grid?.maxTotalMarginPerCoin,
+      maxConcurrentCoins: this.config.grid?.maxConcurrentCoins,
+
+      // Exit & Protection
+      takeProfitPct: this.config.exit?.takeProfitPct,
+      trailingTpEnabled: this.config.exit?.trailingTpEnabled,
+      trailingCallbackPct: this.config.exit?.trailingCallbackPct,
+      hardStopLossPct: this.config.exit?.hardStopLossPct,
+      maxHoldMinutes: this.config.exit?.maxHoldMinutes,
+      partialTpEnabled: this.config.exit?.partialTpEnabled,
+      partialTpRatio: this.config.exit?.partialTpRatio,
+      extendHoldOnRedCandleEnabled: this.config.exit?.extendHoldOnRedCandleEnabled,
+      extendHoldSeconds: this.config.exit?.extendHoldSeconds,
+      maxHoldExtensions: this.config.exit?.maxHoldExtensions,
+      bepDefenseEnabled: this.config.exit?.bepDefenseEnabled,
+      bepMaxLayersTrigger: this.config.exit?.bepMaxLayersTrigger,
+      bepFastFillEnabled: this.config.exit?.bepFastFillEnabled,
+      bepFastFillSeconds: this.config.exit?.bepFastFillSeconds,
+      bepFastFillMinLayers: this.config.exit?.bepFastFillMinLayers,
+      bepBufferPct: this.config.exit?.bepBufferPct,
+      bepCooldownMinutes: this.config.exit?.bepCooldownMinutes,
+      trailingSlEnabled: this.config.exit?.trailingSlEnabled,
+      earlyExitMomentumEnabled: this.config.exit?.earlyExitMomentumEnabled,
+      earlyExitMinBullishCandles: this.config.exit?.earlyExitMinBullishCandles,
+      earlyExitMinRisePct: this.config.exit?.earlyExitMinRisePct,
+      earlyExitCooldownMinutes: this.config.exit?.earlyExitCooldownMinutes,
+      hardStopCooldownMinutes: this.config.exit?.hardStopCooldownMinutes,
+
+      // Scanner & Filters
+      spikeMinPercent: this.config.scanner?.spikeMinPercent,
+      spikeLookbackSeconds: this.config.scanner?.spikeLookbackSeconds,
+      volumeSpikeMultiplier: this.config.scanner?.volumeSpikeMultiplier,
+      min24hVolumeUsdt: this.config.scanner?.min24hVolumeUsdt,
+      maxSpreadPct: this.config.scanner?.maxSpreadPct,
+      cooldownMinutes: this.config.scanner?.cooldownMinutes,
+      skipBottomRejectionEnabled: this.config.scanner?.skipBottomRejectionEnabled,
+      bottomRejectionMinRangePct: this.config.scanner?.bottomRejectionMinRangePct,
+      bottomRejectionWickRatio: this.config.scanner?.bottomRejectionWickRatio,
+      upperWickPullbackEnabled: this.config.scanner?.upperWickPullbackEnabled,
+      upperWickPullbackMinPct: this.config.scanner?.upperWickPullbackMinPct,
+      upperWickPullbackMaxWaitSeconds: this.config.scanner?.upperWickPullbackMaxWaitSeconds,
+      upperWickCooldownMinutes: this.config.scanner?.upperWickCooldownMinutes,
+      tradeGapFilterEnabled: this.config.scanner?.tradeGapFilterEnabled,
+      maxTradeGapSeconds: this.config.scanner?.maxTradeGapSeconds,
+      tradeGapCooldownMinutes: this.config.scanner?.tradeGapCooldownMinutes,
+      whitelistEnabled: this.config.scanner?.whitelistEnabled,
+
+      // Account & Risk
+      tradingMode: this.config.tradingMode,
+      leverage: this.config.leverage,
+      marginType: this.config.marginType,
+      dataSource: this.config.scanner?.dataSource,
+      maxDailyLossUsdt: this.config.risk?.maxDailyLossUsdt,
+      minSafetyBalanceUsdt: this.config.risk?.minSafetyBalanceUsdt,
+    };
+  }
+
   /**
    * Menutup posisi dan mencatat realized PnL
    */
@@ -2349,19 +2414,7 @@ export class WickSniperEngine {
           marginUsdt: l.marginUsdt,
           status: l.status,
         })),
-        paramsSnapshot: {
-          marginPerLayerUsdt: this.config.grid.marginPerLayerUsdt,
-          totalLayers: this.config.grid.totalLayers,
-          layerSpacingPct: this.config.grid.layerSpacingPct,
-          martingaleMultiplier: this.config.grid.martingaleMultiplier,
-          maxTotalMarginPerCoin: this.config.grid.maxTotalMarginPerCoin,
-          takeProfitPct: this.config.exit.takeProfitPct,
-          hardStopLossPct: this.config.exit.hardStopLossPct,
-          maxHoldMinutes: this.config.exit.maxHoldMinutes,
-          spikeMinPercent: this.config.scanner.spikeMinPercent,
-          leverage: this.config.leverage,
-          marginType: this.config.marginType,
-        },
+        paramsSnapshot: pos.paramsSnapshot || this.captureParamsSnapshot(),
       };
 
       this.closedTrades.unshift(trade);
@@ -2737,6 +2790,7 @@ export class WickSniperEngine {
             targetTpPrice,
             hardSlPrice,
             status: 'SNIPING',
+            paramsSnapshot: this.captureParamsSnapshot(),
           };
 
           this.activePositions.set(livePos.symbol, adoptedPos);
