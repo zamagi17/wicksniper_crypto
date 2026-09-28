@@ -1192,7 +1192,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
       ${renderGroupHeader('🛡️ Emergency BEP Defense (Penyelamat Modal)')}
       ${renderCompareRow('Status BEP Defense', snap.bepDefenseEnabled, currExit.bepDefenseEnabled)}
-      ${renderCompareRow('Paksa BEP di Layer', snap.bepMaxLayersTrigger, currExit.bepMaxLayersTrigger, '', (v) => Number(v) === 0 ? '0 (Velocity Saja)' : `${v} Layer`)}
+      ${renderCompareRow('Proteksi BEP Layer Akhir', snap.bepFinalLayerEnabled, currExit.bepFinalLayerEnabled)}
+      ${renderCompareRow('Paksa BEP di Layer', snap.bepMaxLayersTrigger, currExit.bepMaxLayersTrigger, '', (v) => Number(v) === 0 ? '0 (Hanya Layer Akhir / Velocity)' : `${v} Layer`)}
       ${renderCompareRow('BEP Fast Fill / Velocity', snap.bepFastFillEnabled, currExit.bepFastFillEnabled)}
       ${renderCompareRow('Batas Waktu Cepat (Velocity)', snap.bepFastFillSeconds, currExit.bepFastFillSeconds, ' Detik')}
       ${renderCompareRow('Min Layer Tertelan Kilat', snap.bepFastFillMinLayers, currExit.bepFastFillMinLayers, '', (v) => Number(v) === 0 ? '0 (Otomatis 65%)' : `${v} Layer`)}
@@ -1415,6 +1416,9 @@ function applySnapshotParamsToConfig() {
   if (snap.bepDefenseEnabled !== undefined) {
     setChecked('cfg-bep-defense-enabled', snap.bepDefenseEnabled);
     if (typeof toggleBepDefenseInput === 'function') toggleBepDefenseInput();
+  }
+  if (snap.bepFinalLayerEnabled !== undefined) {
+    setChecked('cfg-bep-final-layer-enabled', snap.bepFinalLayerEnabled);
   }
   setVal('cfg-bep-max-layers-trigger', snap.bepMaxLayersTrigger);
   setVal('cfg-bep-fast-fill-seconds', snap.bepFastFillSeconds);
@@ -1800,6 +1804,10 @@ function populateSettingsForm(cfg) {
     bepDefCheckbox.checked = cfg.exit?.bepDefenseEnabled !== false;
     toggleBepDefenseInput();
   }
+  const bepFinalCheckbox = document.getElementById('cfg-bep-final-layer-enabled');
+  if (bepFinalCheckbox) {
+    bepFinalCheckbox.checked = cfg.exit?.bepFinalLayerEnabled !== false;
+  }
   setVal('cfg-bep-max-layers-trigger', cfg.exit?.bepMaxLayersTrigger ?? 0);
   setVal('cfg-bep-fast-fill-seconds', cfg.exit?.bepFastFillSeconds ?? 120);
   setVal('cfg-bep-fast-fill-layers', cfg.exit?.bepFastFillMinLayers ?? 0);
@@ -1917,6 +1925,7 @@ function getSettingsFormData() {
       earlyExitCooldownMinutes: parseInt(getVal('cfg-early-exit-cooldown', '60')) || 60,
       hardStopCooldownMinutes: parseInt(getVal('cfg-hard-sl-cooldown', '180')) || 180,
       bepDefenseEnabled: !!document.getElementById('cfg-bep-defense-enabled')?.checked,
+      bepFinalLayerEnabled: document.getElementById('cfg-bep-final-layer-enabled') ? !!document.getElementById('cfg-bep-final-layer-enabled').checked : true,
       bepMaxLayersTrigger: parseInt(getVal('cfg-bep-max-layers-trigger', '0'), 10) || 0,
       bepFastFillEnabled: true,
       bepFastFillSeconds: parseInt(getVal('cfg-bep-fast-fill-seconds', '120'), 10) || 120,

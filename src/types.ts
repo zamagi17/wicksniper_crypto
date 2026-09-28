@@ -57,6 +57,7 @@ export interface BotConfig {
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)
     bepDefenseEnabled?: boolean;
+    bepFinalLayerEnabled?: boolean;
     bepMaxLayersTrigger?: number;
     bepFastFillEnabled?: boolean;
     bepFastFillSeconds?: number;

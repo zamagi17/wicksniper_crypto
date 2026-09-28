@@ -138,6 +138,7 @@ export class WickSniperEngine {
         partialTpEnabled: false,
         partialTpRatio: 0.5,
         bepDefenseEnabled: true,
+        bepFinalLayerEnabled: true,
         bepMaxLayersTrigger: 0,
         bepFastFillEnabled: true,
         bepFastFillSeconds: 120,
@@ -1368,6 +1369,10 @@ export class WickSniperEngine {
     const tradeAgeSeconds = (Date.now() - pos.openedAt) / 1000;
 
     const bepDefenseActive = exitCfg.bepDefenseEnabled !== false; // Default aktif demi keselamatan modal
+    const finalLayerDefenseActive = exitCfg.bepFinalLayerEnabled !== false; // Proteksi saat layer akhir / tanpa jaring tersisa
+    const totalLayersCount = (pos.layers && pos.layers.length > 0) ? pos.layers.length : totalConfiguredLayers;
+    const pendingLayersCount = (pos.layers || []).filter((l) => l.status === 'PENDING').length;
+
     // Ambang batas layer statis: jika 0 atau tidak diset, pemicu statis dinonaktifkan (hanya aktif saat Velocity Shock kilat)
     const maxLayersThreshold = exitCfg.bepMaxLayersTrigger && exitCfg.bepMaxLayersTrigger > 0
       ? exitCfg.bepMaxLayersTrigger
@@ -1385,12 +1390,18 @@ export class WickSniperEngine {
     let reason = '';
 
     if (bepDefenseActive && !pos.partialTpDone) {
-      // Kondisi 1: Hanya aktif jika user secara eksplisit menyetel ambang layer statis (> 0)
-      if (maxLayersThreshold > 0 && filledLayersCount >= maxLayersThreshold) {
+      // Kondisi 1 (Prioritas Utama): Proteksi Layer Terakhir / Jaring Habis (Tanpa Jaring Pengaman Tersisa)
+      const isFinalLayer = totalLayersCount > 1 && (filledLayersCount >= totalLayersCount || (pendingLayersCount === 0 && filledLayersCount > 0));
+      if (finalLayerDefenseActive && isFinalLayer) {
+        isBep = true;
+        reason = `Layer Terakhir Terisi (${filledLayersCount}/${totalLayersCount}) - Jaring Habis: Prioritas BEP Pengaman Modal`;
+      }
+      // Kondisi 2: Ambang Batas Layer Statis (jika user menentukan layer spesifik lebih awal, misal layer 4)
+      else if (maxLayersThreshold > 0 && filledLayersCount >= maxLayersThreshold) {
         isBep = true;
         reason = `Kapasitas Jaring Terpenuhi (${filledLayersCount}/${totalConfiguredLayers} Layer)`;
       }
-      // Kondisi 2: Kecepatan Pengisian Ekstrem (Velocity Shock)
+      // Kondisi 3: Kecepatan Pengisian Ekstrem (Velocity Shock)
       else if (exitCfg.bepFastFillEnabled !== false && tradeAgeSeconds <= fastFillSeconds && filledLayersCount >= fastFillMinLayers) {
         isBep = true;
         reason = `Velocity Shock: ${filledLayersCount}/${totalConfiguredLayers} Layer tertelan kilat dlm ${Math.round(tradeAgeSeconds)}s (Batas: ${fastFillSeconds}s)`;
@@ -2035,6 +2046,7 @@ export class WickSniperEngine {
       extendHoldSeconds: this.config.exit?.extendHoldSeconds,
       maxHoldExtensions: this.config.exit?.maxHoldExtensions,
       bepDefenseEnabled: this.config.exit?.bepDefenseEnabled,
+      bepFinalLayerEnabled: this.config.exit?.bepFinalLayerEnabled,
       bepMaxLayersTrigger: this.config.exit?.bepMaxLayersTrigger,
       bepFastFillEnabled: this.config.exit?.bepFastFillEnabled,
       bepFastFillSeconds: this.config.exit?.bepFastFillSeconds,
