@@ -86,7 +86,8 @@ export interface BotConfig {
     notifyOnNewOrder?: boolean;
     notifyOnLayerFill?: boolean;
     notifyOnClose?: boolean;
-    notifyOnEmergency?: boolean;
+      notifyOnEmergency?: boolean;
+      notifyOnAutoBlacklist?: boolean;
     heartbeatIntervalHours?: number;
   };
   security?: {

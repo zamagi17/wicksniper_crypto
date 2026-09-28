@@ -280,6 +280,32 @@ ${details}
   }
 
   /**
+   * Notify only when an auto-blacklist entry is added (opt-in)
+   */
+  public async notifyAutoBlacklist(title: string, details: string, symbol?: string) {
+    // Only send if emergency notifications are enabled and a specific flag is set
+    if (this.config.notifyOnEmergency === false) return;
+    // Keep separate cooldown to avoid spam
+    const key = `AUTOBL_${symbol || 'GLOBAL'}_${title}`;
+    const now = Date.now();
+    const last = this.emergencyAlertCooldown.get(key) || 0;
+    if (now - last < 5 * 60 * 1000) return; // 5 minutes cooldown for auto-blacklist alerts
+    this.emergencyAlertCooldown.set(key, now);
+
+    const symLine = symbol ? `\n🪙 <b>Koin:</b> <code>${symbol}</code>` : '';
+    const msg =
+`🚨 <b>[AUTO BLACKLIST]</b> 🚨
+
+⚠️ <b>${title}</b>${symLine}
+📝 <b>Detail:</b>
+${details}
+
+⏱️ <i>Waktu: ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</i>`;
+
+    this.sendMessage(msg).catch(() => {});
+  }
+
+  /**
    * Laporan Status Berkala (Heartbeat Status)
    */
   public async notifyHeartbeat(status: {

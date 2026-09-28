@@ -2003,6 +2003,7 @@ function populateSettingsForm(cfg) {
   setChecked('cfg-tg-on-layer', tg.notifyOnLayerFill);
   setChecked('cfg-tg-on-close', tg.notifyOnClose);
   setChecked('cfg-tg-on-emergency', tg.notifyOnEmergency !== false);
+  setChecked('cfg-tg-on-autobl', tg.notifyOnAutoBlacklist !== false);
   setVal('cfg-tg-heartbeat-hours', tg.heartbeatIntervalHours ?? 6);
 
   // Risk Management
@@ -2117,6 +2118,7 @@ function getSettingsFormData() {
       notifyOnLayerFill: !!document.getElementById('cfg-tg-on-layer')?.checked,
       notifyOnClose: !!document.getElementById('cfg-tg-on-close')?.checked,
       notifyOnEmergency: !!document.getElementById('cfg-tg-on-emergency')?.checked,
+      notifyOnAutoBlacklist: !!document.getElementById('cfg-tg-on-autobl')?.checked,
       heartbeatIntervalHours: parseInt(getVal('cfg-tg-heartbeat-hours', '6'), 10) || 0,
     },
   };

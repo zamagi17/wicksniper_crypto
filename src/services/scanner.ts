@@ -3,6 +3,7 @@ import { binanceFutures } from './binance';
 import { logger } from './logger';
 import fs from 'fs';
 import path from 'path';
+import { telegram } from './telegram';
 
 export class SpikeScanner {
   private config: BotConfig['scanner'];
@@ -229,15 +230,18 @@ export class SpikeScanner {
         if (this.config.max24hVolumeUsdt && this.config.max24hVolumeUsdt > 0) {
           if (vol24 >= this.config.max24hVolumeUsdt) {
             const reason = `24h volume ${vol24} >= max24hVolumeUsdt (${this.config.max24hVolumeUsdt})`;
-            this.addTemporaryBlacklist(symbol, {
-              reason,
-              vol24,
-              addedAt: Date.now(),
-              expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
-              auto: false,
-            });
-            // notify via telegram if configured
-            try { (require('./telegram').telegram).notifyEmergencyAlert('Auto Blacklist: Volume Ekstrem', reason, symbol); } catch (e) {}
+            if (this.config.autoBlacklist !== false) {
+              this.addTemporaryBlacklist(symbol, {
+                reason,
+                vol24,
+                addedAt: Date.now(),
+                expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
+                auto: true,
+              });
+              try { telegram.notifyAutoBlacklist('Auto Blacklist: Volume Ekstrem', reason, symbol); } catch (e) {}
+            } else {
+              logger.log('INFO', `AutoBlacklist disabled — would have flagged ${symbol}: ${reason}`, symbol);
+            }
             continue;
           }
         }
@@ -245,14 +249,18 @@ export class SpikeScanner {
         // Relative rule vs configured min24hVolumeUsdt
         if (this.config.min24hVolumeUsdt && vol24 >= (this.config.min24hVolumeUsdt * universeMultiplier)) {
           const reason = `24h volume ${vol24} >= min24hVolumeUsdt * ${universeMultiplier}`;
-          this.addTemporaryBlacklist(symbol, {
-            reason,
-            vol24,
-            addedAt: Date.now(),
-            expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
-            auto: false,
-          });
-          try { (require('./telegram').telegram).notifyEmergencyAlert('Auto Blacklist: Volume Spike Relatif', reason, symbol); } catch (e) {}
+          if (this.config.autoBlacklist !== false) {
+            this.addTemporaryBlacklist(symbol, {
+              reason,
+              vol24,
+              addedAt: Date.now(),
+              expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
+              auto: true,
+            });
+            try { telegram.notifyAutoBlacklist('Auto Blacklist: Volume Spike Relatif', reason, symbol); } catch (e) {}
+          } else {
+            logger.log('INFO', `AutoBlacklist disabled — would have flagged ${symbol}: ${reason}`, symbol);
+          }
           continue;
         }
       } catch (e) {
