@@ -1,5 +1,6 @@
 import { BotConfig, SpikeAlert, TickerSnapshot } from '../types';
 import { binanceFutures } from './binance';
+import { logger } from './logger';
 
 export class SpikeScanner {
   private config: BotConfig['scanner'];
@@ -95,6 +96,14 @@ export class SpikeScanner {
     return this.lastPrices.get(symbol) || 0;
   }
 
+  public getStats() {
+    return {
+      trackedPairs: this.getTotalMonitoredSymbols(),
+      ticksPerSecond: this.ticksPerSecond,
+      activeCooldowns: this.cooldowns.size,
+    };
+  }
+
   public start() {
     binanceFutures.onTickers((tickers: any[]) => {
       this.processTickers(tickers);
@@ -127,14 +136,6 @@ export class SpikeScanner {
       if (this.config.min24hVolumeUsdt && this.config.min24hVolumeUsdt > 0 && t.q !== undefined) {
         const quoteVol24h = parseFloat(t.q || '0');
         if (quoteVol24h < this.config.min24hVolumeUsdt) {
-          continue;
-        }
-      }
-
-      // Filter: Lewati koin yang kenaikan 24 jam terlalu ekstrem (mencegah Monster Parabolic Pump)
-      if (this.config.max24hChangePct && this.config.max24hChangePct > 0) {
-        const priceChange24h = parseFloat(t.P || '0'); // Field 'P' di Binance ticker stream = priceChangePercent
-        if (Math.abs(priceChange24h) > this.config.max24hChangePct) {
           continue;
         }
       }
@@ -187,6 +188,21 @@ export class SpikeScanner {
         // Cek apakah koin sedang cooldown
         if (this.isCoolingDown(symbol)) {
           continue;
+        }
+
+        // Filter Kenaikan 24 Jam (Mencegah Monster Parabolic Pump)
+        if (this.config.max24hChangePct && this.config.max24hChangePct > 0) {
+          const priceChange24h = parseFloat(t.P || '0');
+          if (Math.abs(priceChange24h) > this.config.max24hChangePct) {
+            const cooldownMins = this.config.cooldownMinutes || 10;
+            this.setCooldown(symbol, cooldownMins);
+            logger.log(
+              'WARN',
+              `🛡️ [MAX 24H SKIP] ${symbol} (+${surgePct.toFixed(2)}% dalam ${this.config.spikeLookbackSeconds}s): Dilewati karena perubahan 24 jam (${priceChange24h >= 0 ? '+' : ''}${priceChange24h.toFixed(1)}%) melebihi batas aman (±${this.config.max24hChangePct}%). Menghindari monster pump parabolik (cooldown ${cooldownMins}m).`,
+              symbol
+            );
+            continue;
+          }
         }
 
         // Cek apakah spike untuk koin ini baru saja dibunyikan dalam 15 detik terakhir

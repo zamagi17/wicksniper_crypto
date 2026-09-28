@@ -56,6 +56,7 @@ export class WickSniperEngine {
   private liveAvailableBalance: number = 0;
   private lastWeightWarnAt: number = 0;
   private lastHeartbeatAt: number = Date.now();
+  private lastRadarPulseAt: number = Date.now();
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
 
   constructor(configPath: string) {
@@ -383,6 +384,21 @@ export class WickSniperEngine {
           this.sendHeartbeatReport().catch(() => {});
         }
 
+        // Denyut Nadi Radar Berkala (Setiap 15 Menit saat Siaga)
+        const now = Date.now();
+        if (now - this.lastRadarPulseAt >= 15 * 60 * 1000) {
+          this.lastRadarPulseAt = now;
+          const stats = this.scanner.getStats();
+          const posCount = this.activePositions.size;
+          const maxCoins = this.config.grid.maxConcurrentCoins;
+          const availBal = this.config.tradingMode === 'LIVE' ? this.liveAvailableBalance : this.virtualBalance;
+          const ticksLabel = stats.ticksPerSecond > 0 ? `${(stats.ticksPerSecond / 1000).toFixed(1)}k ticks/s` : 'aktif';
+          logger.log(
+            'INFO',
+            `📡 [RADAR SIAGA] Memindai ${stats.trackedPairs} koin Futures (WebSocket: ${ticksLabel}) | ${posCount}/${maxCoins} posisi terbuka | Saldo: $${availBal.toFixed(2)} USDT | Status: Normal & Siaga berburu lonjakan...`
+          );
+        }
+
         // Peringatan Kuota API (Weight): Hanya muncul jika pemakaian kuota sudah >= 80% agar terminal tetap bersih
         const currentWeight = binanceFutures.lastUsedWeight;
         const ord10s = binanceFutures.getOrderCount10s();
@@ -564,14 +580,19 @@ export class WickSniperEngine {
 
               if (isBottomRejectionCandle(candle, minRange, wickRatio, 1.0)) {
                 const rangePct = (((candle.high - candle.low) / candle.low) * 100).toFixed(1);
+                const bouncePct = (((candle.close - candle.low) / candle.low) * 100).toFixed(1);
+                const rawBody = Math.abs(candle.close - candle.open);
+                const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+                const ratioStr = rawBody > 0 ? (lowerWick / rawBody).toFixed(1) + 'x' : 'Ekor Penuh';
                 const barLabel = i === candlesToCheck.length - 1 ? 'candle 1m berjalan (live)' : 'candle 1m sebelumnya';
+
                 alert.status = 'SKIPPED';
-                alert.skipReason = `Terdeteksi Bottom Rejection / Sweep ekstrem pada ${barLabel} (Rentang: ${rangePct}%)`;
+                alert.skipReason = `V-Reversal / Bottom Sweep pada ${barLabel} (Palung $${formatCryptoPrice(candle.low)} ➜ Pantul +${bouncePct}% | Rentang: ${rangePct}%)`;
                 const sweepCooldownMins = this.config.scanner.cooldownMinutes || 10;
                 this.scanner.setCooldown(symbol, sweepCooldownMins);
                 logger.log(
                   'INFO',
-                  `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada ${barLabel} (Rentang: ${rangePct}%). Diistirahatkan ${sweepCooldownMins}m.`,
+                  `🛡️ [BOTTOM REJECTION SKIP] ${symbol}: Melewatkan SHORT! Terdeteksi V-Reversal / sweep pada ${barLabel} (Palung $${formatCryptoPrice(candle.low)} ➜ Pantulan +${bouncePct}% ke $${formatCryptoPrice(candle.close)} | Rasio ekor: ${ratioStr} | Rentang: ${rangePct}%). Diistirahatkan ${sweepCooldownMins}m agar tidak terseret roket pantulan.`,
                   symbol
                 );
                 db.saveSpike(alert).catch(() => { });
@@ -1183,9 +1204,12 @@ export class WickSniperEngine {
       }
 
       if (this.shouldEarlyExitMomentum(pos, recentSamples)) {
+        const lossAmt = Math.abs((pos.avgEntryPrice - currentPrice) * pos.totalQty);
+        const lossPct = ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
+        const requiredSamples = Math.max(2, this.config.exit.earlyExitMinBullishCandles || 3);
         logger.log(
           'WARN',
-          `⚠️ [EARLY MOMENTUM EXIT] ${pos.symbol}: Harga di atas average entry dan momentum naik memenuhi parameter proteksi.`,
+          `⚠️ [EARLY MOMENTUM EXIT] ${pos.symbol}: Memotong posisi lebih awal (-${lossPct.toFixed(2)}% / -$${lossAmt.toFixed(2)})! Terdeteksi ${requiredSamples} tick bullish berturut-turut di atas entry. Menyelamatkan modal sebelum menabrak Hard SL (+${this.config.exit.hardStopLossPct}%).`,
           pos.symbol
         );
         this.closePosition(pos, 'EARLY_MOMENTUM_EXIT', currentPrice);
@@ -2087,7 +2111,15 @@ export class WickSniperEngine {
 
       if (this.config.tradingMode === 'LIVE') {
         // 1. Batalkan semua antrean order (TP & pending grid layers) terlebih dahulu
+        const cancelStart = Date.now();
         await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
+        const cancelMs = Date.now() - cancelStart;
+        const pendingCount = (pos.layers || []).filter(l => l.status === 'PENDING').length;
+        logger.log(
+          'INFO',
+          `🧹 [CLEANUP COMPLETE] ${pos.symbol}: Seluruh sisa antrean order di Binance berhasil dibatalkan (${cancelMs}ms | ${pendingCount} layer pending dilepas). Tidak ada order tersangkut.`,
+          pos.symbol
+        );
 
         // 2. Ambil posisi riil di Binance setelah order dibatalkan untuk menghindari race condition
         let realPos: any = null;
