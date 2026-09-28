@@ -265,12 +265,16 @@
             <div class="panel-title">
               <span class="icon">📟</span>
               <h2>Live Terminal Log</h2>
+              <span class="tag-counter" id="terminal-count-tag">0 Log</span>
             </div>
-            <button class="btn btn-xs" onclick="clearLocalLogs()">Bersihkan</button>
+            <div class="panel-header-actions" style="display: flex; gap: 6px; align-items: center;">
+              <button class="btn btn-xs" id="btn-scroll-bottom" onclick="scrollTerminalToBottom()" style="display: none; color: var(--color-cyan);" title="Gulir ke log terbaru">⬇ Terbaru</button>
+              <button class="btn btn-xs" onclick="clearLocalLogs()" title="Bersihkan tampilan log">Bersihkan</button>
+            </div>
           </div>
 
           <div class="terminal-box" id="terminal-logs">
-            <div class="log-entry info">[SISTEM] Inisialisasi Terminal Wick Sniper...</div>
+            <div class="terminal-empty">Menunggu aktivitas engine &amp; order stream...</div>
           </div>
         </div>
 

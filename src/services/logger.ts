@@ -5,16 +5,21 @@ export class Logger {
   private listeners: ((log: LogEntry) => void)[] = [];
 
   public log(level: LogEntry['level'], message: string, symbol?: string) {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const timestamp = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
     const entry: LogEntry = {
       id: Math.random().toString(36).substring(2, 9),
-      timestamp: new Date().toLocaleTimeString('id-ID', { hour12: false }),
+      timestamp,
+      time: now.getTime(),
       level,
       message,
       symbol,
     };
 
-    this.logs.unshift(entry);
-    if (this.logs.length > 200) this.logs.pop();
+    this.logs.push(entry);
+    if (this.logs.length > 250) this.logs.shift();
 
     const prefix = `[${entry.timestamp}] [${level}]`;
     if (level === 'SNIPER') {
@@ -35,7 +40,7 @@ export class Logger {
   }
 
   public getLogs(): LogEntry[] {
-    return this.logs;
+    return [...this.logs];
   }
 
   public onLog(callback: (log: LogEntry) => void) {

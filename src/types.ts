@@ -220,6 +220,7 @@ export interface EngineStatus {
 export interface LogEntry {
   id: string;
   timestamp: string;
+  time?: number;
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR' | 'SNIPER';
   message: string;
   symbol?: string;

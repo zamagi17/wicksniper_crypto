@@ -1465,10 +1465,101 @@ function applySnapshotParamsToConfig() {
   alert('✅ Seluruh parameter dari trade ini berhasil dimuat ke formulir pengaturan! Silakan periksa lalu klik "Simpan Perubahan" jika ingin menggunakannya.');
 }
 
+let terminalAutoScroll = true;
+
+function normalizeLogTime(raw) {
+  if (!raw) return '--:--:--';
+  const str = String(raw).trim();
+  // Format HH.mm.ss dari locale id-ID dinormalisasi ke HH:mm:ss
+  if (/^\d{1,2}\.\d{2}\.\d{2}$/.test(str)) {
+    return str.replace(/\./g, ':');
+  }
+  // Tangani ISO string
+  if (str.includes('T')) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      const p = (n) => String(n).padStart(2, '0');
+      return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+  }
+  return str;
+}
+
+function updateTerminalCount() {
+  const tag = document.getElementById('terminal-count-tag');
+  const terminal = document.getElementById('terminal-logs');
+  if (tag && terminal) {
+    const rows = terminal.querySelectorAll('.log-row');
+    tag.textContent = `${rows.length} Log`;
+  }
+}
+
+function setupTerminalScrollListener() {
+  const terminal = document.getElementById('terminal-logs');
+  if (!terminal || terminal.dataset.scrollListenerAttached) return;
+  terminal.dataset.scrollListenerAttached = 'true';
+
+  terminal.addEventListener('scroll', () => {
+    // Toleransi 35px dari bawah
+    const isNearBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight <= 35;
+    terminalAutoScroll = isNearBottom;
+
+    const scrollBtn = document.getElementById('btn-scroll-bottom');
+    if (scrollBtn) {
+      scrollBtn.style.display = isNearBottom ? 'none' : 'inline-flex';
+    }
+  });
+}
+
+function scrollTerminalToBottom() {
+  const terminal = document.getElementById('terminal-logs');
+  if (!terminal) return;
+  terminalAutoScroll = true;
+  terminal.scrollTop = terminal.scrollHeight;
+  const scrollBtn = document.getElementById('btn-scroll-bottom');
+  if (scrollBtn) {
+    scrollBtn.style.display = 'none';
+  }
+}
+
 function renderLogs(logs) {
   const terminal = document.getElementById('terminal-logs');
+  if (!terminal) return;
+  setupTerminalScrollListener();
   terminal.innerHTML = '';
-  logs.forEach((l) => appendLog(l));
+
+  if (!Array.isArray(logs) || logs.length === 0) {
+    terminal.innerHTML = '<div class="terminal-empty">Menunggu aktivitas engine &amp; order stream...</div>';
+    updateTerminalCount();
+    return;
+  }
+
+  // Pastikan log selalu urut secara kronologis (paling lama di atas, paling baru di bawah)
+  const sorted = [...logs];
+  if (sorted.length > 1) {
+    if (sorted[0].time && sorted[sorted.length - 1].time) {
+      sorted.sort((a, b) => (a.time || 0) - (b.time || 0));
+    } else {
+      // Deteksi jika log terbalik dari memory backend versi lama (index 0 lebih baru dari index terakhir)
+      const t0 = String(sorted[0].timestamp || '').replace(/\./g, ':');
+      const tEnd = String(sorted[sorted.length - 1].timestamp || '').replace(/\./g, ':');
+      if (t0 > tEnd) {
+        sorted.reverse();
+      }
+    }
+  }
+
+  // Render log terurut
+  sorted.forEach((l) => appendLog(l, true));
+
+  // Langsung bawa scroll ke posisi log paling baru di bawah
+  terminal.scrollTop = terminal.scrollHeight;
+  terminalAutoScroll = true;
+
+  const scrollBtn = document.getElementById('btn-scroll-bottom');
+  if (scrollBtn) scrollBtn.style.display = 'none';
+
+  updateTerminalCount();
 }
 
 function formatLogMessage(message) {
@@ -1497,10 +1588,17 @@ function formatLogMessage(message) {
   return normalized;
 }
 
-function appendLog(log) {
+function appendLog(log, skipScroll = false) {
   if (!log) return;
   const terminal = document.getElementById('terminal-logs');
   if (!terminal) return;
+  setupTerminalScrollListener();
+
+  // Hapus placeholder jika ada
+  const emptyHint = terminal.querySelector('.terminal-empty');
+  if (emptyHint) {
+    terminal.removeChild(emptyHint);
+  }
 
   // Cegah duplikasi entri log yang sama di DOM UI
   if (log.id && document.getElementById(`log-${log.id}`)) {
@@ -1511,24 +1609,57 @@ function appendLog(log) {
   if (log.id) {
     div.id = `log-${log.id}`;
   }
-  div.className = `log-entry ${log.level.toLowerCase()}`;
-  div.innerText = `[${log.timestamp}] [${log.level}] ${formatLogMessage(log.message)}`;
-  
-  // Log baru ditambahkan di bawah (normal chronological order)
-  terminal.appendChild(div);
-  
-  // Auto-scroll ke bawah untuk menampilkan log terbaru
-  terminal.scrollTop = terminal.scrollHeight;
+  const lvl = String(log.level || 'INFO').toUpperCase();
+  div.className = `log-row log-row-${lvl.toLowerCase()}`;
 
-  // Batasi 100 baris DOM (hapus yang paling atas/lama)
-  if (terminal.children.length > 100) {
-    terminal.removeChild(terminal.firstChild);
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'log-time';
+  timeSpan.textContent = normalizeLogTime(log.timestamp);
+  if (log.timestamp) {
+    timeSpan.title = log.timestamp;
+  }
+
+  const badgeSpan = document.createElement('span');
+  badgeSpan.className = `log-badge log-badge-${lvl.toLowerCase()}`;
+  badgeSpan.textContent = lvl;
+
+  const msgSpan = document.createElement('span');
+  msgSpan.className = 'log-msg';
+  msgSpan.textContent = formatLogMessage(log.message);
+
+  div.appendChild(timeSpan);
+  div.appendChild(badgeSpan);
+  div.appendChild(msgSpan);
+
+  // Log baru selalu ditambahkan di paling bawah (kronologis ke bawah)
+  terminal.appendChild(div);
+
+  // Batasi 200 baris DOM (hapus yang paling atas/lama jika penuh)
+  if (terminal.children.length > 200) {
+    terminal.removeChild(terminal.firstElementChild);
+  }
+
+  updateTerminalCount();
+
+  // Auto-scroll ke bawah jika pengguna sedang berada di dasar
+  if (!skipScroll && terminalAutoScroll) {
+    terminal.scrollTop = terminal.scrollHeight;
   }
 }
 
 function clearLocalLogs() {
-  document.getElementById('terminal-logs').innerHTML = '';
+  const terminal = document.getElementById('terminal-logs');
+  if (terminal) {
+    terminal.innerHTML = '<div class="terminal-empty">Terminal log dibersihkan. Menunggu event baru...</div>';
+  }
+  const scrollBtn = document.getElementById('btn-scroll-bottom');
+  if (scrollBtn) scrollBtn.style.display = 'none';
+  terminalAutoScroll = true;
+  updateTerminalCount();
 }
+
+window.scrollTerminalToBottom = scrollTerminalToBottom;
+window.clearLocalLogs = clearLocalLogs;
 
 async function toggleEngine() {
   if (!currentStatus) return;
