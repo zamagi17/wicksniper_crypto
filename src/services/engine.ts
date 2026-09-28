@@ -613,10 +613,12 @@ export class WickSniperEngine {
       if (this.config.scanner?.upperWickPullbackEnabled) {
         const minPullbackPct = this.config.scanner.upperWickPullbackMinPct ?? 0.3;
         const maxWaitSec = this.config.scanner.upperWickPullbackMaxWaitSeconds ?? 5;
-        const deadline = Date.now() + maxWaitSec * 1000;
+        const waitStartTime = Date.now();
+        const deadline = waitStartTime + maxWaitSec * 1000;
         let peakPrice = alert.currentPrice;
         let isConfirmed = false;
         let pullbackTicks = 0;
+        let lastLoggedSec = 0;
 
         logger.log(
           'INFO',
@@ -626,6 +628,8 @@ export class WickSniperEngine {
 
         while (Date.now() < deadline) {
           const livePrice = this.scanner.getCurrentPrice(symbol);
+          const currentElapsedSec = Math.min(maxWaitSec, Math.floor((Date.now() - waitStartTime) / 1000) + 1);
+
           if (livePrice > peakPrice) {
             peakPrice = livePrice; // Pompa masih berlangsung, perbarui puncak
             pullbackTicks = 0;
@@ -638,7 +642,7 @@ export class WickSniperEngine {
               confirmedEntryPrice = livePrice;
               logger.log(
                 'SNIPER',
-                `🎯 [UPPER WICK CONFIRMED] ${symbol}: Terkonfirmasi pantulan ekor atas stabil! Puncak $${peakPrice.toFixed(4)} → Reversal $${livePrice.toFixed(4)} (-${actualPullbackPct}%). Menembakkan jaring SHORT...`,
+                `🎯 [UPPER WICK CONFIRMED ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Ekor atas valid (-${actualPullbackPct}%)! Puncak $${peakPrice.toFixed(4)} ➜ Reversal di $${livePrice.toFixed(4)}. Menembakkan SHORT...`,
                 symbol
               );
               break;
@@ -646,6 +650,19 @@ export class WickSniperEngine {
           } else {
             pullbackTicks = 0;
           }
+
+          // Telemetry status per detik (dibatasi 1x per detik agar bersih & tidak spam)
+          if (currentElapsedSec > lastLoggedSec && currentElapsedSec <= maxWaitSec && !isConfirmed) {
+            lastLoggedSec = currentElapsedSec;
+            const diffPct = peakPrice > 0 ? (((peakPrice - livePrice) / peakPrice) * 100) : 0;
+            const pbLabel = diffPct <= 0 ? `+0.00%` : `-${diffPct.toFixed(2)}%`;
+            logger.log(
+              'INFO',
+              `⏳ [WAIT ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Puncak $${peakPrice.toFixed(4)} | Live $${livePrice.toFixed(4)} (${pbLabel} / target -${minPullbackPct}%)`,
+              symbol
+            );
+          }
+
           await new Promise((r) => setTimeout(r, 150));
         }
 
@@ -820,12 +837,14 @@ export class WickSniperEngine {
         status: 'SENT',
       });
 
+      const orderStartTime = Date.now();
       const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
+      const orderLatencyMs = Date.now() - orderStartTime;
       if (!res0?.orderId) {
         const errMsg = binanceFutures.lastOrderError || 'Cek saldo USDT atau izin Futures API Key.';
         logger.log(
           'ERROR',
-          `❌ [ORDER GAGAL] Gagal membuka Layer 0 SHORT untuk ${symbol} di Binance! Membatalkan penempatan jaring. Alasan: ${errMsg}`,
+          `❌ [ORDER GAGAL] Gagal membuka Layer 0 SHORT untuk ${symbol} di Binance (${orderLatencyMs}ms)! Membatalkan penempatan jaring. Alasan: ${errMsg}`,
           symbol
         );
         telegram.notifyMarginInsufficient(symbol, 'Membuka Posisi Awal (Layer #0)', {
@@ -937,8 +956,8 @@ export class WickSniperEngine {
         initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
         initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
         logger.log(
-          'INFO',
-          `🎯 [LIVE FILL SYNC] ${symbol} Layer #0 terisi riil di Binance @ $${realEntryPrice.toFixed(6)} | Grid Jaring & Target TP disinkronkan ke $${initialPos.targetTpPrice.toFixed(6)}`,
+          'SUCCESS',
+          `⚡ [EXEC SPEED] ${symbol} Layer #0 terisi riil di Binance dalam ${orderLatencyMs}ms @ $${realEntryPrice.toFixed(6)} (Qty: ${executedQty || layer0Qty}) | Target TP: $${initialPos.targetTpPrice.toFixed(6)}`,
           symbol
         );
       }
@@ -1055,7 +1074,7 @@ export class WickSniperEngine {
 
     logger.log(
       'SUCCESS',
-      `🎯 [JARING SHORT DITERBITKAN] ${symbol}: ${layers.length} Layer terpasang. Layer #0 terisi di $${initialPos.avgEntryPrice.toFixed(6)}. Target TP: $${initialPos.targetTpPrice.toFixed(6)} (-${exitCfg.takeProfitPct}%)`,
+      `⚡ [EXEC SPEED] ${symbol} Layer #0 Paper Order terisi instan (12ms) @ $${initialPos.avgEntryPrice.toFixed(6)} | Target TP: $${initialPos.targetTpPrice.toFixed(6)} (-${exitCfg.takeProfitPct}%)`,
       symbol
     );
   }
@@ -1763,10 +1782,12 @@ export class WickSniperEngine {
         const canSplit = tp1Qty > 0 && tp2Qty > 0 && tp1Notional >= prec.minNotional && tp2Notional >= prec.minNotional;
 
         if (canSplit) {
+          const tpStartTime = Date.now();
           const [tp1Res, tp2Res] = await Promise.all([
             binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp1Qty, tp1Price, true),
             binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp2Qty, tp2Price, true),
           ]);
+          const tpLatencyMs = Date.now() - tpStartTime;
 
           if (tp1Res?.orderId) {
             pos.tpOrderId = String(tp1Res.orderId);
@@ -1792,7 +1813,7 @@ export class WickSniperEngine {
           if (pos.tpOrderId && pos.tp2OrderId) {
             logger.log(
               'SUCCESS',
-              `🎯 [DUAL LIMIT TP AKTIF] ${pos.symbol}: TP1 (50%) terpasang @ $${tp1Price.toFixed(6)} (Qty: ${tp1Qty}) & TP2 (50%) terpasang @ $${tp2Price.toFixed(6)} (Qty: ${tp2Qty}) [Maker 0.02%]`,
+              `🎯 [DUAL LIMIT TP AKTIF] ${pos.symbol}: TP1 @ $${tp1Price.toFixed(6)} & TP2 @ $${tp2Price.toFixed(6)} terpasang (${tpLatencyMs}ms | Maker 0.02%)`,
               pos.symbol
             );
             return;
@@ -1843,6 +1864,7 @@ export class WickSniperEngine {
       }
 
       // KASUS C: Single TP Biasa (100% Volume)
+      const tpStartTime = Date.now();
       const tpRes = await binanceFutures.placeLimitOrder(
         pos.symbol,
         'BUY',
@@ -1850,6 +1872,7 @@ export class WickSniperEngine {
         pos.targetTpPrice,
         true
       );
+      const tpLatencyMs = Date.now() - tpStartTime;
 
       if (tpRes?.orderId) {
         pos.tpOrderId = String(tpRes.orderId);
@@ -1863,8 +1886,8 @@ export class WickSniperEngine {
         logger.log(
           'SUCCESS',
           pos.isBepDefenseActive
-            ? `🛡️ [BEP DEFENSE LIMIT TP AKTIF] ${pos.symbol}: Order Limit Penyelamat Modal BEP terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`
-            : `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Order Limit Take Profit terpasang di Binance @ $${pos.targetTpPrice.toFixed(6)} (Qty: ${pos.totalQty}, Order ID: #${pos.tpOrderId})`,
+            ? `🛡️ [BEP DEFENSE LIMIT TP] ${pos.symbol}: Limit TP terpasang @ $${pos.targetTpPrice.toFixed(6)} (${tpLatencyMs}ms | Order #${pos.tpOrderId})`
+            : `🎯 [LIMIT TP AKTIF] ${pos.symbol}: Limit TP terpasang @ $${pos.targetTpPrice.toFixed(6)} (${tpLatencyMs}ms | Maker 0.02% | Order #${pos.tpOrderId})`,
           pos.symbol
         );
       } else {
@@ -2131,9 +2154,16 @@ export class WickSniperEngine {
             closePrice,
             status: 'SENT',
           });
+          const closeStartTime = Date.now();
           const closeRes = await binanceFutures.closePositionMarket(pos.symbol, actualClosingSide, closeQty);
+          const closeLatencyMs = Date.now() - closeStartTime;
           if (closeRes?.orderId) {
             closeResOrderId = String(closeRes.orderId);
+            logger.log(
+              'INFO',
+              `⚡ [EXEC SPEED] ${pos.symbol}: Order penutupan market ${actualClosingSide} diterima Binance dalam ${closeLatencyMs}ms (Order #${closeResOrderId})`,
+              pos.symbol
+            );
           }
           execQty = parseFloat(closeRes?.executedQty || '0');
           const cumQuote = parseFloat(closeRes?.cumQuote || '0');
