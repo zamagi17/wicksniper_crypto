@@ -994,10 +994,16 @@ export class WickSniperEngine {
 
         // Hitung ulang target TP dan SL berdasarkan harga eksekusi riil Binance
         initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+        const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2;
+        initialPos.targetTp2Price = realEntryPrice * (1 - tp2Pct / 100);
         initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+        const ratio = exitCfg.partialTpRatio || 0.7;
+        const tpLogInfo = exitCfg.partialTpEnabled
+          ? `Dual TP: TP1 (${Math.round(ratio * 100)}% @ $${initialPos.targetTpPrice.toFixed(6)}) | TP2 (${100 - Math.round(ratio * 100)}% @ $${initialPos.targetTp2Price.toFixed(6)})`
+          : `Target TP: $${initialPos.targetTpPrice.toFixed(6)}`;
         logger.log(
           'SUCCESS',
-          `⚡ [EXEC SPEED] ${symbol} Layer #0 terisi riil di Binance dalam ${orderLatencyMs}ms @ $${realEntryPrice.toFixed(6)} (Qty: ${executedQty || layer0Qty}) | Target TP: $${initialPos.targetTpPrice.toFixed(6)}`,
+          `⚡ [EXEC SPEED] ${symbol} Layer #0 terisi riil di Binance dalam ${orderLatencyMs}ms @ $${realEntryPrice.toFixed(6)} (Qty: ${executedQty || layer0Qty}) | ${tpLogInfo}`,
           symbol
         );
       }
@@ -1112,9 +1118,14 @@ export class WickSniperEngine {
       exitCfg.hardStopLossPct
     );
 
+    const paperRatio = exitCfg.partialTpRatio || 0.7;
+    const paperTpLog = exitCfg.partialTpEnabled
+      ? `Dual TP: TP1 (${Math.round(paperRatio * 100)}% @ $${initialPos.targetTpPrice.toFixed(6)}) | TP2 (${100 - Math.round(paperRatio * 100)}% @ $${(initialPos.targetTp2Price || initialPos.avgEntryPrice * (1 - (exitCfg.takeProfit2Pct || exitCfg.takeProfitPct * 2) / 100)).toFixed(6)})`
+      : `Target TP: $${initialPos.targetTpPrice.toFixed(6)} (-${exitCfg.takeProfitPct}%)`;
+
     logger.log(
       'SUCCESS',
-      `⚡ [EXEC SPEED] ${symbol} Layer #0 Paper Order terisi instan (12ms) @ $${initialPos.avgEntryPrice.toFixed(6)} | Target TP: $${initialPos.targetTpPrice.toFixed(6)} (-${exitCfg.takeProfitPct}%)`,
+      `⚡ [EXEC SPEED] ${symbol} Layer #0 Paper Order terisi instan (12ms) @ $${initialPos.avgEntryPrice.toFixed(6)} | ${paperTpLog}`,
       symbol
     );
   }
@@ -1477,9 +1488,13 @@ export class WickSniperEngine {
         pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
       }
 
+      const recalculateTpLog = (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive)
+        ? `TP1: $${formatCryptoPrice(pos.targetTpPrice)} | TP2: $${formatCryptoPrice(pos.targetTp2Price || 0)}`
+        : `TP: $${formatCryptoPrice(pos.targetTpPrice)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`;
+
       logger.log(
         'INFO',
-        `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${formatCryptoPrice(pos.avgEntryPrice)} | Volume: ${pos.totalQty} | TP: $${formatCryptoPrice(pos.targetTpPrice)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`,
+        `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${formatCryptoPrice(pos.avgEntryPrice)} | Volume: ${pos.totalQty} | ${recalculateTpLog}`,
         pos.symbol
       );
 
@@ -1898,9 +1913,11 @@ export class WickSniperEngine {
           }
 
           if (pos.tpOrderId && pos.tp2OrderId) {
+            const tp1RatioStr = Math.round(ratio * 100);
+            const tp2RatioStr = 100 - tp1RatioStr;
             logger.log(
               'SUCCESS',
-              `🎯 [DUAL LIMIT TP AKTIF] ${pos.symbol}: TP1 @ $${tp1Price.toFixed(6)} & TP2 @ $${tp2Price.toFixed(6)} terpasang (${tpLatencyMs}ms | Maker 0.02%)`,
+              `🎯 [DUAL LIMIT TP AKTIF] ${pos.symbol}: TP1 (${tp1RatioStr}%: ${tp1Qty} koin @ $${tp1Price.toFixed(6)}) & TP2 (${tp2RatioStr}%: ${tp2Qty} koin @ $${tp2Price.toFixed(6)}) terpasang (${tpLatencyMs}ms | Maker 0.02%)`,
               pos.symbol
             );
             return;
@@ -2384,7 +2401,12 @@ export class WickSniperEngine {
 
           if (recentTrades.length > 0) {
             let closingTrades: any[] = [];
-            if (pos.tpOrderId || pos.tp2OrderId) {
+            if (pos.partialTpDone) {
+              // Jika pernah Partial TP, seluruh trade BUY sejak posisi dibuka adalah bagian dari closing posisi ini!
+              closingTrades = recentTrades.filter(
+                (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
+              );
+            } else if (pos.tpOrderId || pos.tp2OrderId) {
               closingTrades = recentTrades.filter(
                 (tr: any) =>
                   (pos.tpOrderId && String(tr.orderId) === String(pos.tpOrderId)) ||
@@ -2449,7 +2471,12 @@ export class WickSniperEngine {
               }
 
               actualFee = Math.round(binanceFeeSum * 1000) / 1000;
-              const netBinancePnl = binancePnlSum - actualFee;
+              const filledLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
+              const totalExpectedQty = filledLayers.length > 0
+                ? filledLayers.reduce((sum, l) => sum + l.qty, 0)
+                : pos.totalQty;
+              const isPartialMissing = pos.partialTpDone && (pos.partialRealizedPnl || 0) > 0 && totalTradedQty < totalExpectedQty * 0.8;
+              const netBinancePnl = binancePnlSum - actualFee + (isPartialMissing ? (pos.partialRealizedPnl || 0) : 0);
               actualRealizedPnl = Math.round(netBinancePnl * 100) / 100;
               const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
               actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
@@ -2513,8 +2540,15 @@ export class WickSniperEngine {
         this.virtualBalance += actualRealizedPnl;
       }
 
-      const filledLayersCount = (pos.layers || []).filter((l) => l.status === 'FILLED').length;
+      const filledLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
+      const filledLayersCount = filledLayers.length;
       const totalLayersCount = (pos.layers || []).length;
+      const totalTradeQty = filledLayers.length > 0
+        ? parseFloat(binanceFutures.formatQty(pos.symbol, filledLayers.reduce((sum, l) => sum + l.qty, 0)))
+        : pos.totalQty;
+      const totalTradeMargin = filledLayers.length > 0
+        ? Math.round(filledLayers.reduce((sum, l) => sum + l.marginUsdt, 0) * 100) / 100
+        : pos.totalMarginUsed;
 
       const trade: ClosedTrade = {
         id: Math.random().toString(36).substring(2, 9),
@@ -2522,8 +2556,8 @@ export class WickSniperEngine {
         side: 'SHORT',
         entryPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, pos.avgEntryPrice)),
         exitPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, actualExitPrice)),
-        qty: pos.totalQty,
-        marginUsed: pos.totalMarginUsed,
+        qty: totalTradeQty,
+        marginUsed: totalTradeMargin,
         realizedPnl: actualRealizedPnl,
         grossPnl: Math.round((actualRealizedPnl + actualFee) * 100) / 100,
         fee: actualFee,

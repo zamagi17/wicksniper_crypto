@@ -672,6 +672,40 @@ function renderActivePositions(positions) {
         ? 'text-green'
         : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
 
+      const isDualTp = currentConfig?.exit?.partialTpEnabled;
+      const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.7) * 100);
+      const tp2RatioPct = 100 - tp1RatioPct;
+
+      let tpStatusBadge = '';
+      let tpBannerHtml = '';
+      let slMetricLabel = `Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)`;
+      let slMetricHtml = `<span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>`;
+      let tpMetricLabel = `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
+      let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
+
+      if (pos.partialTpDone) {
+        tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">✅ TP 1 HIT (+${tp1RatioPct}%) • 🛡️ AUTO BEP AKTIF</span>`;
+        tpBannerHtml = `
+          <div style="background: linear-gradient(90deg, rgba(48, 209, 88, 0.12), rgba(0, 240, 255, 0.08)); border: 1px dashed rgba(48, 209, 88, 0.35); border-radius: 6px; padding: 7px 12px; margin: 10px 0 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11.5px;">
+            <span style="color: #30d158; font-weight: 600;">
+              🎯 <b>TP 1 SUDAH TERISI:</b> Cuan Maker <b>+$${(pos.partialRealizedPnl || 0).toFixed(2)} USDT</b> aman di dompet!
+            </span>
+            <span style="color: #00f0ff; font-weight: 600;">
+              🛡️ Sisa <b>${pos.totalQty} koin (${tp2RatioPct}%)</b> memburu TP 2 dengan <b>Auto BEP @ $${formatCryptoPrice(pos.hardSlPrice)}</b>
+            </span>
+          </div>
+        `;
+        slMetricLabel = `🛡️ Stop Loss (Auto BEP)`;
+        slMetricHtml = `<span style="color: #00f0ff; font-weight: 600;">$${formatCryptoPrice(pos.hardSlPrice)} <small style="color: #30d158;">(Zero Risk)</small></span>`;
+        tpMetricLabel = `🎯 Target TP 2 (Sisa ${tp2RatioPct}%)`;
+        tpMetricHtml = `<span class="text-green"><b>$${formatCryptoPrice(pos.targetTpPrice)}</b></span>`;
+      } else if (isDualTp) {
+        tpStatusBadge = `<span class="badge-tp-stage-dual" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: #00f0ff; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🎯 Dual TP: ${tp1RatioPct}% / ${tp2RatioPct}%</span>`;
+        tpMetricLabel = `🎯 Target TP 1 (${tp1RatioPct}%)`;
+        const tp2DisplayPrice = pos.targetTp2Price ? formatCryptoPrice(pos.targetTp2Price) : formatCryptoPrice(pos.avgEntryPrice * (1 - (currentConfig?.exit?.takeProfit2Pct || (currentConfig?.exit?.takeProfitPct || 1.2) * 2) / 100));
+        tpMetricHtml = `<span class="text-green"><b>$${formatCryptoPrice(pos.targetTpPrice)}</b> <small style="color: #00f0ff;">(TP2: $${tp2DisplayPrice})</small></span>`;
+      }
+
       const layersHtml = (pos.layers || [])
         .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
         .join('');
@@ -682,18 +716,22 @@ function renderActivePositions(positions) {
             <div class="pos-symbol">
               ${pos.symbol}
               <span class="badge-side short">SHORT ${pos.leverage}x</span>
+              ${tpStatusBadge}
               <span class="badge-margin-tag">💰 Margin: $${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
               <div class="pos-pnl">
                 <div class="pos-pnl-val ${pnlColor}">${pnlSign}$${(pos.unrealizedPnl || 0).toFixed(2)}</div>
                 <div class="pos-pnl-pct ${pnlColor}">${pnlSign}${(pos.pnlPct || 0).toFixed(1)}%</div>
+                ${pos.partialTpDone && (pos.partialRealizedPnl || 0) > 0 ? `<div style="font-size: 10px; color: #30d158; text-align: right; font-weight: 600;">+ Cuan TP1: +$${(pos.partialRealizedPnl || 0).toFixed(2)}</div>` : ''}
               </div>
               <button class="btn btn-sm btn-danger" onclick="manualClosePosition('${pos.symbol}')" title="Tutup posisi ini seketika di harga pasar">
                 ⚡ Tutup
               </button>
             </div>
           </div>
+
+          ${tpBannerHtml}
 
           <div class="pos-metrics">
             <div class="pos-metric-item">
@@ -709,12 +747,12 @@ function renderActivePositions(positions) {
               <span class="text-cyan"><b>$${(pos.totalMarginUsed || 0).toFixed(2)} USDT</b> <small class="text-muted">(${pos.totalQty} koin)</small></span>
             </div>
             <div class="pos-metric-item">
-              <small>Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)</small>
-              <span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>
+              <small>${tpMetricLabel}</small>
+              ${tpMetricHtml}
             </div>
             <div class="pos-metric-item">
-              <small>Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)</small>
-              <span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>
+              <small>${slMetricLabel}</small>
+              ${slMetricHtml}
             </div>
             <div class="pos-metric-item">
               <small>Sisa Waktu Hold</small>
