@@ -2578,6 +2578,7 @@ export class WickSniperEngine {
           qty: l.qty,
           marginUsdt: l.marginUsdt,
           status: l.status,
+          filledAt: l.filledAt,
         })),
         paramsSnapshot: pos.paramsSnapshot || this.captureParamsSnapshot(),
       };

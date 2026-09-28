@@ -797,7 +797,14 @@ function renderActivePositions(positions) {
       }
 
       const layersHtml = (pos.layers || [])
-        .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
+        .map((l) => {
+          let timeTag = '';
+          if (l.filledAt) {
+            const dt = new Date(l.filledAt);
+            timeTag = ` • ⏱️${dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`;
+          }
+          return `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status}${timeTag} • $${l.marginUsdt.toFixed(2)})</span>`;
+        })
         .join('');
 
       return `
@@ -1264,19 +1271,46 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
     let layersHtml = '';
     if (Array.isArray(layers) && layers.length > 0) {
+      let prevFilledTime = null;
       layersHtml = `
         <div class="td-section-title">🧱 Rincian Layer Jaring Terisi (${t.layersFilled || 'Grid'})</div>
         <div class="td-layers-wrap">
           ${layers
-            .map((l) => {
+            .map((l, idx) => {
               const priceNum = Number(l.price || 0);
               const marginNum = Number(l.marginUsdt || 0);
-              const layerIdx = l.layerIndex !== undefined ? l.layerIndex : '-';
+              const layerIdx = l.layerIndex !== undefined ? l.layerIndex : idx;
               const statusStr = l.status || 'PENDING';
+
+              // Hitung waktu terisi & jeda waktu antar layer
+              let timeHtml = '';
+              if (l.filledAt) {
+                const filledDate = new Date(l.filledAt);
+                const timeStr = filledDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                let diffStr = '';
+                if (prevFilledTime && l.filledAt >= prevFilledTime) {
+                  const diffSec = Math.round((l.filledAt - prevFilledTime) / 1000);
+                  if (diffSec < 60) {
+                    diffStr = `(+${diffSec}s)`;
+                  } else {
+                    const m = Math.floor(diffSec / 60);
+                    const s = diffSec % 60;
+                    diffStr = `(+${m}m ${s}s)`;
+                  }
+                } else if (layerIdx === 0 || idx === 0) {
+                  diffStr = '(Entry)';
+                }
+                timeHtml = `<span class="td-layer-time">⏱️ ${timeStr} <small style="opacity: 0.85;">${diffStr}</small></span>`;
+                prevFilledTime = l.filledAt;
+              } else if (statusStr === 'FILLED') {
+                timeHtml = `<span style="font-size: 10.5px; color: var(--text-muted);">⏱️ Terisi</span>`;
+              }
+
               return `
                 <div class="td-layer-row ${statusStr === 'FILLED' ? 'filled' : ''}">
                   <span><b>Layer #${layerIdx}</b>: $${formatCryptoPrice(priceNum)}</span>
                   <span>Margin: $${marginNum.toFixed(2)} USDT</span>
+                  ${timeHtml}
                   <span class="${statusStr === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${statusStr}]</b></span>
                 </div>
               `;

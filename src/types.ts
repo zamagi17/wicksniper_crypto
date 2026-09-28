@@ -188,6 +188,7 @@ export interface ClosedTrade {
     qty: number;
     marginUsdt: number;
     status: string;
+    filledAt?: number;
   }[];
   paramsSnapshot?: Record<string, any>;
 }
