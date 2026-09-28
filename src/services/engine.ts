@@ -540,38 +540,43 @@ export class WickSniperEngine {
         try {
           const client = await binanceFutures.getHttpClient();
           const klineRes = await client.get('/fapi/v1/klines', {
-            params: { symbol, interval: '1m', limit: 2 },
+            params: { symbol, interval: '1m', limit: 3 },
             timeout: 700,
           });
           if (Array.isArray(klineRes.data) && klineRes.data.length >= 2) {
-            const k = klineRes.data[klineRes.data.length - 2];
-            const prevCandle: Candle = {
-              openTime: k[0],
-              open: parseFloat(k[1]),
-              high: parseFloat(k[2]),
-              low: parseFloat(k[3]),
-              close: parseFloat(k[4]),
-              volume: parseFloat(k[5]),
-              closeTime: k[6],
-              tradesCount: k[8] ? parseInt(k[8]) : 0,
-            };
-
+            // Periksa candle 1m sebelumnya DAN candle 1m yang sedang berjalan (live bar)
+            const candlesToCheck = klineRes.data.slice(-2);
             const minRange = this.config.scanner.bottomRejectionMinRangePct ?? 1.5;
             const wickRatio = this.config.scanner.bottomRejectionWickRatio ?? 2.0;
 
-            if (isBottomRejectionCandle(prevCandle, minRange, wickRatio, 1.0)) {
-              const rangePct = (((prevCandle.high - prevCandle.low) / prevCandle.low) * 100).toFixed(1);
-              alert.status = 'SKIPPED';
-              alert.skipReason = `Candle 1m sebelumnya Bottom Rejection / Sweep ekstrem (Rentang: ${rangePct}%)`;
-              const sweepCooldownMins = this.config.scanner.cooldownMinutes || 10;
-              this.scanner.setCooldown(symbol, sweepCooldownMins);
-              logger.log(
-                'INFO',
-                `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada candle 1m sebelumnya (Rentang: ${rangePct}%). Diistirahatkan ${sweepCooldownMins}m.`,
-                symbol
-              );
-              db.saveSpike(alert).catch(() => { });
-              return;
+            for (let i = 0; i < candlesToCheck.length; i++) {
+              const k = candlesToCheck[i];
+              const candle: Candle = {
+                openTime: k[0],
+                open: parseFloat(k[1]),
+                high: parseFloat(k[2]),
+                low: parseFloat(k[3]),
+                close: parseFloat(k[4]),
+                volume: parseFloat(k[5]),
+                closeTime: k[6],
+                tradesCount: k[8] ? parseInt(k[8]) : 0,
+              };
+
+              if (isBottomRejectionCandle(candle, minRange, wickRatio, 1.0)) {
+                const rangePct = (((candle.high - candle.low) / candle.low) * 100).toFixed(1);
+                const barLabel = i === candlesToCheck.length - 1 ? 'candle 1m berjalan (live)' : 'candle 1m sebelumnya';
+                alert.status = 'SKIPPED';
+                alert.skipReason = `Terdeteksi Bottom Rejection / Sweep ekstrem pada ${barLabel} (Rentang: ${rangePct}%)`;
+                const sweepCooldownMins = this.config.scanner.cooldownMinutes || 10;
+                this.scanner.setCooldown(symbol, sweepCooldownMins);
+                logger.log(
+                  'INFO',
+                  `🛡️ [BOTTOM REJECTION FILTER] Lonjakan ${symbol} dilewati: Terdeteksi liquidity sweep bawah ekstrem pada ${barLabel} (Rentang: ${rangePct}%). Diistirahatkan ${sweepCooldownMins}m.`,
+                  symbol
+                );
+                db.saveSpike(alert).catch(() => { });
+                return;
+              }
             }
           }
         } catch (e: any) {

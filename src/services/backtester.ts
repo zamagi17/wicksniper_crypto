@@ -101,7 +101,12 @@ export function isBottomRejectionCandle(
   const lowerWick = Math.min(c.open, c.close) - c.low;
   const upperWick = c.high - Math.max(c.open, c.close);
 
-  const isExtremeLowerWick = lowerWick >= candleBodyEffective * wickToBodyRatio;
+  // Ekor bawah ekstrem: baik secara rasio terhadap body (Pinbar/Hammer),
+  // MAUPUN secara persentase mutlak dari harga terendah (Flash dump & bounce)
+  const lowerWickPct = (lowerWick / c.low) * 100;
+  const isExtremeLowerWick =
+    lowerWick >= candleBodyEffective * wickToBodyRatio ||
+    lowerWickPct >= minRangePct;
   const isLowerWickDominant = lowerWick >= upperWick * dominanceRatio;
 
   return isExtremeLowerWick && isLowerWickDominant;
