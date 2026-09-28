@@ -3075,6 +3075,10 @@ export class WickSniperEngine {
     return this.scanner.getRecentSpikes();
   }
 
+  public getScanner(): SpikeScanner {
+    return this.scanner;
+  }
+
   public getStatus(): EngineStatus {
     this.checkDailyReset();
     const todayStartTs = this.getStartOfDayWibTimestamp();

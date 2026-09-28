@@ -10,6 +10,7 @@ export interface TelegramConfig {
   notifyOnLayerFill?: boolean;
   notifyOnClose?: boolean;
   notifyOnEmergency?: boolean;
+  notifyOnAutoBlacklist?: boolean;
   heartbeatIntervalHours?: number;
 }
 
@@ -285,6 +286,7 @@ ${details}
   public async notifyAutoBlacklist(title: string, details: string, symbol?: string) {
     // Only send if emergency notifications are enabled and a specific flag is set
     if (this.config.notifyOnEmergency === false) return;
+    if (this.config.notifyOnAutoBlacklist === false) return;
     // Keep separate cooldown to avoid spam
     const key = `AUTOBL_${symbol || 'GLOBAL'}_${title}`;
     const now = Date.now();

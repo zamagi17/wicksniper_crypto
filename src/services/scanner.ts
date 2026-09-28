@@ -5,6 +5,15 @@ import fs from 'fs';
 import path from 'path';
 import { telegram } from './telegram';
 
+export interface BlacklistEntry {
+  symbol: string;
+  reason: string;
+  vol24?: number;
+  addedAt: number;
+  expiresAt?: number;
+  auto?: boolean;
+}
+
 export class SpikeScanner {
   private config: BotConfig['scanner'];
   private priceHistory: Map<string, TickerSnapshot[]> = new Map();
@@ -16,82 +25,109 @@ export class SpikeScanner {
   private lastTickReset: number = Date.now();
   private ticksPerSecond: number = 0;
   private lastDataAt: number = 0;
+  private blacklistMap: Map<string, BlacklistEntry> = new Map();
+  private blacklistSaveTimer: NodeJS.Timeout | null = null;
 
   constructor(config: BotConfig['scanner']) {
     this.config = config;
-    // ensure blacklist cache exists
-    try {
-      const cacheDir = path.resolve(__dirname, '../../data_cache');
-      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-      const blPath = path.join(cacheDir, 'blacklist.json');
-      if (!fs.existsSync(blPath)) fs.writeFileSync(blPath, JSON.stringify([]), 'utf-8');
-    } catch (e) {
-      // ignore filesystem errors
-    }
+    this.loadBlacklistFromDisk();
   }
 
   private getBlacklistPath(): string {
     return path.resolve(__dirname, '../../data_cache/blacklist.json');
   }
 
-  private loadBlacklist(): any[] {
+  private loadBlacklistFromDisk() {
     try {
       const p = this.getBlacklistPath();
-      if (!fs.existsSync(p)) return [];
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      if (!fs.existsSync(p)) {
+        fs.writeFileSync(p, '[]', 'utf-8');
+        return;
+      }
       const raw = fs.readFileSync(p, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (e) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        const now = Date.now();
+        for (const it of list) {
+          if (it && it.symbol && (!it.expiresAt || it.expiresAt > now)) {
+            this.blacklistMap.set(it.symbol, it);
+          }
+        }
+      }
+    } catch {
       // ignore
     }
-    return [];
   }
 
-  private saveBlacklist(list: any[]) {
+  private saveBlacklistToDisk() {
     try {
       const p = this.getBlacklistPath();
-      fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf-8');
-    } catch (e) {
+      const arr = Array.from(this.blacklistMap.values());
+      fs.writeFileSync(p, JSON.stringify(arr, null, 2), 'utf-8');
+    } catch {
       // ignore
     }
   }
 
-  private isBlacklisted(symbol: string): boolean {
-    try {
-      const list = this.loadBlacklist();
-      const now = Date.now();
-      const idx = list.findIndex((it: any) => it.symbol === symbol);
-      if (idx === -1) return false;
-      const entry = list[idx];
-      if (entry.expiresAt && entry.expiresAt < now) {
-        // remove expired
-        list.splice(idx, 1);
-        this.saveBlacklist(list);
-        return false;
-      }
-      return true;
-    } catch { return false; }
+  private scheduleSaveBlacklist() {
+    if (this.blacklistSaveTimer) return;
+    this.blacklistSaveTimer = setTimeout(() => {
+      this.blacklistSaveTimer = null;
+      this.saveBlacklistToDisk();
+    }, 1000);
   }
 
-  private addTemporaryBlacklist(symbol: string, entry: any) {
-    try {
-      const list = this.loadBlacklist();
-      const now = Date.now();
-      const exists = list.find((it: any) => it.symbol === symbol);
-      if (exists) {
-        // update
-        exists.reason = entry.reason || exists.reason;
-        exists.vol24 = entry.vol24 || exists.vol24;
-        exists.addedAt = exists.addedAt || now;
-        exists.expiresAt = entry.expiresAt || exists.expiresAt;
-      } else {
-        list.push({ symbol, ...entry });
+  public getBlacklist(): BlacklistEntry[] {
+    const now = Date.now();
+    let hasExpired = false;
+    for (const [sym, entry] of this.blacklistMap.entries()) {
+      if (entry.expiresAt && entry.expiresAt <= now) {
+        this.blacklistMap.delete(sym);
+        hasExpired = true;
       }
-      this.saveBlacklist(list);
-      logger.log('WARN', `🔒 [BLACKLIST] ${symbol} flagged: ${entry.reason}`, symbol);
-    } catch (e) {
-      // ignore
     }
+    if (hasExpired) this.scheduleSaveBlacklist();
+    return Array.from(this.blacklistMap.values());
+  }
+
+  public isBlacklisted(symbol: string): boolean {
+    const entry = this.blacklistMap.get(symbol);
+    if (!entry) return false;
+    if (entry.expiresAt && entry.expiresAt <= Date.now()) {
+      this.blacklistMap.delete(symbol);
+      this.scheduleSaveBlacklist();
+      return false;
+    }
+    return true;
+  }
+
+  public addTemporaryBlacklist(symbol: string, entry: Partial<BlacklistEntry>) {
+    const now = Date.now();
+    const existing = this.blacklistMap.get(symbol);
+    const updated: BlacklistEntry = {
+      symbol,
+      reason: entry.reason || existing?.reason || 'Auto-blacklisted',
+      vol24: entry.vol24 || existing?.vol24,
+      addedAt: existing?.addedAt || now,
+      expiresAt: entry.expiresAt || existing?.expiresAt || (now + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000)),
+      auto: entry.auto ?? true,
+    };
+    this.blacklistMap.set(symbol, updated);
+    this.scheduleSaveBlacklist();
+    logger.log('WARN', `🔒 [BLACKLIST] ${symbol} flagged: ${updated.reason}`, symbol);
+  }
+
+  public removeBlacklist(symbol: string): boolean {
+    const deleted = this.blacklistMap.delete(symbol);
+    if (deleted) this.scheduleSaveBlacklist();
+    return deleted;
+  }
+
+  public clearBlacklist(): void {
+    this.blacklistMap.clear();
+    this.saveBlacklistToDisk();
   }
 
   public getTotalMonitoredSymbols(): number {
@@ -221,50 +257,21 @@ export class SpikeScanner {
         continue;
       }
 
-      // New: Volume-spike blacklist detector (flag-only default)
-      try {
+      // Auto-blacklist volume ekstrim (hanya jika autoBlacklist aktif & batas atas max24hVolumeUsdt diset > 0)
+      if (this.config.autoBlacklist && this.config.max24hVolumeUsdt && this.config.max24hVolumeUsdt > 0) {
         const vol24 = parseFloat(t.q || '0');
-        const universeMultiplier = this.config.volumeSpikeMultiplier || 2;
-
-        // Absolute cap (if present in config)
-        if (this.config.max24hVolumeUsdt && this.config.max24hVolumeUsdt > 0) {
-          if (vol24 >= this.config.max24hVolumeUsdt) {
-            const reason = `24h volume ${vol24} >= max24hVolumeUsdt (${this.config.max24hVolumeUsdt})`;
-            if (this.config.autoBlacklist !== false) {
-              this.addTemporaryBlacklist(symbol, {
-                reason,
-                vol24,
-                addedAt: Date.now(),
-                expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
-                auto: true,
-              });
-              try { telegram.notifyAutoBlacklist('Auto Blacklist: Volume Ekstrem', reason, symbol); } catch (e) {}
-            } else {
-              logger.log('INFO', `AutoBlacklist disabled — would have flagged ${symbol}: ${reason}`, symbol);
-            }
-            continue;
-          }
-        }
-
-        // Relative rule vs configured min24hVolumeUsdt
-        if (this.config.min24hVolumeUsdt && vol24 >= (this.config.min24hVolumeUsdt * universeMultiplier)) {
-          const reason = `24h volume ${vol24} >= min24hVolumeUsdt * ${universeMultiplier}`;
-          if (this.config.autoBlacklist !== false) {
-            this.addTemporaryBlacklist(symbol, {
-              reason,
-              vol24,
-              addedAt: Date.now(),
-              expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
-              auto: true,
-            });
-            try { telegram.notifyAutoBlacklist('Auto Blacklist: Volume Spike Relatif', reason, symbol); } catch (e) {}
-          } else {
-            logger.log('INFO', `AutoBlacklist disabled — would have flagged ${symbol}: ${reason}`, symbol);
-          }
+        if (vol24 >= this.config.max24hVolumeUsdt) {
+          const reason = `24h volume $${Math.round(vol24).toLocaleString('en-US')} >= limit $${this.config.max24hVolumeUsdt.toLocaleString('en-US')}`;
+          this.addTemporaryBlacklist(symbol, {
+            reason,
+            vol24,
+            auto: true,
+          });
+          try {
+            telegram.notifyAutoBlacklist('Auto Blacklist: Volume Ekstrem', reason, symbol);
+          } catch {}
           continue;
         }
-      } catch (e) {
-        // ignore any parse errors
       }
 
       const currentPrice = parseFloat(t.c || t.p || '0');

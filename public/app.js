@@ -1332,6 +1332,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Spike Lookback', snap.spikeLookbackSeconds, currScanner.spikeLookbackSeconds, ' Detik')}
       ${renderCompareRow('Volume Spike Multiplier', snap.volumeSpikeMultiplier, currScanner.volumeSpikeMultiplier, 'x')}
       ${renderCompareRow('Min Volume 24 Jam', snap.min24hVolumeUsdt, currScanner.min24hVolumeUsdt, '', formatVolumeUsdt)}
+      ${renderCompareRow('Max Volume 24 Jam', snap.max24hVolumeUsdt, currScanner.max24hVolumeUsdt, '', formatVolumeUsdt)}
       ${renderCompareRow('Maksimal Spread Bid-Ask', snap.maxSpreadPct, currScanner.maxSpreadPct, '%')}
       ${renderCompareRow('Cooldown Antar Koin', snap.cooldownMinutes, currScanner.cooldownMinutes, ' Menit')}
       ${renderCompareRow('Filter Bottom Rejection (Sweep)', snap.skipBottomRejectionEnabled, currScanner.skipBottomRejectionEnabled)}
@@ -1574,6 +1575,7 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-spike-pct', snap.spikeMinPercent);
   setVal('cfg-cooldown', snap.cooldownMinutes);
   setVal('cfg-min-24h-vol', snap.min24hVolumeUsdt);
+  setVal('cfg-max-24h-vol', snap.max24hVolumeUsdt ?? 300000000);
   setVal('cfg-max-spread', snap.maxSpreadPct);
 
   if (snap.skipBottomRejectionEnabled !== undefined) {
@@ -1887,9 +1889,10 @@ function populateSettingsForm(cfg) {
   setVal('cfg-margin-type', cfg.marginType || 'CROSSED');
   setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 2.0);
   setVal('cfg-min-24h-vol', cfg.scanner?.min24hVolumeUsdt ?? 1500000);
+  setVal('cfg-max-24h-vol', cfg.scanner?.max24hVolumeUsdt ?? 300000000);
   setVal('cfg-max-spread', cfg.scanner?.maxSpreadPct ?? 0.25);
   const abCheckbox = document.getElementById('cfg-auto-blacklist');
-  if (abCheckbox) abCheckbox.checked = cfg.scanner?.autoBlacklist !== false;
+  if (abCheckbox) abCheckbox.checked = !!cfg.scanner?.autoBlacklist;
   setVal('cfg-max-24h-change', cfg.scanner?.max24hChangePct ?? 40);
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
@@ -2044,6 +2047,7 @@ function getSettingsFormData() {
       ...(currentConfig?.scanner || {}),
       spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '2.0')) || 2.0,
       min24hVolumeUsdt: parseFloat(getVal('cfg-min-24h-vol', '1500000')) || 0,
+      max24hVolumeUsdt: parseFloat(getVal('cfg-max-24h-vol', '300000000')) || 0,
       maxSpreadPct: parseFloat(getVal('cfg-max-spread', '0.25')) || 0,
     autoBlacklist: !!document.getElementById('cfg-auto-blacklist')?.checked,
       max24hChangePct: parseFloat(getVal('cfg-max-24h-change', '40')) || 0,
