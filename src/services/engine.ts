@@ -9,6 +9,18 @@ import { telegram } from './telegram';
 import { Candle } from './dataFetcher';
 import { isBottomRejectionCandle } from './backtester';
 
+function formatCryptoPrice(val: number): string {
+  if (!val || isNaN(val)) return '0.00';
+  const abs = Math.abs(val);
+  if (abs < 0.00001) return val.toFixed(8);
+  if (abs < 0.001) return val.toFixed(7);
+  if (abs < 0.1) return val.toFixed(6);
+  if (abs < 1) return val.toFixed(5);
+  if (abs < 10) return val.toFixed(4);
+  if (abs < 100) return val.toFixed(3);
+  return val.toFixed(2);
+}
+
 export class WickSniperEngine {
   private config: BotConfig;
   private configPath: string;
@@ -642,7 +654,7 @@ export class WickSniperEngine {
               confirmedEntryPrice = livePrice;
               logger.log(
                 'SNIPER',
-                `🎯 [UPPER WICK CONFIRMED ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Ekor atas valid (-${actualPullbackPct}%)! Puncak $${peakPrice.toFixed(4)} ➜ Reversal di $${livePrice.toFixed(4)}. Menembakkan SHORT...`,
+                `🎯 [UPPER WICK CONFIRMED ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Ekor atas valid (-${actualPullbackPct}%)! Puncak $${formatCryptoPrice(peakPrice)} ➜ Reversal di $${formatCryptoPrice(livePrice)}. Menembakkan SHORT...`,
                 symbol
               );
               break;
@@ -658,7 +670,7 @@ export class WickSniperEngine {
             const pbLabel = diffPct <= 0 ? `+0.00%` : `-${diffPct.toFixed(2)}%`;
             logger.log(
               'INFO',
-              `⏳ [WAIT ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Puncak $${peakPrice.toFixed(4)} | Live $${livePrice.toFixed(4)} (${pbLabel} / target -${minPullbackPct}%)`,
+              `⏳ [WAIT ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Puncak $${formatCryptoPrice(peakPrice)} | Live $${formatCryptoPrice(livePrice)} (${pbLabel} / target -${minPullbackPct}%)`,
               symbol
             );
           }
@@ -1226,7 +1238,7 @@ export class WickSniperEngine {
                 pos.targetTpPrice = pos.targetTp2Price;
                 logger.log(
                   'SUCCESS',
-                  `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke BEP: $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${pos.targetTpPrice.toFixed(4)}.`,
+                  `🎯 [STAGE 1 PARTIAL TP 50%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke BEP: $${formatCryptoPrice(pos.hardSlPrice)}. Sisa ${pos.totalQty} koin memburu Stage 2 TP @ $${formatCryptoPrice(pos.targetTpPrice)}.`,
                   pos.symbol
                 );
                 telegram.notifyPartialTp(
@@ -1415,7 +1427,7 @@ export class WickSniperEngine {
 
       logger.log(
         'INFO',
-        `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${pos.avgEntryPrice.toFixed(4)} | Volume: ${pos.totalQty} | TP: $${pos.targetTpPrice.toFixed(4)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`,
+        `📊 [RECALCULATE AVG] ${pos.symbol}: Entry Rata-rata baru: $${formatCryptoPrice(pos.avgEntryPrice)} | Volume: ${pos.totalQty} | TP: $${formatCryptoPrice(pos.targetTpPrice)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`,
         pos.symbol
       );
 
@@ -1498,7 +1510,7 @@ export class WickSniperEngine {
 
     logger.log(
       'SUCCESS',
-      `🎯 [STAGE 1 TP1 TERISI DI BINANCE] ${pos.symbol}: Cuan Maker +$${partialPnl.toFixed(2)} aman! Grid pending dibatalkan, Hard SL digeser ke BEP (Include Fee): $${pos.hardSlPrice.toFixed(4)}. Sisa ${pos.totalQty} koin memburu TP2 @ $${pos.targetTp2Price.toFixed(4)}.`,
+      `🎯 [STAGE 1 TP1 TERISI DI BINANCE] ${pos.symbol}: Cuan Maker +$${partialPnl.toFixed(2)} aman! Grid pending dibatalkan, Hard SL digeser ke BEP (Include Fee): $${formatCryptoPrice(pos.hardSlPrice)}. Sisa ${pos.totalQty} koin memburu TP2 @ $${formatCryptoPrice(pos.targetTp2Price || 0)}.`,
       pos.symbol
     );
     telegram.notifyPartialTp(
@@ -2593,7 +2605,7 @@ export class WickSniperEngine {
 
             logger.log(
               'INFO',
-              `⏳ [HOLD EXTENDED] ${pos.symbol}: Candle 1m MERAH (Harga $${pos.currentPrice.toFixed(4)} sedang turun). Menambah waktu hold +${extendSec}s (Perpanjangan ke-${pos.extensionCount}/${maxExtensions}). Sisa waktu baru: ${pos.holdRemainingSeconds}s`,
+              `⏳ [HOLD EXTENDED] ${pos.symbol}: Candle 1m MERAH (Harga $${formatCryptoPrice(pos.currentPrice)} sedang turun). Menambah waktu hold +${extendSec}s (Perpanjangan ke-${pos.extensionCount}/${maxExtensions}). Sisa waktu baru: ${pos.holdRemainingSeconds}s`,
               pos.symbol
             );
           }

@@ -13,6 +13,18 @@ export interface TelegramConfig {
   heartbeatIntervalHours?: number;
 }
 
+function formatCryptoPrice(val: number): string {
+  if (!val || isNaN(val)) return '0.00';
+  const abs = Math.abs(val);
+  if (abs < 0.00001) return val.toFixed(8);
+  if (abs < 0.001) return val.toFixed(7);
+  if (abs < 0.1) return val.toFixed(6);
+  if (abs < 1) return val.toFixed(5);
+  if (abs < 10) return val.toFixed(4);
+  if (abs < 100) return val.toFixed(3);
+  return val.toFixed(2);
+}
+
 export class TelegramService {
   private config: TelegramConfig = {
     enabled: false,
@@ -129,11 +141,11 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
 🪙 <b>Koin:</b> <code>${pos.symbol}</code>
 📊 <b>Aksi:</b> <b>SHORT ${pos.leverage}x</b>
 ⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)
-💵 <b>Layer #0 Entry:</b> <code>$${pos.avgEntryPrice.toFixed(4)}</code>
+💵 <b>Layer #0 Entry:</b> <code>$${formatCryptoPrice(pos.avgEntryPrice)}</code>
 🕸️ <b>Jaring Terpasang:</b> ${pos.layers.length} Layer (Jarak ${spacingPct}%)
 💰 <b>Modal Awal Layer #0:</b> $${pos.totalMarginUsed.toFixed(2)} USDT
-🎯 <b>Target TP:</b> <code>$${pos.targetTpPrice.toFixed(4)}</code> (-${tpPct}%)
-🛑 <b>Hard SL:</b> <code>$${pos.hardSlPrice.toFixed(4)}</code> (+${slPct}%)
+🎯 <b>Target TP:</b> <code>$${formatCryptoPrice(pos.targetTpPrice)}</code> (-${tpPct}%)
+🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (+${slPct}%)
 ⚙️ <b>Mode:</b> ${modeTag}`;
 
     this.sendMessage(msg).catch(() => {});
@@ -190,7 +202,7 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
 
 🪙 <b>Koin:</b> <code>${trade.symbol}</code> SHORT
 🏁 <b>Alasan Exit:</b> ${reasonLabel}
-💵 <b>Harga:</b> <code>$${trade.entryPrice}</code> ➜ <code>$${trade.exitPrice}</code>
+💵 <b>Harga:</b> <code>$${formatCryptoPrice(trade.entryPrice)}</code> ➜ <code>$${formatCryptoPrice(trade.exitPrice)}</code>
 ⏱️ <b>Durasi Trade:</b> ${durationStr}
 🕸️ <b>Layer Terisi:</b> ${trade.layersFilled} Layer
 💰 <b>Margin Dipakai:</b> $${trade.marginUsed.toFixed(2)} USDT${grossPnlLine}${feeLine}

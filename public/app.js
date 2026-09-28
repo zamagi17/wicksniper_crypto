@@ -424,6 +424,25 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function formatCryptoPrice(val) {
+  if (val === null || val === undefined || val === '') return '-';
+  const num = Number(val);
+  if (isNaN(num)) return String(val);
+  if (num === 0) return '0.00';
+
+  const abs = Math.abs(num);
+  let decimals = 2;
+  if (abs < 0.00001) decimals = 8;
+  else if (abs < 0.001) decimals = 7;
+  else if (abs < 0.1) decimals = 6;
+  else if (abs < 1) decimals = 5;
+  else if (abs < 10) decimals = 4;
+  else if (abs < 100) decimals = 3;
+  else decimals = 2;
+
+  return num.toFixed(decimals);
+}
+
 function formatDateTime(val, splitLines = false) {
   if (!val) return '-';
   let ts = val;
@@ -654,7 +673,7 @@ function renderActivePositions(positions) {
         : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
 
       const layersHtml = (pos.layers || [])
-        .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${l.price.toFixed(4)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
+        .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
         .join('');
 
       return `
@@ -679,11 +698,11 @@ function renderActivePositions(positions) {
           <div class="pos-metrics">
             <div class="pos-metric-item">
               <small>Entry Rata-rata</small>
-              <span>$${pos.avgEntryPrice.toFixed(4)}</span>
+              <span>$${formatCryptoPrice(pos.avgEntryPrice)}</span>
             </div>
             <div class="pos-metric-item">
               <small>Harga Saat Ini</small>
-              <span>$${pos.currentPrice.toFixed(4)}</span>
+              <span>$${formatCryptoPrice(pos.currentPrice)}</span>
             </div>
             <div class="pos-metric-item">
               <small>Margin Terpakai</small>
@@ -691,11 +710,11 @@ function renderActivePositions(positions) {
             </div>
             <div class="pos-metric-item">
               <small>Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)</small>
-              <span class="text-green">$${pos.targetTpPrice.toFixed(4)}</span>
+              <span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>
             </div>
             <div class="pos-metric-item">
               <small>Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)</small>
-              <span class="text-red">$${pos.hardSlPrice.toFixed(4)}</span>
+              <span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>
             </div>
             <div class="pos-metric-item">
               <small>Sisa Waktu Hold</small>
@@ -899,10 +918,10 @@ function renderSpikesTable(spikes) {
           <td>${timeStr}</td>
           <td>
             <b>${escapeHtml(s.symbol)}</b>
-            <span class="mobile-spike-sub">$${startPrice.toFixed(4)} ➜ $${currPrice.toFixed(4)}</span>
+            <span class="mobile-spike-sub">$${formatCryptoPrice(startPrice)} ➜ $${formatCryptoPrice(currPrice)}</span>
           </td>
-          <td>$${startPrice.toFixed(4)}</td>
-          <td>$${currPrice.toFixed(4)}</td>
+          <td>$${formatCryptoPrice(startPrice)}</td>
+          <td>$${formatCryptoPrice(currPrice)}</td>
           <td class="text-green"><b>+${surgePct.toFixed(2)}%</b></td>
           <td>${statusBadge}</td>
         </tr>
@@ -945,7 +964,7 @@ function renderClosedTradesTable(trades) {
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
           <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span> ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
-          <td>$${t.entryPrice || 0} ➜ $${t.exitPrice || 0}</td>
+          <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
           <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
           <td class="${pnlColor}"><b>${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
           <td>
@@ -1128,7 +1147,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               const statusStr = l.status || 'PENDING';
               return `
                 <div class="td-layer-row ${statusStr === 'FILLED' ? 'filled' : ''}">
-                  <span><b>Layer #${layerIdx}</b>: $${priceNum.toFixed(4)}</span>
+                  <span><b>Layer #${layerIdx}</b>: $${formatCryptoPrice(priceNum)}</span>
                   <span>Margin: $${marginNum.toFixed(2)} USDT</span>
                   <span class="${statusStr === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${statusStr}]</b></span>
                 </div>
@@ -1231,7 +1250,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           ` : ''}
           <div class="td-kpi-card">
             <div class="td-kpi-label">Entry ➜ Exit</div>
-            <div class="td-kpi-val" style="font-size: 12.5px;">$${t.entryPrice || 0} ➜ $${t.exitPrice || 0}</div>
+            <div class="td-kpi-val" style="font-size: 12.5px;">$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</div>
           </div>
           <div class="td-kpi-card">
             <div class="td-kpi-label">Total Margin Terpakai</div>
@@ -2655,7 +2674,7 @@ async function executeBacktest() {
               <td>${t.entryTime}</td>
               <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span>${partialBadge}</td>
               <td><span class="text-cyan font-mono"><b>$${t.marginUsed.toFixed(2)}</b></span></td>
-              <td>$${t.entryPrice} ➜ $${t.exitPrice}</td>
+              <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
               <td><b>${formatDurationHms((t.durationMinutes || 0) * 60)}</b></td>
               <td class="${tColor}"><b>${tSign}$${t.realizedPnl.toFixed(2)} (${tSign}${t.pnlPct.toFixed(1)}%)</b>${btFeeTag}</td>
               <td><small>${exitReasonLabel}</small></td>
