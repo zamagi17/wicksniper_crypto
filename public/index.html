@@ -352,33 +352,7 @@
             <p>Akses cepat menu bot wick sniper</p>
           </div>
         </div>
-        <button type="button" class="btn-close" onclick="closeMobileDrawer()">&times;</button>
       </div>
-
-    <!-- BLACKLIST MODAL -->
-    <div id="blacklist-modal" class="modal-backdrop" style="display:none;">
-      <div class="modal-card" style="max-width:720px; width:92%;">
-        <div class="modal-header">
-          <div class="modal-title-box">
-            <h3>🛑 Manage Blacklist</h3>
-          </div>
-          <button class="btn-close" onclick="closeBlacklistModal()">&times;</button>
-        </div>
-        <div class="modal-body" style="padding:12px 18px;">
-          <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
-            <div style="font-size:13px; color:var(--text-muted);">Daftar entri blacklist sementara (auto-flag oleh sistem).</div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn btn-danger" onclick="blacklistClear()">Clear All</button>
-              <button class="btn" onclick="refreshBlacklistList()">Refresh</button>
-            </div>
-          </div>
-
-          <div id="blacklist-list-container" style="max-height:360px; overflow:auto; border-radius:6px; border:1px solid var(--border-color); padding:8px; background:var(--panel-bg);">
-            <div id="blacklist-empty" style="padding:12px; color:var(--text-muted);">Memuat...</div>
-          </div>
-        </div>
-      </div>
-    </div>
 
       <div class="drawer-body">
         <div class="drawer-mode-indicator">
@@ -1065,6 +1039,34 @@
       <div class="modal-footer floating-footer">
         <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
         <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 Simpan Perubahan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BLACKLIST MODAL -->
+  <div id="blacklist-modal" class="modal-backdrop" style="z-index: 12000;" onclick="if(event.target===this)closeBlacklistModal()">
+    <div class="modal-card" style="max-width:720px; width:92%;">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3>🛑 Manage Blacklist</h3>
+        </div>
+        <button type="button" class="btn-close" onclick="closeBlacklistModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;">
+        <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+          <div style="font-size:13px; color:var(--text-muted);">Daftar entri koin yang sedang di-blacklist oleh sistem.</div>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="btn btn-danger" onclick="blacklistClear()">Clear All</button>
+            <button type="button" class="btn btn-secondary" onclick="refreshBlacklistList()">🔄 Refresh</button>
+          </div>
+        </div>
+
+        <div id="blacklist-list-container" style="max-height:360px; overflow-y:auto; border-radius:6px; border:1px solid var(--border-color); padding:8px; background:var(--panel-bg);">
+          <div id="blacklist-empty" style="padding:12px; color:var(--text-muted);">Memuat...</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:10px 20px; display:flex; justify-content:flex-end;">
+        <button type="button" class="btn btn-secondary" onclick="closeBlacklistModal()">Tutup</button>
       </div>
     </div>
   </div>

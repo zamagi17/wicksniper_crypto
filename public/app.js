@@ -15,12 +15,14 @@ function getAuthToken() {
 
 // BLACKLIST UI HANDLERS
 window.openBlacklistModal = async function () {
-  document.getElementById('blacklist-modal').style.display = 'block';
+  const modal = document.getElementById('blacklist-modal');
+  if (modal) modal.classList.add('open');
   await refreshBlacklistList();
 };
 
 window.closeBlacklistModal = function () {
-  document.getElementById('blacklist-modal').style.display = 'none';
+  const modal = document.getElementById('blacklist-modal');
+  if (modal) modal.classList.remove('open');
 };
 
 async function refreshBlacklistList() {
