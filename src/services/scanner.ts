@@ -1,6 +1,8 @@
 import { BotConfig, SpikeAlert, TickerSnapshot } from '../types';
 import { binanceFutures } from './binance';
 import { logger } from './logger';
+import fs from 'fs';
+import path from 'path';
 
 export class SpikeScanner {
   private config: BotConfig['scanner'];
@@ -16,6 +18,79 @@ export class SpikeScanner {
 
   constructor(config: BotConfig['scanner']) {
     this.config = config;
+    // ensure blacklist cache exists
+    try {
+      const cacheDir = path.resolve(__dirname, '../../data_cache');
+      if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+      const blPath = path.join(cacheDir, 'blacklist.json');
+      if (!fs.existsSync(blPath)) fs.writeFileSync(blPath, JSON.stringify([]), 'utf-8');
+    } catch (e) {
+      // ignore filesystem errors
+    }
+  }
+
+  private getBlacklistPath(): string {
+    return path.resolve(__dirname, '../../data_cache/blacklist.json');
+  }
+
+  private loadBlacklist(): any[] {
+    try {
+      const p = this.getBlacklistPath();
+      if (!fs.existsSync(p)) return [];
+      const raw = fs.readFileSync(p, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  }
+
+  private saveBlacklist(list: any[]) {
+    try {
+      const p = this.getBlacklistPath();
+      fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf-8');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  private isBlacklisted(symbol: string): boolean {
+    try {
+      const list = this.loadBlacklist();
+      const now = Date.now();
+      const idx = list.findIndex((it: any) => it.symbol === symbol);
+      if (idx === -1) return false;
+      const entry = list[idx];
+      if (entry.expiresAt && entry.expiresAt < now) {
+        // remove expired
+        list.splice(idx, 1);
+        this.saveBlacklist(list);
+        return false;
+      }
+      return true;
+    } catch { return false; }
+  }
+
+  private addTemporaryBlacklist(symbol: string, entry: any) {
+    try {
+      const list = this.loadBlacklist();
+      const now = Date.now();
+      const exists = list.find((it: any) => it.symbol === symbol);
+      if (exists) {
+        // update
+        exists.reason = entry.reason || exists.reason;
+        exists.vol24 = entry.vol24 || exists.vol24;
+        exists.addedAt = exists.addedAt || now;
+        exists.expiresAt = entry.expiresAt || exists.expiresAt;
+      } else {
+        list.push({ symbol, ...entry });
+      }
+      this.saveBlacklist(list);
+      logger.log('WARN', `🔒 [BLACKLIST] ${symbol} flagged: ${entry.reason}`, symbol);
+    } catch (e) {
+      // ignore
+    }
   }
 
   public getTotalMonitoredSymbols(): number {
@@ -138,6 +213,50 @@ export class SpikeScanner {
         if (quoteVol24h < this.config.min24hVolumeUsdt) {
           continue;
         }
+      }
+
+      // skip if already blacklisted
+      if (this.isBlacklisted(symbol)) {
+        continue;
+      }
+
+      // New: Volume-spike blacklist detector (flag-only default)
+      try {
+        const vol24 = parseFloat(t.q || '0');
+        const universeMultiplier = this.config.volumeSpikeMultiplier || 2;
+
+        // Absolute cap (if present in config)
+        if (this.config.max24hVolumeUsdt && this.config.max24hVolumeUsdt > 0) {
+          if (vol24 >= this.config.max24hVolumeUsdt) {
+            const reason = `24h volume ${vol24} >= max24hVolumeUsdt (${this.config.max24hVolumeUsdt})`;
+            this.addTemporaryBlacklist(symbol, {
+              reason,
+              vol24,
+              addedAt: Date.now(),
+              expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
+              auto: false,
+            });
+            // notify via telegram if configured
+            try { (require('./telegram').telegram).notifyEmergencyAlert('Auto Blacklist: Volume Ekstrem', reason, symbol); } catch (e) {}
+            continue;
+          }
+        }
+
+        // Relative rule vs configured min24hVolumeUsdt
+        if (this.config.min24hVolumeUsdt && vol24 >= (this.config.min24hVolumeUsdt * universeMultiplier)) {
+          const reason = `24h volume ${vol24} >= min24hVolumeUsdt * ${universeMultiplier}`;
+          this.addTemporaryBlacklist(symbol, {
+            reason,
+            vol24,
+            addedAt: Date.now(),
+            expiresAt: Date.now() + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000),
+            auto: false,
+          });
+          try { (require('./telegram').telegram).notifyEmergencyAlert('Auto Blacklist: Volume Spike Relatif', reason, symbol); } catch (e) {}
+          continue;
+        }
+      } catch (e) {
+        // ignore any parse errors
       }
 
       const currentPrice = parseFloat(t.c || t.p || '0');

@@ -27,6 +27,9 @@ export interface BotConfig {
     upperWickPullbackMaxWaitSeconds?: number;
     upperWickCooldownMinutes?: number;
     min24hVolumeUsdt?: number;
+    max24hVolumeUsdt?: number;
+    blacklistTemporaryHours?: number;
+    autoBlacklist?: boolean;
     maxSpreadPct?: number;
     tradeGapFilterEnabled?: boolean;
     maxTradeGapSeconds?: number;

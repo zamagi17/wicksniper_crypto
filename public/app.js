@@ -13,6 +13,94 @@ function getAuthToken() {
   }
 }
 
+// BLACKLIST UI HANDLERS
+window.openBlacklistModal = async function () {
+  document.getElementById('blacklist-modal').style.display = 'block';
+  await refreshBlacklistList();
+};
+
+window.closeBlacklistModal = function () {
+  document.getElementById('blacklist-modal').style.display = 'none';
+};
+
+async function refreshBlacklistList() {
+  const container = document.getElementById('blacklist-list-container');
+  const empty = document.getElementById('blacklist-empty');
+  if (empty) empty.innerText = 'Memuat...';
+  try {
+    const res = await authFetch('/api/blacklist').then((r) => r.json());
+    let list = res;
+    if (res && Array.isArray(res.list)) list = res.list;
+    if (!Array.isArray(list)) {
+      if (empty) empty.innerText = 'Gagal memuat daftar.';
+      return;
+    }
+    container.innerHTML = '';
+    if (list.length === 0) {
+      container.innerHTML = '<div style="padding:12px; color:var(--text-muted);">Tidak ada entri blacklist sementara.</div>';
+      return;
+    }
+    list.forEach((entry) => {
+      const el = document.createElement('div');
+      el.style.display = 'flex';
+      el.style.justifyContent = 'space-between';
+      el.style.alignItems = 'center';
+      el.style.padding = '8px 10px';
+      el.style.borderBottom = '1px dashed rgba(255,255,255,0.03)';
+
+      const left = document.createElement('div');
+      left.style.display = 'flex';
+      left.style.flexDirection = 'column';
+      left.innerHTML = `<strong>${entry.symbol}</strong><small style="color:var(--text-muted);">${entry.reason || ''} ${entry.expiresAt ? ' • Expires: ' + new Date(entry.expiresAt).toLocaleString() : ''}</small>`;
+
+      const right = document.createElement('div');
+      right.style.display = 'flex';
+      right.style.gap = '8px';
+
+      const btnRemove = document.createElement('button');
+      btnRemove.className = 'btn btn-danger';
+      btnRemove.innerText = 'Remove';
+      btnRemove.onclick = async () => {
+        if (!confirm(`Remove ${entry.symbol} from blacklist?`)) return;
+        try {
+          const resp = await authFetch('/api/blacklist/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: entry.symbol }),
+          });
+          const j = await resp.json();
+          if (!j || !j.success) {
+            alert('Gagal menghapus: ' + (j?.message || 'Unknown error'));
+            return;
+          }
+          await refreshBlacklistList();
+        } catch (err) {
+          alert('Gagal menghapus: ' + err.message);
+        }
+      };
+
+      right.appendChild(btnRemove);
+      el.appendChild(left);
+      el.appendChild(right);
+      container.appendChild(el);
+    });
+  } catch (err) {
+    if (empty) empty.innerText = 'Gagal memuat: ' + err.message;
+  }
+}
+
+async function blacklistClear() {
+  if (!confirm('Clear semua entri blacklist sementara?')) return;
+  try {
+    await authFetch('/api/blacklist/clear', { method: 'POST' }).then((r) => r.json());
+    await refreshBlacklistList();
+  } catch (err) {
+    alert('Gagal clear: ' + err.message);
+  }
+}
+
+window.refreshBlacklistList = refreshBlacklistList;
+
 function setAuthToken(token) {
   try {
     localStorage.setItem('wicksniper_auth_token', token);

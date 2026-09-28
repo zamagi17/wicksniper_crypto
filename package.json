@@ -5,7 +5,9 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node src/server.ts",
+    "blacklist": "ts-node scripts/blacklist.ts",
     "backtest": "ts-node src/backtest.ts",
+    "test:blacklist": "ts-node scripts/test-blacklist.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },

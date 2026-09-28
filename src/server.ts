@@ -12,6 +12,7 @@ import { telegram } from './services/telegram';
 import { db } from './services/db';
 
 import crypto from 'crypto';
+import fs from 'fs';
 
 const app = express();
 const server = http.createServer(app);
@@ -328,6 +329,44 @@ app.get('/api/spikes', async (req, res) => {
   const spikes = list.slice(offset, offset + limit);
 
   return res.json({ success: true, spikes, total, page, totalPages });
+});
+
+// Blacklist management endpoints (protected)
+app.get('/api/blacklist', requireAuth, (req, res) => {
+  try {
+    const p = path.resolve(__dirname, '../data_cache/blacklist.json');
+    if (!fs.existsSync(p)) return res.json({ success: true, list: [] });
+    const raw = fs.readFileSync(p, 'utf-8');
+    const list = JSON.parse(raw || '[]');
+    return res.json({ success: true, list });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/blacklist/clear', requireAuth, (req, res) => {
+  try {
+    const p = path.resolve(__dirname, '../data_cache/blacklist.json');
+    fs.writeFileSync(p, JSON.stringify([], null, 2), 'utf-8');
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/blacklist/remove', requireAuth, (req, res) => {
+  try {
+    const { symbol } = req.body || {};
+    if (!symbol) return res.status(400).json({ success: false, message: 'symbol required' });
+    const p = path.resolve(__dirname, '../data_cache/blacklist.json');
+    const list = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf-8')) : [];
+    const idx = list.findIndex((it: any) => it.symbol === symbol);
+    if (idx !== -1) list.splice(idx, 1);
+    fs.writeFileSync(p, JSON.stringify(list, null, 2), 'utf-8');
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 // WebSocket Realtime Broadcaster
