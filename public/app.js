@@ -25,69 +25,82 @@ window.closeBlacklistModal = function () {
   if (modal) modal.classList.remove('open');
 };
 
-async function refreshBlacklistList() {
+async function refreshBlacklistList(btnEl) {
+  const btn = (btnEl instanceof HTMLElement ? btnEl : null) || document.getElementById('btn-refresh-blacklist');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Memuat...';
+  }
   const container = document.getElementById('blacklist-list-container');
-  const empty = document.getElementById('blacklist-empty');
-  if (empty) empty.innerText = 'Memuat...';
   try {
-    const res = await authFetch('/api/blacklist').then((r) => r.json());
+    const res = await authFetch('/api/blacklist?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
     let list = res;
     if (res && Array.isArray(res.list)) list = res.list;
     if (!Array.isArray(list)) {
-      if (empty) empty.innerText = 'Gagal memuat daftar.';
+      if (container) container.innerHTML = '<div style="padding:12px; color:var(--text-danger);">Gagal memuat daftar blacklist.</div>';
       return;
     }
-    container.innerHTML = '';
-    if (list.length === 0) {
-      container.innerHTML = '<div style="padding:12px; color:var(--text-muted);">Tidak ada entri blacklist sementara.</div>';
-      return;
-    }
-    list.forEach((entry) => {
-      const el = document.createElement('div');
-      el.style.display = 'flex';
-      el.style.justifyContent = 'space-between';
-      el.style.alignItems = 'center';
-      el.style.padding = '8px 10px';
-      el.style.borderBottom = '1px dashed rgba(255,255,255,0.03)';
+    if (container) {
+      container.innerHTML = '';
+      if (list.length === 0) {
+        container.innerHTML = '<div style="padding:12px; color:var(--text-muted);">Tidak ada entri blacklist sementara.</div>';
+        return;
+      }
+      list.forEach((entry) => {
+        const el = document.createElement('div');
+        el.style.display = 'flex';
+        el.style.justifyContent = 'space-between';
+        el.style.alignItems = 'center';
+        el.style.padding = '8px 10px';
+        el.style.borderBottom = '1px dashed rgba(255,255,255,0.03)';
 
-      const left = document.createElement('div');
-      left.style.display = 'flex';
-      left.style.flexDirection = 'column';
-      left.innerHTML = `<strong>${entry.symbol}</strong><small style="color:var(--text-muted);">${entry.reason || ''} ${entry.expiresAt ? ' • Expires: ' + new Date(entry.expiresAt).toLocaleString() : ''}</small>`;
+        const left = document.createElement('div');
+        left.style.display = 'flex';
+        left.style.flexDirection = 'column';
+        left.innerHTML = `<strong>${entry.symbol}</strong><small style="color:var(--text-muted);">${entry.reason || ''} ${entry.expiresAt ? ' • Expires: ' + new Date(entry.expiresAt).toLocaleString() : ''}</small>`;
 
-      const right = document.createElement('div');
-      right.style.display = 'flex';
-      right.style.gap = '8px';
+        const right = document.createElement('div');
+        right.style.display = 'flex';
+        right.style.gap = '8px';
 
-      const btnRemove = document.createElement('button');
-      btnRemove.className = 'btn btn-danger';
-      btnRemove.innerText = 'Remove';
-      btnRemove.onclick = async () => {
-        if (!confirm(`Remove ${entry.symbol} from blacklist?`)) return;
-        try {
-          const resp = await authFetch('/api/blacklist/remove', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol: entry.symbol }),
-          });
-          const j = await resp.json();
-          if (!j || !j.success) {
-            alert('Gagal menghapus: ' + (j?.message || 'Unknown error'));
-            return;
+        const btnRemove = document.createElement('button');
+        btnRemove.className = 'btn btn-danger';
+        btnRemove.innerText = 'Remove';
+        btnRemove.onclick = async () => {
+          if (!confirm(`Remove ${entry.symbol} from blacklist?`)) return;
+          try {
+            const resp = await authFetch('/api/blacklist/remove', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ symbol: entry.symbol }),
+            });
+            const j = await resp.json();
+            if (!j || !j.success) {
+              alert('Gagal menghapus: ' + (j?.message || 'Unknown error'));
+              return;
+            }
+            await refreshBlacklistList();
+          } catch (err) {
+            alert('Gagal menghapus: ' + err.message);
           }
-          await refreshBlacklistList();
-        } catch (err) {
-          alert('Gagal menghapus: ' + err.message);
-        }
-      };
+        };
 
-      right.appendChild(btnRemove);
-      el.appendChild(left);
-      el.appendChild(right);
-      container.appendChild(el);
-    });
+        right.appendChild(btnRemove);
+        el.appendChild(left);
+        el.appendChild(right);
+        container.appendChild(el);
+      });
+    }
   } catch (err) {
-    if (empty) empty.innerText = 'Gagal memuat: ' + err.message;
+    if (container) container.innerHTML = `<div style="padding:12px; color:var(--text-danger);">Gagal memuat: ${err.message}</div>`;
+  } finally {
+    if (btn) {
+      btn.innerText = '✅ Terupdate!';
+      setTimeout(() => {
+        btn.innerText = '🔄 Refresh';
+        btn.disabled = false;
+      }, 1000);
+    }
   }
 }
 
