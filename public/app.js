@@ -1888,6 +1888,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 2.0);
   setVal('cfg-min-24h-vol', cfg.scanner?.min24hVolumeUsdt ?? 1500000);
   setVal('cfg-max-spread', cfg.scanner?.maxSpreadPct ?? 0.25);
+  const abCheckbox = document.getElementById('cfg-auto-blacklist');
+  if (abCheckbox) abCheckbox.checked = cfg.scanner?.autoBlacklist !== false;
   setVal('cfg-max-24h-change', cfg.scanner?.max24hChangePct ?? 40);
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
@@ -2042,6 +2044,7 @@ function getSettingsFormData() {
       spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '2.0')) || 2.0,
       min24hVolumeUsdt: parseFloat(getVal('cfg-min-24h-vol', '1500000')) || 0,
       maxSpreadPct: parseFloat(getVal('cfg-max-spread', '0.25')) || 0,
+    autoBlacklist: !!document.getElementById('cfg-auto-blacklist')?.checked,
       max24hChangePct: parseFloat(getVal('cfg-max-24h-change', '40')) || 0,
       skipBottomRejectionEnabled: !!document.getElementById('cfg-bottom-rejection-enabled')?.checked,
       bottomRejectionMinRangePct: parseFloat(getVal('cfg-bottom-rejection-range', '1.5')) || 1.5,

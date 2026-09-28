@@ -530,6 +530,13 @@
             <input type="number" id="cfg-max-spread" min="0.05" max="2.0" step="0.05" class="form-control" placeholder="0.25">
             <small class="form-hint">Proteksi orderbook kosong. Lewati jika selisih Ask - Bid > X% (Standar: 0.25%).</small>
           </div>
+          <div class="form-group" style="flex: 1; align-self: center; display:flex; gap:8px; align-items:center;">
+            <label style="margin:0; display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="cfg-auto-blacklist" style="width:16px; height:16px;" />
+              <span style="font-weight:600;">Aktifkan Auto Blacklist (by volume)</span>
+            </label>
+            <small class="form-hint" style="margin-left:6px;">Jika aktif, scanner otomatis menambahkan koin dengan volume ekstrim ke blacklist sementara.</small>
+          </div>
         </div>
 
         <div class="form-row" style="background: rgba(255, 59, 48, 0.06); border: 1px dashed rgba(255, 59, 48, 0.4); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
