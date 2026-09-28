@@ -686,20 +686,28 @@
           </div>
         </div>
 
-        <!-- PARTIAL TAKE PROFIT & BEP PROTECTION -->
+        <!-- PARTIAL TAKE PROFIT & BEP PROTECTION (DUAL TP 1 & TP 2) -->
         <div class="form-row" style="background: rgba(0, 240, 255, 0.03); border: 1px dashed rgba(0, 240, 255, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
               <input type="checkbox" id="cfg-partial-tp-enabled" onchange="togglePartialTpInput()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
-              🎯 Aktifkan Stage 1 Partial TP (Amankan Cuan + BEP Protection)
+              🎯 Aktifkan Stage 1 & Stage 2 Take Profit (Dual TP + Auto BEP Defense)
             </label>
-            <small class="form-hint">Saat TP awal tercapai, cairkan sebagian posisi untuk mengunci profit, lalu otomatis geser Stop-Loss sisa posisi ke titik BEP (bebas risiko 100%).</small>
+            <small class="form-hint">Saat TP 1 tercapai, cairkan sebagian posisi (misal 70%) untuk mengunci profit, lalu otomatis geser Stop-Loss sisa posisi (misal 30%) ke titik BEP (+ buffer parameter BEP). Sisa koin memburu TP 2 bebas risiko!</small>
           </div>
 
-          <div class="form-group" id="partial-tp-ratio-group" style="grid-column: span 2;">
-            <label>Porsi Pencairan TP Tahap 1 (%)</label>
-            <input type="number" id="cfg-partial-tp-ratio" min="10" max="90" step="5" class="form-control" placeholder="50">
-            <small class="form-hint">Rekomendasi: 50% (cairkan 50% saat TP awal, sisa 50% memburu cuan lebih besar di bawahnya).</small>
+          <div id="partial-tp-ratio-group" style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Target TP Tahap 2 (%)</label>
+              <input type="number" id="cfg-tp2-pct" step="0.1" class="form-control" placeholder="2.4">
+              <small class="form-hint">Target profit sisa posisi (TP 1 diatur di atas, misal 1.2%). Kosongkan = 2x TP 1.</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Porsi Pencairan TP 1 (%)</label>
+              <input type="number" id="cfg-partial-tp-ratio" min="10" max="90" step="5" class="form-control" placeholder="70" oninput="updateTpPortionHint()">
+              <small class="form-hint" id="tp-portion-hint">Cairkan 70% di TP 1, sisa 30% memburu TP 2 dengan proteksi Auto BEP.</small>
+            </div>
           </div>
         </div>
 
@@ -834,10 +842,38 @@
             <small class="form-hint">Jika aktif, bot HANYA memantau koin yang ada di daftar ini.</small>
           </div>
 
-          <div class="form-group" id="whitelist-input-group">
-            <label>Daftar Koin Whitelist (Pisahkan dengan koma)</label>
-            <input type="text" id="cfg-whitelist-symbols" class="form-control" placeholder="AKEUSDT, BTWUSDT, CROSSUSDT">
-            <small class="form-hint">Contoh: AKEUSDT, BTWUSDT, SAGAUSDT</small>
+          <div class="form-group full-width" id="whitelist-input-group" style="grid-column: span 2;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label style="margin: 0; font-weight: 600;">Daftar Koin Whitelist</label>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="cfg-whitelist-count" class="coin-selector-badge">0 koin terpilih</span>
+                <button type="button" class="btn-coin-action" onclick="refreshCoinCache(this, true)" title="Sinkronkan daftar koin terbaru dari Binance">🔄 Refresh Binance</button>
+              </div>
+            </div>
+
+            <!-- Toolbar Pencarian & Aksi Cepat -->
+            <div class="coin-selector-toolbar">
+              <div class="coin-selector-search">
+                <input type="text" id="cfg-whitelist-search" class="form-control" placeholder="🔍 Cari koin... (misal: BTC, PEPE, SOL)" oninput="filterCoinList('cfg-whitelist')" />
+              </div>
+              <div class="coin-selector-actions">
+                <button type="button" class="btn-coin-action" onclick="selectAllFilteredCoins('cfg-whitelist')">☑️ Pilih Hasil Filter</button>
+                <button type="button" class="btn-coin-action" onclick="clearAllSelectedCoins('cfg-whitelist')">✖️ Hapus Semua</button>
+                <button type="button" class="btn-coin-action" onclick="toggleRawInput('cfg-whitelist-raw-wrap')">📝 Input Manual (Teks)</button>
+              </div>
+            </div>
+
+            <!-- Scrollable Checkbox Grid -->
+            <div id="cfg-whitelist-list" class="coin-selector-grid">
+              <div style="padding: 12px; color: var(--text-muted); font-size: 11px;">Memuat daftar koin Binance...</div>
+            </div>
+
+            <!-- Input Manual / Sinkronisasi Tersembunyi tapi Aksesibel -->
+            <div id="cfg-whitelist-raw-wrap" style="display: none; margin-top: 8px;">
+              <input type="text" id="cfg-whitelist-symbols" class="form-control" placeholder="AKEUSDT, BTWUSDT, CROSSUSDT" onchange="syncCoinsFromInput('cfg-whitelist')" />
+              <small class="form-hint">Pisahkan dengan koma. Checkbox di atas akan otomatis sinkron dengan teks ini.</small>
+            </div>
+            <small class="form-hint" style="margin-top: 4px;">Daftar seluruh koin aktif USDT Binance Futures dicache 1x sehari untuk performa kilat.</small>
           </div>
         </div>
 
@@ -1000,9 +1036,37 @@
         <div class="backtest-controls-grid">
           <!-- TARGET SYMBOLS -->
           <div class="form-group full-width">
-            <label>Target Koin Futures (Pisahkan dengan koma):</label>
-            <input type="text" id="bt-symbols" class="form-control" placeholder="Contoh: BTCUSDT, ETHUSDT (Default otomatis dari Whitelist Koin)" />
-            <small class="form-hint">Mendukung semua koin perpetual USDT di Binance Futures. Default otomatis mengambil daftar Whitelist Koin di Pengaturan.</small>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label style="margin: 0; font-weight: 600;">Target Koin Futures Backtest:</label>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="bt-symbols-count" class="coin-selector-badge">0 koin terpilih</span>
+                <button type="button" class="btn-coin-action" onclick="copyWhitelistToBacktest()" title="Samakan pilihan koin dengan koin yang ada di Whitelist">📋 Samakan dgn Whitelist</button>
+              </div>
+            </div>
+
+            <!-- Toolbar Pencarian & Aksi Cepat -->
+            <div class="coin-selector-toolbar">
+              <div class="coin-selector-search">
+                <input type="text" id="bt-symbols-search" class="form-control" placeholder="🔍 Cari koin... (misal: BTC, PEPE, SOL)" oninput="filterCoinList('bt-symbols')" />
+              </div>
+              <div class="coin-selector-actions">
+                <button type="button" class="btn-coin-action" onclick="selectAllFilteredCoins('bt-symbols')">☑️ Pilih Hasil Filter</button>
+                <button type="button" class="btn-coin-action" onclick="clearAllSelectedCoins('bt-symbols')">✖️ Hapus Semua</button>
+                <button type="button" class="btn-coin-action" onclick="toggleRawInput('bt-symbols-raw-wrap')">📝 Input Manual (Teks)</button>
+              </div>
+            </div>
+
+            <!-- Scrollable Checkbox Grid -->
+            <div id="bt-symbols-list" class="coin-selector-grid">
+              <div style="padding: 12px; color: var(--text-muted); font-size: 11px;">Memuat daftar koin Binance...</div>
+            </div>
+
+            <!-- Input Manual / Sinkronisasi Tersembunyi tapi Aksesibel -->
+            <div id="bt-symbols-raw-wrap" style="display: none; margin-top: 8px;">
+              <input type="text" id="bt-symbols" class="form-control" placeholder="Contoh: BTCUSDT, ETHUSDT" onchange="syncCoinsFromInput('bt-symbols')" />
+              <small class="form-hint">Pisahkan dengan koma. Checkbox di atas akan otomatis sinkron dengan teks ini.</small>
+            </div>
+            <small class="form-hint" style="margin-top: 4px;">Pilih koin yang ingin di-backtest dengan mencentang daftar koin di atas.</small>
           </div>
 
           <!-- QUICK PRESETS -->
@@ -1125,18 +1189,23 @@
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
               <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan); margin: 0;">
                 <input type="checkbox" id="bt-partial-tp-enabled" onchange="toggleBtPartialTp()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
-                🎯 Aktifkan Stage 1 Partial TP & BEP Protection
+                🎯 Aktifkan Stage 1 & Stage 2 Partial TP (Dual TP + Auto BEP)
               </label>
-              <div id="bt-partial-tp-ratio-container" style="display: none; align-items: center; gap: 6px;">
-                <label style="font-size: 12px; margin: 0; color: var(--color-muted);">Porsi Cair:</label>
-                <div style="display: inline-flex; align-items: center; gap: 4px;">
-                  <input type="number" id="bt-partial-tp-ratio" value="50" min="10" max="90" step="5" style="width: 65px; padding: 4px 8px; height: 28px;" class="form-control" />
+              <div id="bt-partial-tp-ratio-container" style="display: none; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="display: inline-flex; align-items: center; gap: 6px;">
+                  <label style="font-size: 12px; margin: 0; color: var(--color-muted);">TP2:</label>
+                  <input type="number" id="bt-tp2-pct" value="2.4" step="0.1" style="width: 65px; padding: 4px 8px; height: 28px;" class="form-control" placeholder="2.4" />
+                  <span style="font-size: 12px; color: var(--color-muted);">%</span>
+                </div>
+                <div style="display: inline-flex; align-items: center; gap: 6px;">
+                  <label style="font-size: 12px; margin: 0; color: var(--color-muted);">Porsi TP1:</label>
+                  <input type="number" id="bt-partial-tp-ratio" value="70" min="10" max="90" step="5" style="width: 65px; padding: 4px 8px; height: 28px;" class="form-control" />
                   <span style="font-size: 12px; color: var(--color-muted);">%</span>
                 </div>
               </div>
             </div>
             <small class="form-hint" style="margin-top: 4px; display: block;">
-              Saat TP awal tercapai, cairkan sebagian posisi untuk kunci cuan, lalu otomatis pindahkan SL sisa posisi ke titik BEP (0% risiko). Sisa koin mengejar Stage 2 TP.
+              Saat TP 1 tercapai, cairkan sebagian posisi (misal 70%), lalu pindahkan SL sisa posisi (misal 30%) ke titik BEP (+ buffer). Sisa koin mengejar TP 2.
             </small>
           </div>
 

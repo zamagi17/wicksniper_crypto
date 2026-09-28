@@ -319,6 +319,30 @@ export class BinanceFuturesClient {
     }
   }
 
+  private tradableSymbolsCache: { list: string[]; timestamp: number } | null = null;
+
+  public async getTradableSymbols(forceRefresh = false): Promise<string[]> {
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    if (
+      !forceRefresh &&
+      this.tradableSymbolsCache &&
+      Date.now() - this.tradableSymbolsCache.timestamp < ONE_DAY_MS &&
+      this.tradableSymbolsCache.list.length > 0
+    ) {
+      return this.tradableSymbolsCache.list;
+    }
+
+    if (this.precisions.size === 0 || forceRefresh) {
+      await this.loadExchangeInfo();
+    }
+
+    const list = Array.from(this.precisions.keys()).sort();
+    if (list.length > 0) {
+      this.tradableSymbolsCache = { list, timestamp: Date.now() };
+    }
+    return list;
+  }
+
   public getPrecision(symbol: string): SymbolPrecision {
     const existing = this.precisions.get(symbol);
     if (existing) return existing;

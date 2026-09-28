@@ -1179,7 +1179,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Trailing TP (Callback)', snap.trailingTpEnabled, currExit.trailingTpEnabled)}
       ${renderCompareRow('Jarak Callback Trailing TP', snap.trailingCallbackPct, currExit.trailingCallbackPct, '%')}
       ${renderCompareRow('Stage 1 Partial TP', snap.partialTpEnabled, currExit.partialTpEnabled)}
-      ${renderCompareRow('Porsi Pencairan Partial TP', snap.partialTpRatio, currExit.partialTpRatio, '', formatRatioPct)}
+      ${renderCompareRow('Porsi Pencairan TP 1', snap.partialTpRatio, currExit.partialTpRatio, '', formatRatioPct)}
+      ${renderCompareRow('Target TP Tahap 2', snap.takeProfit2Pct, currExit.takeProfit2Pct, '%')}
       ${renderCompareRow('Trailing Stop Loss', snap.trailingSlEnabled, currExit.trailingSlEnabled)}
       ${renderCompareRow('Perpanjang Hold Saat Candle Merah', snap.extendHoldOnRedCandleEnabled, currExit.extendHoldOnRedCandleEnabled)}
       ${renderCompareRow('Durasi Ekstensi Candle Merah', snap.extendHoldSeconds, currExit.extendHoldSeconds, ' Detik')}
@@ -1404,6 +1405,10 @@ function applySnapshotParamsToConfig() {
   if (snap.partialTpRatio !== undefined) {
     const r = snap.partialTpRatio;
     setVal('cfg-partial-tp-ratio', r <= 1 ? Math.round(r * 100) : r);
+    if (typeof updateTpPortionHint === 'function') updateTpPortionHint();
+  }
+  if (snap.takeProfit2Pct !== undefined) {
+    setVal('cfg-tp2-pct', snap.takeProfit2Pct);
   }
 
   if (snap.extendHoldOnRedCandleEnabled !== undefined) {
@@ -1470,6 +1475,15 @@ function applySnapshotParamsToConfig() {
   if (snap.whitelistEnabled !== undefined) {
     setChecked('cfg-whitelist-enabled', snap.whitelistEnabled);
     if (typeof toggleWhitelistInput === 'function') toggleWhitelistInput();
+  }
+  if (Array.isArray(snap.whitelistSymbols)) {
+    setVal('cfg-whitelist-symbols', snap.whitelistSymbols.join(', '));
+    const wlInst = coinSelectorInstances['cfg-whitelist'];
+    if (wlInst) {
+      wlInst.selected.clear();
+      snap.whitelistSymbols.forEach((s) => wlInst.selected.add(s.toUpperCase()));
+      renderCoinSelector('cfg-whitelist');
+    }
   }
 
   // 4. Mode Akun & Manajemen Risiko
@@ -1796,7 +1810,9 @@ function populateSettingsForm(cfg) {
     ptCheckbox.checked = !!cfg.exit?.partialTpEnabled;
     togglePartialTpInput();
   }
-  setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 50);
+  setVal('cfg-tp2-pct', cfg.exit?.takeProfit2Pct ?? (cfg.exit?.takeProfitPct ? Math.round(cfg.exit.takeProfitPct * 2 * 10) / 10 : 2.4));
+  setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 70);
+  if (typeof updateTpPortionHint === 'function') updateTpPortionHint();
 
   // Emergency BEP Defense
   const bepDefCheckbox = document.getElementById('cfg-bep-defense-enabled');
@@ -1871,7 +1887,14 @@ function populateSettingsForm(cfg) {
     wlCheckbox.checked = !!cfg.scanner?.whitelistEnabled;
     toggleWhitelistInput();
   }
-  setVal('cfg-whitelist-symbols', (cfg.scanner?.whitelistSymbols || []).join(', '));
+  const wlSymbols = (cfg.scanner?.whitelistSymbols || []).filter(Boolean);
+  setVal('cfg-whitelist-symbols', wlSymbols.join(', '));
+  const wlInst = coinSelectorInstances['cfg-whitelist'];
+  if (wlInst) {
+    wlInst.selected.clear();
+    wlSymbols.forEach((s) => wlInst.selected.add(s.toUpperCase()));
+    renderCoinSelector('cfg-whitelist');
+  }
   setVal('cfg-exclude-symbols', (cfg.scanner?.excludeSymbols ?? ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT']).join(', '));
 }
 
@@ -1932,8 +1955,9 @@ function getSettingsFormData() {
       bepFastFillMinLayers: parseInt(getVal('cfg-bep-fast-fill-layers', '0'), 10) || 0,
       bepBufferPct: parseFloat(getVal('cfg-bep-buffer-pct', '0.08')) || 0.08,
       bepCooldownMinutes: parseInt(getVal('cfg-bep-cooldown', '15'), 10) || 15,
+      takeProfit2Pct: parseFloat(getVal('cfg-tp2-pct', '2.4')) || 2.4,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
-      partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '50')) || 50) / 100,
+      partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '70')) || 70) / 100,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
       trailingTpEnabled: !!document.getElementById('cfg-trailing-tp-enabled')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-trailing-tp-callback', '0.4')) || 0.4,
@@ -2132,6 +2156,241 @@ async function testBinanceConnection() {
 
 // ==========================================
 // ==========================================
+// ACTIVE COIN LIST & CACHE (24 HOURS TTL)
+// ==========================================
+const SYMBOLS_CACHE_KEY = 'wicksniper_tradable_symbols';
+const SYMBOLS_TIME_KEY = 'wicksniper_symbols_cached_at';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+let globalTradableSymbols = [];
+const coinSelectorInstances = {
+  'cfg-whitelist': { selected: new Set(), rawInputId: 'cfg-whitelist-symbols', searchId: 'cfg-whitelist-search', listId: 'cfg-whitelist-list', countId: 'cfg-whitelist-count' },
+  'bt-symbols': { selected: new Set(), rawInputId: 'bt-symbols', searchId: 'bt-symbols-search', listId: 'bt-symbols-list', countId: 'bt-symbols-count' }
+};
+
+async function loadTradableSymbols(forceRefresh = false) {
+  if (!forceRefresh) {
+    try {
+      const cached = localStorage.getItem(SYMBOLS_CACHE_KEY);
+      const cachedTime = parseInt(localStorage.getItem(SYMBOLS_TIME_KEY) || '0', 10);
+      if (cached && (Date.now() - cachedTime < ONE_DAY_MS)) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          globalTradableSymbols = parsed;
+          renderAllCoinSelectors();
+          return globalTradableSymbols;
+        }
+      }
+    } catch (e) {
+      console.warn('Gagal membaca cache koin:', e);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/symbols' + (forceRefresh ? '?refresh=1' : '')).then((r) => r.json());
+    if (res && res.success && Array.isArray(res.symbols) && res.symbols.length > 0) {
+      globalTradableSymbols = res.symbols;
+      localStorage.setItem(SYMBOLS_CACHE_KEY, JSON.stringify(globalTradableSymbols));
+      localStorage.setItem(SYMBOLS_TIME_KEY, String(Date.now()));
+      renderAllCoinSelectors();
+      return globalTradableSymbols;
+    }
+  } catch (err) {
+    console.error('Gagal memuat koin dari server:', err);
+  }
+
+  if (globalTradableSymbols.length === 0) {
+    globalTradableSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'NEARUSDT'];
+    renderAllCoinSelectors();
+  }
+  return globalTradableSymbols;
+}
+
+function renderCoinSelector(instanceKey) {
+  const inst = coinSelectorInstances[instanceKey];
+  if (!inst) return;
+  const listEl = document.getElementById(inst.listId);
+  if (!listEl) return;
+
+  const searchEl = document.getElementById(inst.searchId);
+  const filterQuery = (searchEl ? searchEl.value.trim().toUpperCase() : '');
+
+  const rawInput = document.getElementById(inst.rawInputId);
+  if (rawInput && inst.selected.size === 0 && rawInput.value.trim()) {
+    const symbols = rawInput.value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+    symbols.forEach((s) => inst.selected.add(s));
+  }
+
+  if (globalTradableSymbols.length === 0) {
+    listEl.innerHTML = `<div style="padding: 12px; color: var(--text-muted); font-size: 11px; grid-column: 1 / -1; text-align: center;">Memuat daftar koin Binance...</div>`;
+    updateCoinSelectorBadge(instanceKey);
+    return;
+  }
+
+  const filtered = filterQuery
+    ? globalTradableSymbols.filter((s) => s.toUpperCase().includes(filterQuery))
+    : globalTradableSymbols;
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div style="padding: 12px; color: var(--text-muted); font-size: 11px; grid-column: 1 / -1; text-align: center;">Tidak ada koin yang cocok dengan "${filterQuery}"</div>`;
+    updateCoinSelectorBadge(instanceKey);
+    return;
+  }
+
+  listEl.innerHTML = filtered.map((sym) => {
+    const isChecked = inst.selected.has(sym);
+    return `
+      <div class="coin-chip-item ${isChecked ? 'active' : ''}" onclick="toggleCoinChip(event, '${instanceKey}', '${sym}')" title="${sym}">
+        <input type="checkbox" value="${sym}" ${isChecked ? 'checked' : ''} style="pointer-events: none;">
+        <span>${sym}</span>
+      </div>
+    `;
+  }).join('');
+
+  updateCoinSelectorBadge(instanceKey);
+}
+
+function updateCoinSelectorBadge(instanceKey) {
+  const inst = coinSelectorInstances[instanceKey];
+  if (!inst) return;
+  const countEl = document.getElementById(inst.countId);
+  if (countEl) {
+    countEl.textContent = `${inst.selected.size} koin terpilih`;
+  }
+}
+
+function toggleCoinChip(event, instanceKey, symbol) {
+  if (event) {
+    event.stopPropagation();
+  }
+  const inst = coinSelectorInstances[instanceKey];
+  if (!inst) return;
+
+  if (inst.selected.has(symbol)) {
+    inst.selected.delete(symbol);
+  } else {
+    inst.selected.add(symbol);
+  }
+
+  const rawInput = document.getElementById(inst.rawInputId);
+  if (rawInput) {
+    rawInput.value = Array.from(inst.selected).join(', ');
+    rawInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  renderCoinSelector(instanceKey);
+}
+
+function syncCoinsFromInput(instanceKey) {
+  const inst = coinSelectorInstances[instanceKey];
+  if (!inst) return;
+  const rawInput = document.getElementById(inst.rawInputId);
+  if (!rawInput) return;
+
+  inst.selected.clear();
+  const symbols = rawInput.value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  symbols.forEach((s) => inst.selected.add(s));
+
+  renderCoinSelector(instanceKey);
+}
+
+function filterCoinList(instanceKey) {
+  renderCoinSelector(instanceKey);
+}
+
+function selectAllFilteredCoins(instanceKey) {
+  const inst = coinSelectorInstances[instanceKey];
+  if (!inst) return;
+  const searchEl = document.getElementById(inst.searchId);
+  const filterQuery = (searchEl ? searchEl.value.trim().toUpperCase() : '');
+
+  const filtered = filterQuery
+    ? globalTradableSymbols.filter((s) => s.toUpperCase().includes(filterQuery))
+    : globalTradableSymbols;
+
+  filtered.forEach((s) => inst.selected.add(s));
+
+  const rawInput = document.getElementById(inst.rawInputId);
+  if (rawInput) {
+    rawInput.value = Array.from(inst.selected).join(', ');
+    rawInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  renderCoinSelector(instanceKey);
+}
+
+function clearAllSelectedCoins(instanceKey) {
+  const inst = coinSelectorInstances[instanceKey];
+  if (!inst) return;
+  inst.selected.clear();
+
+  const rawInput = document.getElementById(inst.rawInputId);
+  if (rawInput) {
+    rawInput.value = '';
+    rawInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  renderCoinSelector(instanceKey);
+}
+
+function copyWhitelistToBacktest() {
+  const wlInst = coinSelectorInstances['cfg-whitelist'];
+  const btInst = coinSelectorInstances['bt-symbols'];
+  if (!wlInst || !btInst) return;
+
+  const rawWl = document.getElementById('cfg-whitelist-symbols');
+  const wlSymbols = rawWl && rawWl.value.trim()
+    ? rawWl.value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+    : Array.from(wlInst.selected);
+
+  btInst.selected.clear();
+  wlSymbols.forEach((s) => btInst.selected.add(s));
+
+  const btRaw = document.getElementById('bt-symbols');
+  if (btRaw) {
+    btRaw.value = wlSymbols.join(', ');
+    btRaw.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  renderCoinSelector('bt-symbols');
+}
+
+function toggleRawInput(wrapId) {
+  const el = document.getElementById(wrapId);
+  if (el) {
+    el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+  }
+}
+
+async function refreshCoinCache(btnEl, force = true) {
+  if (typeof btnEl === 'boolean') {
+    force = btnEl;
+    btnEl = null;
+  }
+  const btn = btnEl || (typeof event !== 'undefined' && event?.currentTarget);
+  if (btn && btn.textContent) btn.textContent = '⏳ Memuat...';
+  try {
+    await loadTradableSymbols(force);
+    renderAllCoinSelectors();
+  } finally {
+    if (btn && btn.textContent) btn.textContent = '🔄 Refresh Binance';
+  }
+}
+
+function renderAllCoinSelectors() {
+  Object.keys(coinSelectorInstances).forEach((k) => renderCoinSelector(k));
+}
+
+window.filterCoinList = filterCoinList;
+window.selectAllFilteredCoins = selectAllFilteredCoins;
+window.clearAllSelectedCoins = clearAllSelectedCoins;
+window.copyWhitelistToBacktest = copyWhitelistToBacktest;
+window.toggleRawInput = toggleRawInput;
+window.refreshCoinCache = refreshCoinCache;
+window.syncCoinsFromInput = syncCoinsFromInput;
+window.toggleCoinChip = toggleCoinChip;
+
+// ==========================================
 // WHITELIST TOGGLE
 // ==========================================
 function toggleWhitelistInput() {
@@ -2156,6 +2415,16 @@ function togglePartialTpInput() {
   }
 }
 window.togglePartialTpInput = togglePartialTpInput;
+
+function updateTpPortionHint() {
+  const ratioInput = document.getElementById('cfg-partial-tp-ratio');
+  const hintEl = document.getElementById('tp-portion-hint');
+  if (!hintEl) return;
+  const tp1Val = Math.min(99, Math.max(1, parseInt(ratioInput?.value || '70', 10)));
+  const tp2Val = 100 - tp1Val;
+  hintEl.textContent = `Cairkan ${tp1Val}% di TP 1, sisa ${tp2Val}% memburu TP 2 dengan proteksi Auto BEP.`;
+}
+window.updateTpPortionHint = updateTpPortionHint;
 
 // ==========================================
 // TRAILING STOP LOSS TOGGLE
@@ -2349,6 +2618,12 @@ function applyConfigToBacktestInputs(cfg) {
     } else {
       symbolsInput.value = 'AKEUSDT, CROSSUSDT, BTWUSDT';
     }
+    const btInst = coinSelectorInstances['bt-symbols'];
+    if (btInst) {
+      btInst.selected.clear();
+      symbolsInput.value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean).forEach((s) => btInst.selected.add(s));
+      renderCoinSelector('bt-symbols');
+    }
   }
 
   if (cfg.leverage !== undefined) document.getElementById('bt-leverage').value = cfg.leverage;
@@ -2369,8 +2644,12 @@ function applyConfigToBacktestInputs(cfg) {
   const btptCheckbox = document.getElementById('bt-partial-tp-enabled');
   if (btptCheckbox) btptCheckbox.checked = !!cfg.exit?.partialTpEnabled;
   const btptRatio = document.getElementById('bt-partial-tp-ratio');
-  if (btptRatio && cfg.exit?.partialTpRatio !== undefined) {
-    btptRatio.value = Math.round(cfg.exit.partialTpRatio * 100);
+  if (btptRatio) {
+    btptRatio.value = cfg.exit?.partialTpRatio !== undefined ? Math.round(cfg.exit.partialTpRatio * 100) : 70;
+  }
+  const btTp2 = document.getElementById('bt-tp2-pct');
+  if (btTp2) {
+    btTp2.value = cfg.exit?.takeProfit2Pct ?? (cfg.exit?.takeProfitPct ? Math.round(cfg.exit.takeProfitPct * 2 * 10) / 10 : 2.4);
   }
   toggleBtPartialTp();
 
@@ -2439,6 +2718,7 @@ async function openBacktestModal() {
     _backtestFormModifiedByUser = false;
   }
 
+  renderCoinSelector('bt-symbols');
   document.getElementById('backtest-modal').style.display = 'flex';
 }
 
@@ -2575,7 +2855,9 @@ async function executeBacktest() {
     earlyExitCooldownMinutes: getInt('bt-early-exit-cooldown', 60),
     hardStopCooldownMinutes: getInt('bt-hard-sl-cooldown', 180),
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
-    partialTpRatio: getNum('bt-partial-tp-ratio', 50) / 100,
+    partialTpRatio: getNum('bt-partial-tp-ratio', 70) / 100,
+    takeProfit2Pct: getNum('bt-tp2-pct', 2.4),
+    bepBufferPct: currentConfig?.exit?.bepBufferPct ?? 0.08,
     trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,
     trailingCallbackPct: getNum('bt-trailing-tp-callback', 0.4),
     skipBottomRejectionEnabled: !!document.getElementById('bt-bottom-rejection-enabled')?.checked,
@@ -2733,6 +3015,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cfg-trailing-sl-enabled')?.addEventListener('change', toggleTrailingSL);
   document.getElementById('cfg-whitelist-enabled')?.addEventListener('change', toggleWhitelistInput);
   document.getElementById('cfg-data-source')?.addEventListener('change', toggleDataSourceGroup);
+  loadTradableSymbols();
 });
 
 // Deteksi saat tab aktif kembali (saat buka layar HP/iPad atau kembali dari tab lain)

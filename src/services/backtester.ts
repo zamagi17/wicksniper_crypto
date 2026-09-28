@@ -7,6 +7,8 @@ export interface BacktestParams {
   leverage?: number;
   spikeMinPercent?: number;
   takeProfitPct?: number;
+  takeProfit2Pct?: number;
+  bepBufferPct?: number;
   hardStopLossPct?: number;
   trailingSlEnabled?: boolean;
   marginPerLayerUsdt?: number;
@@ -167,7 +169,9 @@ export class WickSniperBacktester {
     const earlyExitMinBullishCandles = Math.max(2, params.earlyExitMinBullishCandles || 3);
     const earlyExitMinRisePct = params.earlyExitMinRisePct || 0.5;
     const partialTpEnabled = params.partialTpEnabled === true;
-    const partialTpRatio = params.partialTpRatio !== undefined ? params.partialTpRatio : 0.5;
+    const partialTpRatio = params.partialTpRatio !== undefined ? params.partialTpRatio : 0.7;
+    const takeProfit2Pct = params.takeProfit2Pct && params.takeProfit2Pct > 0 ? params.takeProfit2Pct : takeProfitPct * 2;
+    const bepBufferPct = params.bepBufferPct ?? 0.08;
     const trailingTpEnabled = params.trailingTpEnabled === true;
     const trailingCallbackPct = params.trailingCallbackPct !== undefined ? params.trailingCallbackPct : 0.4;
     const initialBalance = params.initialBalance || 1000;
@@ -439,11 +443,11 @@ export class WickSniperBacktester {
               qty -= partQty;
               partialDone = true;
 
-              // Geser SL ke Breakeven (Fee-Inclusive: 0.08% roundtrip fee di bawah Avg Entry untuk SHORT)
-              const feeRoundtripRate = 0.0008;
+              // Geser SL ke Breakeven dengan buffer yang sama dengan parameter BEP
+              const feeRoundtripRate = bepBufferPct / 100;
               hardSlPrice = avgPrice * (1 - feeRoundtripRate);
-              // Target TP tahap 2 digeser lebih dalam
-              targetTpPrice = avgPrice * (1 - (takeProfitPct * 2) / 100);
+              // Target TP tahap 2 digeser sesuai takeProfit2Pct
+              targetTpPrice = avgPrice * (1 - takeProfit2Pct / 100);
 
               // Batalkan layer pending yang tersisa
               for (const l of layers) {

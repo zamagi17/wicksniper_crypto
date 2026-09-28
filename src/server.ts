@@ -143,6 +143,16 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
 // ==========================================
 // REST APIs (PROTECTED & STATUS)
 // ==========================================
+app.get('/api/symbols', async (req, res) => {
+  try {
+    const forceRefresh = req.query.refresh === '1';
+    const symbols = await binanceFutures.getTradableSymbols(forceRefresh);
+    res.json({ success: true, symbols, cachedAt: Date.now() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/status', (req, res) => {
   res.json(engine.getStatus());
 });
