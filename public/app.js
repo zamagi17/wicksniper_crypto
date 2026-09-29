@@ -1516,6 +1516,22 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       if (rows.length > 0) {
         console.log('[TradeDetail] First row:', rows[0].outerHTML.substring(0, 200));
       }
+      
+      // Cek visibility table
+      const table = document.querySelector('.param-compare-table');
+      if (table) {
+        const rect = table.getBoundingClientRect();
+        const modalBody = document.getElementById('td-body');
+        console.log('[TradeDetail] Table position:', {
+          top: rect.top,
+          bottom: rect.bottom,
+          height: rect.height,
+          isVisible: rect.top < window.innerHeight && rect.bottom > 0
+        });
+        if (modalBody) {
+          console.log('[TradeDetail] Modal body scrollHeight:', modalBody.scrollHeight, 'clientHeight:', modalBody.clientHeight);
+        }
+      }
     }, 100);
   } catch (err) {
     console.error('[TradeDetailModal] Error rendering trade detail modal:', err);
