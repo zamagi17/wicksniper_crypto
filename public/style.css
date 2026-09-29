@@ -833,6 +833,7 @@ body {
   flex-direction: column;
   gap: 12px;
   flex: 1;
+  min-height: 200px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }

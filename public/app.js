@@ -1508,31 +1508,14 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     const modalEl = document.getElementById('trade-detail-modal');
     if (modalEl) modalEl.classList.add('open');
     
-    // Debug: cek apakah rows benar-benar ada di DOM
+    // Auto-scroll ke parameter comparison table
     setTimeout(() => {
-      const tbody = document.querySelector('.param-compare-table tbody');
-      const rows = tbody ? tbody.querySelectorAll('tr') : [];
-      console.log('[TradeDetail] DOM Check: tbody exists?', !!tbody, 'rows count:', rows.length);
-      if (rows.length > 0) {
-        console.log('[TradeDetail] First row:', rows[0].outerHTML.substring(0, 200));
+      const paramSection = document.querySelector('.param-comparison-section');
+      if (paramSection) {
+        paramSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        console.log('[TradeDetail] Auto-scrolled to parameter comparison table');
       }
-      
-      // Cek visibility table
-      const table = document.querySelector('.param-compare-table');
-      if (table) {
-        const rect = table.getBoundingClientRect();
-        const modalBody = document.getElementById('td-body');
-        console.log('[TradeDetail] Table position:', {
-          top: rect.top,
-          bottom: rect.bottom,
-          height: rect.height,
-          isVisible: rect.top < window.innerHeight && rect.bottom > 0
-        });
-        if (modalBody) {
-          console.log('[TradeDetail] Modal body scrollHeight:', modalBody.scrollHeight, 'clientHeight:', modalBody.clientHeight);
-        }
-      }
-    }, 100);
+    }, 150);
   } catch (err) {
     console.error('[TradeDetailModal] Error rendering trade detail modal:', err);
     const modalEl = document.getElementById('trade-detail-modal');
