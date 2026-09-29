@@ -1137,6 +1137,78 @@ function renderClosedTradesTable(trades) {
     .join('');
 }
 
+function renderPostExitSnapshotHtml(t) {
+  const snap = t.postExit30m;
+  if (!snap) {
+    return `
+      <div class="td-post-exit-box">
+        <div class="td-post-exit-header">
+          <div class="td-post-exit-title">⏱️ Snapshot Harga Pasca-Exit (Jendela 30 Menit)</div>
+          <span class="badge-post-status tracking">⏳ Mengambil Data Binance...</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); font-style: italic;">
+          Sedang mengambil data pergerakan 30 candle 1-menit dari Binance Futures...
+        </div>
+      </div>
+    `;
+  }
+
+  const isComplete = !!snap.isComplete;
+  const minutes = snap.minutesTracked || 0;
+  const high = Number(snap.highestPrice || 0);
+  const low = Number(snap.lowestPrice || 0);
+  const highDiff = Number(snap.highestDiffPct || 0);
+  const lowDiff = Number(snap.lowestDiffPct || 0);
+
+  const highSign = highDiff >= 0 ? '+' : '';
+  const lowSign = lowDiff >= 0 ? '+' : '';
+
+  let insightText = '';
+  if (lowDiff <= -1.0) {
+    insightText = `📉 <b>MFE (Favorable)</b>: Pasca-exit, harga sempat turun hingga <b>${lowSign}${lowDiff.toFixed(2)}%</b> ($${formatCryptoPrice(low)}). Terdapat peluang profit lebih jika TP diperlebar.`;
+  } else if (highDiff >= 1.5) {
+    insightText = `🛡️ <b>MAE (Adverse)</b>: Pasca-exit, harga sempat melonjak <b>${highSign}${highDiff.toFixed(2)}%</b> ($${formatCryptoPrice(high)}). Keputusan exit berhasil menyelamatkan modal dari floating loss lebih dalam!`;
+  } else {
+    insightText = `⚖️ Pasca-exit, harga bergerak dalam rentang wajar (High: ${highSign}${highDiff.toFixed(2)}%, Low: ${lowSign}${lowDiff.toFixed(2)}%) di sekitar harga exit.`;
+  }
+
+  return `
+    <div class="td-post-exit-box">
+      <div class="td-post-exit-header">
+        <div class="td-post-exit-title">⏱️ Snapshot Harga Pasca-Exit (Jendela 30 Menit)</div>
+        <span class="badge-post-status ${isComplete ? 'complete' : 'tracking'}">
+          ${isComplete ? '✅ Pemantauan 30m Selesai' : `⏳ Sedang Berjalan (${minutes} / 30 Menit)`}
+        </span>
+      </div>
+      <div class="td-post-exit-grid">
+        <div class="td-pe-stat">
+          <div class="pe-label">Harga Tertinggi (Peak High)</div>
+          <div class="pe-val" style="color: ${highDiff > 0 ? 'var(--color-gold)' : 'var(--text-main)'};">
+            $${formatCryptoPrice(high)}
+            <small class="pe-diff" style="color: ${highDiff > 0 ? 'var(--color-red)' : 'var(--text-muted)'};">(${highSign}${highDiff.toFixed(2)}%)</small>
+          </div>
+        </div>
+        <div class="td-pe-stat">
+          <div class="pe-label">Harga Terendah (Deep Low)</div>
+          <div class="pe-val" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-main)'};">
+            $${formatCryptoPrice(low)}
+            <small class="pe-diff" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-muted)'};">(${lowSign}${lowDiff.toFixed(2)}%)</small>
+          </div>
+        </div>
+        <div class="td-pe-stat">
+          <div class="pe-label">Jendela Pengamatan</div>
+          <div class="pe-val" style="font-size: 12px; color: var(--color-cyan);">
+            ${minutes} Menit Candle 1m
+          </div>
+        </div>
+        <div class="td-pe-insight">
+          ${insightText}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function openTradeDetailModal(tradeId, tradeIndex) {
   try {
     let t = null;
@@ -1471,6 +1543,11 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           </div>
         </div>
 
+        <!-- SNAPSHOT 30 MENIT PASCA-EXIT -->
+        <div id="td-post-exit-container">
+          ${renderPostExitSnapshotHtml(t)}
+        </div>
+
         <!-- PARAMETER COMPARISON TABLE -->
         <div class="param-comparison-section">
           <div class="param-filter-bar">
@@ -1509,6 +1586,22 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
     const modalEl = document.getElementById('trade-detail-modal');
     if (modalEl) modalEl.classList.add('open');
+
+    // Fetch snapshot 30 menit pasca-exit secara dinamis dari server jika belum lengkap
+    if (!t.postExit30m || !t.postExit30m.isComplete) {
+      fetch(`/api/trades/${encodeURIComponent(t.id)}/post-exit-30m`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.success && data.snapshot) {
+            t.postExit30m = data.snapshot;
+            const container = document.getElementById('td-post-exit-container');
+            if (container && selectedTradeForDetail && String(selectedTradeForDetail.id) === String(t.id)) {
+              container.innerHTML = renderPostExitSnapshotHtml(t);
+            }
+          }
+        })
+        .catch(() => {});
+    }
     
     // Auto-scroll ke parameter comparison table
     setTimeout(() => {

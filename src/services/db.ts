@@ -118,6 +118,7 @@ export class DatabaseService {
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS fee NUMERIC;
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS gross_pnl NUMERIC;
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS layers_filled VARCHAR(32);
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS post_exit_30m JSONB;
         `);
 
         // 4. Tabel Riwayat Spike Lonjakan Harga
@@ -237,9 +238,9 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_trades (
-           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-         ON CONFLICT (id) DO NOTHING;`,
+           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled, post_exit_30m
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+         ON CONFLICT (id) DO UPDATE SET post_exit_30m = COALESCE(EXCLUDED.post_exit_30m, wicksniper_trades.post_exit_30m);`,
         [
           t.id,
           t.symbol,
@@ -260,6 +261,7 @@ export class DatabaseService {
           t.fee !== undefined ? t.fee : null,
           t.grossPnl !== undefined ? t.grossPnl : null,
           t.layersFilled || null,
+          t.postExit30m ? JSON.stringify(t.postExit30m) : null,
         ]
       );
     } catch (e: any) {
@@ -281,7 +283,8 @@ export class DatabaseService {
                 closed_at AS "closedAt", timestamp,
                 params_snapshot AS "paramsSnapshot",
                 layers_detail AS "layersDetail",
-                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled"
+                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
+                post_exit_30m AS "postExit30m"
          FROM wicksniper_trades
          ${whereMode}
          ORDER BY timestamp DESC
@@ -308,10 +311,70 @@ export class DatabaseService {
         layersFilled: r.layersFilled || undefined,
         paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
+        postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
       }));
     } catch (e: any) {
       console.error('[Database] Gagal load trades dari DB:', e.message);
       return [];
+    }
+  }
+
+  public async updateTradePostExit(tradeId: string, postExit: any): Promise<void> {
+    if (!this.isConnected || !this.pool) return;
+    try {
+      await this.pool.query(
+        `UPDATE wicksniper_trades SET post_exit_30m = $1 WHERE id = $2;`,
+        [JSON.stringify(postExit), tradeId]
+      );
+    } catch (e: any) {
+      console.error('[Database] Gagal update post_exit_30m:', e.message);
+    }
+  }
+
+  public async getTradeById(tradeId: string): Promise<ClosedTrade | null> {
+    if (!this.isConnected || !this.pool) return null;
+    try {
+      const res = await this.pool.query(
+        `SELECT id, symbol, side, entry_price AS "entryPrice", exit_price AS "exitPrice",
+                qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
+                pnl_pct AS "pnlPct", duration_seconds AS "durationSeconds",
+                exit_reason AS "exitReason", is_paper AS "isPaper",
+                closed_at AS "closedAt", timestamp,
+                params_snapshot AS "paramsSnapshot",
+                layers_detail AS "layersDetail",
+                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
+                post_exit_30m AS "postExit30m"
+         FROM wicksniper_trades
+         WHERE id = $1 LIMIT 1;`,
+        [tradeId]
+      );
+      if (!res.rows || res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        symbol: r.symbol,
+        side: r.side,
+        entryPrice: parseFloat(r.entryPrice),
+        exitPrice: parseFloat(r.exitPrice),
+        qty: parseFloat(r.qty),
+        marginUsed: parseFloat(r.marginUsed),
+        realizedPnl: parseFloat(r.realizedPnl),
+        grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
+        fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
+        pnlPct: parseFloat(r.pnlPct),
+        durationSeconds: parseInt(r.durationSeconds, 10),
+        exitReason: r.exitReason,
+        isPaper: r.isPaper,
+        closedAt: r.closedAt,
+        timestamp: parseInt(r.timestamp, 10),
+        layersFilled: r.layersFilled || undefined,
+        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
+        layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
+        postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
+      };
+    } catch (e: any) {
+      console.error('[Database] Gagal getTradeById:', e.message);
+      return null;
     }
   }
 
@@ -493,7 +556,8 @@ export class DatabaseService {
                 closed_at AS "closedAt", timestamp,
                 params_snapshot AS "paramsSnapshot",
                 layers_detail AS "layersDetail",
-                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled"
+                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
+                post_exit_30m AS "postExit30m"
          FROM wicksniper_trades
          ${whereClause}
          ORDER BY timestamp DESC
@@ -521,6 +585,7 @@ export class DatabaseService {
         layersFilled: r.layersFilled || undefined,
         paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
+        postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
       }));
 
       return { trades, total, page, totalPages };

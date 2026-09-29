@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, SpikeAlert } from '../types';
+import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, PostExitSnapshot, SpikeAlert } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { logger } from './logger';
@@ -378,6 +378,11 @@ export class WickSniperEngine {
         if (tickCount % 5 === 0) {
           await this.syncConfigFromDb();
           await this.syncTradesFromDb();
+        }
+
+        // Pemeriksaan snapshot harga 30m pasca-exit tiap 30 detik
+        if (tickCount % 30 === 0) {
+          this.checkPendingPostExitSnapshots().catch(() => {});
         }
 
         // Heartbeat Telegram Berkala (Laporan Status Rutin)
@@ -3308,5 +3313,94 @@ export class WickSniperEngine {
       ticksPerSecond: this.scanner.getTicksPerSecond(),
       marketDataStale: (status.marketDataAgeMs ?? 0) >= 3000,
     });
+  }
+
+  /**
+   * Mengambil snapshot harga tertinggi dan terendah selama 30 menit setelah trading selesai.
+   * Tracking bersifat independen per tradeId, sehingga jika koin yang sama ditransaksikan
+   * berulang kali dalam 30 menit, masing-masing posisi tetap memiliki data snapshot yang presisi.
+   */
+  public async fetchPostExitSnapshot(trade: ClosedTrade): Promise<PostExitSnapshot | null> {
+    if (trade.postExit30m && trade.postExit30m.isComplete) {
+      return trade.postExit30m;
+    }
+
+    const exitTime = trade.timestamp;
+    if (!exitTime || isNaN(exitTime) || exitTime <= 0) return null;
+
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - exitTime);
+    const minutesSinceExit = elapsedMs / 60_000;
+
+    try {
+      const client = await binanceFutures.getHttpClient();
+      const res = await client.get('/fapi/v1/klines', {
+        params: {
+          symbol: trade.symbol,
+          interval: '1m',
+          startTime: exitTime,
+          limit: 30,
+        },
+        timeout: 3500,
+      });
+
+      if (!Array.isArray(res.data) || res.data.length === 0) {
+        return trade.postExit30m || null;
+      }
+
+      let highest = trade.exitPrice;
+      let lowest = trade.exitPrice;
+
+      for (const candle of res.data) {
+        const h = parseFloat(candle[2]);
+        const l = parseFloat(candle[3]);
+        if (!isNaN(h) && h > highest) highest = h;
+        if (!isNaN(l) && l > 0 && l < lowest) lowest = l;
+      }
+
+      // Tandai complete jika waktu sudah >= 30 menit dan candle terambil minimal 29
+      const isComplete = minutesSinceExit >= 30 && res.data.length >= 29;
+      const highestDiffPct = trade.exitPrice > 0 ? ((highest - trade.exitPrice) / trade.exitPrice) * 100 : 0;
+      const lowestDiffPct = trade.exitPrice > 0 ? ((lowest - trade.exitPrice) / trade.exitPrice) * 100 : 0;
+
+      const snapshot: PostExitSnapshot = {
+        highestPrice: parseFloat(highest.toFixed(8)),
+        lowestPrice: parseFloat(lowest.toFixed(8)),
+        highestDiffPct: parseFloat(highestDiffPct.toFixed(2)),
+        lowestDiffPct: parseFloat(lowestDiffPct.toFixed(2)),
+        minutesTracked: Math.min(30, res.data.length),
+        isComplete,
+        updatedAt: now,
+      };
+
+      trade.postExit30m = snapshot;
+
+      // Sinkronkan ke array memory internal closedTrades
+      const memoryTrade = this.closedTrades.find((t) => t.id === trade.id);
+      if (memoryTrade) {
+        memoryTrade.postExit30m = snapshot;
+      }
+
+      // Simpan ke DB bila terhubung
+      db.updateTradePostExit(trade.id, snapshot).catch(() => {});
+
+      return snapshot;
+    } catch (e: any) {
+      logger.log('WARN', `⚠️ [POST-EXIT 30M] Gagal mengambil snapshot 30m ${trade.symbol} (${trade.id}): ${e.message}`, trade.symbol);
+      return trade.postExit30m || null;
+    }
+  }
+
+  public async checkPendingPostExitSnapshots(): Promise<void> {
+    const now = Date.now();
+    const pending = this.closedTrades.filter(
+      (t) => !t.postExit30m?.isComplete && now - t.timestamp >= 30 * 60_000 && now - t.timestamp <= 7 * 86400_000
+    );
+    if (pending.length === 0) return;
+
+    for (const trade of pending.slice(0, 3)) {
+      await this.fetchPostExitSnapshot(trade);
+      await new Promise((r) => setTimeout(r, 250));
+    }
   }
 }

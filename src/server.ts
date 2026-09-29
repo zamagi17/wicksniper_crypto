@@ -302,6 +302,25 @@ app.get('/api/trades', async (req, res) => {
   return res.json({ success: true, trades, total, page, totalPages });
 });
 
+app.get('/api/trades/:id/post-exit-30m', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const { id } = req.params;
+  try {
+    let trade = engine.getClosedTrades().find((t) => t.id === id);
+    if (!trade && db.isConnected) {
+      trade = (await db.getTradeById(id)) || undefined;
+    }
+    if (!trade) {
+      return res.status(404).json({ success: false, message: 'Trade tidak ditemukan' });
+    }
+
+    const snapshot = await engine.fetchPostExitSnapshot(trade);
+    return res.json({ success: true, snapshot, tradeId: trade.id, symbol: trade.symbol });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 app.get('/api/spikes', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   const page = parseInt(String(req.query.page || '1'), 10) || 1;

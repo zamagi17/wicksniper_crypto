@@ -164,6 +164,16 @@ export interface ActivePosition {
   paramsSnapshot?: Record<string, any>;
 }
 
+export interface PostExitSnapshot {
+  highestPrice: number;
+  lowestPrice: number;
+  highestDiffPct: number;
+  lowestDiffPct: number;
+  minutesTracked: number;
+  isComplete: boolean;
+  updatedAt: number;
+}
+
 export interface ClosedTrade {
   id: string;
   symbol: string;
@@ -191,6 +201,7 @@ export interface ClosedTrade {
     filledAt?: number;
   }[];
   paramsSnapshot?: Record<string, any>;
+  postExit30m?: PostExitSnapshot;
 }
 
 export interface EngineStatus {
