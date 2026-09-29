@@ -1472,33 +1472,35 @@ function openTradeDetailModal(tradeId, tradeIndex) {
         </div>
 
         <!-- PARAMETER COMPARISON TABLE -->
-        <div class="param-filter-bar">
-          <div class="td-section-title" style="margin: 0;">
-            ⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)
-            ${diffCount > 0 
-              ? `<span class="badge-diff" style="margin-left: 8px;">${diffCount} Parameter Berbeda</span>` 
-              : `<span class="badge-same" style="margin-left: 8px;">Semua Identik</span>`}
+        <div class="param-comparison-section">
+          <div class="param-filter-bar">
+            <div class="td-section-title" style="margin: 0;">
+              ⚖️ Perbandingan Parameter (Trade Ini vs Aktif Sekarang)
+              ${diffCount > 0 
+                ? `<span class="badge-diff" style="margin-left: 8px;">${diffCount} Parameter Berbeda</span>` 
+                : `<span class="badge-same" style="margin-left: 8px;">Semua Identik</span>`}
+            </div>
+            <label style="font-size: 11px; color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; user-select: none;">
+              <input type="checkbox" id="td-diff-only-checkbox" onchange="toggleDiffOnlyParams(this.checked)" style="accent-color: var(--color-cyan);">
+              Hanya tampilkan yang berbeda
+            </label>
           </div>
-          <label style="font-size: 11px; color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; user-select: none;">
-            <input type="checkbox" id="td-diff-only-checkbox" onchange="toggleDiffOnlyParams(this.checked)" style="accent-color: var(--color-cyan);">
-            Hanya tampilkan yang berbeda
-          </label>
-        </div>
 
-        <div style="overflow-x: auto;">
-          <table class="param-compare-table">
-            <thead>
-              <tr>
-                <th>Parameter Bot</th>
-                <th>Saat Trade Ini Berjalan</th>
-                <th>Konfigurasi Aktif Sekarang</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${compareRowsHtml}
-            </tbody>
-          </table>
+          <div style="overflow-x: auto;">
+            <table class="param-compare-table">
+              <thead>
+                <tr>
+                  <th>Parameter Bot</th>
+                  <th>Saat Trade Ini Berjalan</th>
+                  <th>Konfigurasi Aktif Sekarang</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${compareRowsHtml}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         ${layersHtml}
