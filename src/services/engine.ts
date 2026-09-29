@@ -2299,9 +2299,16 @@ export class WickSniperEngine {
 
         let confirmedClose = false;
         try {
-          const recentTrades = await binanceFutures.getUserTrades(pos.symbol, 20);
           const minTime = pos.openedAt - 120000;
-          const freshBuyTrades = recentTrades.filter((tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime));
+          // Trade BUY penutup bisa belum muncul di userTrades setelah 800ms (terutama TP super cepat) -> retry singkat
+          let recentTrades: any[] = [];
+          for (let attempt = 0; attempt < 4; attempt++) {
+            recentTrades = await binanceFutures.getUserTrades(pos.symbol, 100, minTime);
+            const hasBuyTrade = recentTrades.some((tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime);
+            if (hasBuyTrade) break;
+            if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 700));
+          }
+          const freshBuyTrades = recentTrades.filter((tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime);
 
           if (pos.tpOrderId || pos.tp2OrderId) {
             const tpMatches = recentTrades.filter(
@@ -2404,7 +2411,7 @@ export class WickSniperEngine {
             if (pos.partialTpDone) {
               // Jika pernah Partial TP, seluruh trade BUY sejak posisi dibuka adalah bagian dari closing posisi ini!
               closingTrades = recentTrades.filter(
-                (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
+                (tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime
               );
             } else if (pos.tpOrderId || pos.tp2OrderId) {
               closingTrades = recentTrades.filter(
@@ -2418,7 +2425,7 @@ export class WickSniperEngine {
             }
             if (closingTrades.length === 0) {
               closingTrades = recentTrades.filter(
-                (tr: any) => tr.side === 'BUY' && (!tr.time || tr.time >= minTime)
+                (tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime
               );
             }
 
@@ -2441,7 +2448,7 @@ export class WickSniperEngine {
               // Ambil harga BNB jika ada komisi yang dibayar dengan BNB untuk konversi akurat ke USDT
               let bnbPrice = 0;
               const hasBnbFee = closingTrades.some((tr: any) => tr.commissionAsset === 'BNB') ||
-                recentTrades.some((tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime) && tr.commissionAsset === 'BNB');
+                recentTrades.some((tr: any) => tr.side === 'SELL' && tr.time && tr.time >= minTime && tr.commissionAsset === 'BNB');
               if (hasBnbFee) {
                 bnbPrice = await binanceFutures.getBnbPrice();
               }
@@ -2458,7 +2465,7 @@ export class WickSniperEngine {
               }
 
               const openingTrades = recentTrades.filter(
-                (tr: any) => tr.side === 'SELL' && (!tr.time || tr.time >= minTime)
+                (tr: any) => tr.side === 'SELL' && tr.time && tr.time >= minTime
               );
               for (const otr of openingTrades) {
                 const rawComm = parseFloat(otr.commission || '0');
@@ -2525,6 +2532,21 @@ export class WickSniperEngine {
 
             // Final sweep: Batalkan seluruh sisa order di Binance agar tidak ada order liar tertinggal
             await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
+          } else {
+            // userTrades kosong (error/belum terindeks): jangan simpan PnL kotor tanpa fee
+            const fbLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
+            const fbTotalQty = fbLayers.length > 0 ? fbLayers.reduce((sum, l) => sum + l.qty, 0) : pos.totalQty;
+            const exitFeeRate = (reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE') ? 0.0002 : 0.0005;
+            const estFee = pos.avgEntryPrice * fbTotalQty * 0.0005 + closePrice * fbTotalQty * exitFeeRate;
+            actualFee = Math.round(estFee * 1000) / 1000;
+            actualRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0) - actualFee) * 100) / 100;
+            const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+            actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
+            logger.log(
+              'WARN',
+              `⚠️ [PNL ESTIMASI] ${pos.symbol}: userTrades Binance kosong setelah retry. PnL dihitung lokal dengan estimasi fee $${actualFee.toFixed(3)} (bisa beda tipis dari Binance).`,
+              pos.symbol
+            );
           }
         } catch (e: any) {
           console.warn(`[Sync PnL] Menggunakan kalkulasi lokal: ${e.message}`);
