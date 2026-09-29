@@ -1507,6 +1507,16 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
     const modalEl = document.getElementById('trade-detail-modal');
     if (modalEl) modalEl.classList.add('open');
+    
+    // Debug: cek apakah rows benar-benar ada di DOM
+    setTimeout(() => {
+      const tbody = document.querySelector('.param-compare-table tbody');
+      const rows = tbody ? tbody.querySelectorAll('tr') : [];
+      console.log('[TradeDetail] DOM Check: tbody exists?', !!tbody, 'rows count:', rows.length);
+      if (rows.length > 0) {
+        console.log('[TradeDetail] First row:', rows[0].outerHTML.substring(0, 200));
+      }
+    }, 100);
   } catch (err) {
     console.error('[TradeDetailModal] Error rendering trade detail modal:', err);
     const modalEl = document.getElementById('trade-detail-modal');
