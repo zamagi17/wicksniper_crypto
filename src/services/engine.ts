@@ -57,6 +57,7 @@ export class WickSniperEngine {
   private lastWeightWarnAt: number = 0;
   private lastHeartbeatAt: number = Date.now();
   private lastRadarPulseAt: number = Date.now();
+  private lastAutoBlacklistRefreshAt: number = Date.now();
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
 
   constructor(configPath: string) {
@@ -384,6 +385,12 @@ export class WickSniperEngine {
         if (hbHours > 0 && Date.now() - this.lastHeartbeatAt >= hbHours * 3600 * 1000) {
           this.lastHeartbeatAt = Date.now();
           this.sendHeartbeatReport().catch(() => {});
+        }
+
+        // Auto Blacklist Refresh (Setiap 1 Jam)
+        if (this.config.scanner.autoBlacklist && Date.now() - this.lastAutoBlacklistRefreshAt >= 3600 * 1000) {
+          this.lastAutoBlacklistRefreshAt = Date.now();
+          this.scanner.refreshAutoBlacklist().catch(() => {});
         }
 
         // Denyut Nadi Radar Berkala (Setiap 15 Menit saat Siaga)

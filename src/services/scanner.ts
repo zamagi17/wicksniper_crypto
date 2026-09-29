@@ -116,7 +116,7 @@ export class SpikeScanner {
     };
     this.blacklistMap.set(symbol, updated);
     this.scheduleSaveBlacklist();
-    logger.log('WARN', `🔒 [BLACKLIST] ${symbol} flagged: ${updated.reason}`, symbol);
+    // Log yang lebih ringkas: hanya log saat scheduled refresh, tidak per-koin real-time
   }
 
   public removeBlacklist(symbol: string): boolean {
@@ -128,6 +128,44 @@ export class SpikeScanner {
   public clearBlacklist(): void {
     this.blacklistMap.clear();
     this.saveBlacklistToDisk();
+  }
+
+  /**
+   * Scheduled refresh: Re-check all tradable symbols and auto-blacklist those exceeding volume limit
+   * Runs every 1 hour (called from engine)
+   */
+  public async refreshAutoBlacklist(): Promise<void> {
+    if (!this.config.autoBlacklist || !this.config.max24hVolumeUsdt || this.config.max24hVolumeUsdt <= 0) {
+      return;
+    }
+
+    try {
+      const tickers = await binanceFutures.fetch24hTickers();
+      let blacklistedCount = 0;
+
+      for (const t of tickers) {
+        const symbol = t.s || t.symbol;
+        if (!symbol || !symbol.endsWith('USDT')) continue;
+        if (this.isBlacklisted(symbol)) continue;
+
+        const vol24 = parseFloat(t.q || '0');
+        if (vol24 >= this.config.max24hVolumeUsdt) {
+          const reason = `24h volume $${Math.round(vol24).toLocaleString('en-US')} >= limit $${this.config.max24hVolumeUsdt.toLocaleString('en-US')}`;
+          this.addTemporaryBlacklist(symbol, {
+            reason,
+            vol24,
+            auto: true,
+          });
+          blacklistedCount++;
+        }
+      }
+
+      if (blacklistedCount > 0) {
+        logger.log('INFO', `🔄 [AUTO BLACKLIST REFRESH] ${blacklistedCount} koin baru di-blacklist karena volume > $${this.config.max24hVolumeUsdt.toLocaleString('en-US')} USDT`);
+      }
+    } catch (err) {
+      logger.log('ERROR', `❌ [AUTO BLACKLIST REFRESH] Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   public getTotalMonitoredSymbols(): number {
@@ -267,9 +305,7 @@ export class SpikeScanner {
             vol24,
             auto: true,
           });
-          try {
-            telegram.notifyAutoBlacklist('Auto Blacklist: Volume Ekstrem', reason, symbol);
-          } catch {}
+          // Notifikasi Telegram dihapus untuk menghindari spam, hanya log saat scheduled refresh
           continue;
         }
       }

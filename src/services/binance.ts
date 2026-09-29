@@ -1300,6 +1300,35 @@ export class BinanceFuturesClient {
     return [];
   }
 
+  /**
+   * Fetch 24h ticker statistics including volume (for auto-blacklist refresh)
+   * Endpoint: /fapi/v1/ticker/24hr
+   */
+  public async fetch24hTickers(): Promise<any[]> {
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get('/fapi/v1/ticker/24hr');
+      if (Array.isArray(res.data)) {
+        return res.data.map((item: any) => ({
+          s: item.symbol,
+          c: item.lastPrice,
+          p: item.lastPrice,
+          q: item.quoteVolume, // 24h volume in USDT
+        }));
+      }
+    } catch (err: any) {
+      if (err.response) {
+        const status = err.response.status;
+        if (status === 429) {
+          logger.log('WARN', `⚠️ [24H TICKER] Terkena HTTP 429 Rate Limit (Used Weight: ${this.lastUsedWeight}/2400).`);
+        } else if (status === 418) {
+          logger.log('ERROR', `❌ [24H TICKER] IP Terkena Banned (HTTP 418). Used Weight: ${this.lastUsedWeight}/2400.`);
+        }
+      }
+    }
+    return [];
+  }
+
   public startFastTickerStream(intervalMs?: number) {
     const effectiveInterval = intervalMs || this.currentPollingIntervalMs || 1000;
     this.currentPollingIntervalMs = effectiveInterval;

@@ -1195,6 +1195,11 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     const currScanner = curr.scanner || {};
     const currRisk = curr.risk || {};
 
+    console.log('[TradeDetail] currentConfig:', currentConfig ? 'LOADED' : 'NULL/UNDEFINED');
+    console.log('[TradeDetail] snap:', snap);
+    console.log('[TradeDetail] currGrid:', currGrid);
+    console.log('[TradeDetail] currExit:', currExit);
+
     let diffCount = 0;
     let totalParamCount = 0;
 
@@ -1404,6 +1409,9 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Rem Rugi Harian (Circuit Breaker)', snap.maxDailyLossUsdt, currRisk.maxDailyLossUsdt, ' USDT', formatZeroDisabled(' USDT'))}
       ${renderCompareRow('Batas Saldo Pengaman (Floor)', snap.minSafetyBalanceUsdt, currRisk.minSafetyBalanceUsdt, ' USDT', formatZeroDisabled(' USDT'))}
     `;
+
+    console.log('[TradeDetail] diffCount:', diffCount, 'totalParams:', totalParamCount);
+    console.log('[TradeDetail] compareRowsHtml preview:', compareRowsHtml.substring(0, 500));
 
     const body = document.getElementById('td-body');
     if (body) {

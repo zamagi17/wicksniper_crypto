@@ -38,6 +38,7 @@ export class TelegramService {
     heartbeatIntervalHours: 6,
   };
   private emergencyAlertCooldown: Map<string, number> = new Map();
+  private lastHeartbeatSentAt: number = 0;
 
   public updateConfig(cfg?: Partial<TelegramConfig>) {
     if (!cfg) return;
@@ -66,10 +67,12 @@ export class TelegramService {
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        await axios.post(url, payload, { timeout: 10000 });
+        await axios.post(url, payload, { timeout: 15000 });
         return true;
       } catch (err: any) {
-        if (attempt === 1 && (err.code === 'ECONNABORTED' || err.message?.includes('timeout'))) {
+        // Hanya retry kalau benar-benar network error, bukan timeout response dari Telegram
+        // Kalau timeout, kemungkinan pesan sudah masuk tapi response lambat -> jangan retry!
+        if (attempt === 1 && err.code === 'ECONNRESET') {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
@@ -321,6 +324,12 @@ ${details}
     ticksPerSecond: number;
     marketDataStale: boolean;
   }) {
+    // Anti-duplikasi: Jika heartbeat baru saja dikirim dalam 30 detik terakhir, skip
+    const now = Date.now();
+    if (now - this.lastHeartbeatSentAt < 30000) {
+      return;
+    }
+    this.lastHeartbeatSentAt = now;
     const isProfit = status.dailyPnl >= 0;
     const pnlSign = isProfit ? '+' : '';
     const modeTag = status.tradingMode === 'LIVE' ? '🟢 LIVE FUTURES' : '🧪 PAPER TRADING';
