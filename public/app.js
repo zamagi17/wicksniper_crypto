@@ -13,6 +13,109 @@ function getAuthToken() {
   }
 }
 
+// BLACKLIST UI HANDLERS
+window.openBlacklistModal = async function () {
+  const modal = document.getElementById('blacklist-modal');
+  if (modal) modal.classList.add('open');
+  await refreshBlacklistList();
+};
+
+window.closeBlacklistModal = function () {
+  const modal = document.getElementById('blacklist-modal');
+  if (modal) modal.classList.remove('open');
+};
+
+async function refreshBlacklistList(btnEl) {
+  const btn = (btnEl instanceof HTMLElement ? btnEl : null) || document.getElementById('btn-refresh-blacklist');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Memuat...';
+  }
+  const container = document.getElementById('blacklist-list-container');
+  try {
+    const res = await authFetch('/api/blacklist?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    let list = res;
+    if (res && Array.isArray(res.list)) list = res.list;
+    if (!Array.isArray(list)) {
+      if (container) container.innerHTML = '<div style="padding:12px; color:var(--text-danger);">Gagal memuat daftar blacklist.</div>';
+      return;
+    }
+    if (container) {
+      container.innerHTML = '';
+      if (list.length === 0) {
+        container.innerHTML = '<div style="padding:12px; color:var(--text-muted);">Tidak ada entri blacklist sementara.</div>';
+        return;
+      }
+      list.forEach((entry) => {
+        const el = document.createElement('div');
+        el.style.display = 'flex';
+        el.style.justifyContent = 'space-between';
+        el.style.alignItems = 'center';
+        el.style.padding = '8px 10px';
+        el.style.borderBottom = '1px dashed rgba(255,255,255,0.03)';
+
+        const left = document.createElement('div');
+        left.style.display = 'flex';
+        left.style.flexDirection = 'column';
+        left.innerHTML = `<strong>${entry.symbol}</strong><small style="color:var(--text-muted);">${entry.reason || ''} ${entry.expiresAt ? ' • Expires: ' + new Date(entry.expiresAt).toLocaleString() : ''}</small>`;
+
+        const right = document.createElement('div');
+        right.style.display = 'flex';
+        right.style.gap = '8px';
+
+        const btnRemove = document.createElement('button');
+        btnRemove.className = 'btn btn-danger';
+        btnRemove.innerText = 'Remove';
+        btnRemove.onclick = async () => {
+          if (!confirm(`Remove ${entry.symbol} from blacklist?`)) return;
+          try {
+            const resp = await authFetch('/api/blacklist/remove', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ symbol: entry.symbol }),
+            });
+            const j = await resp.json();
+            if (!j || !j.success) {
+              alert('Gagal menghapus: ' + (j?.message || 'Unknown error'));
+              return;
+            }
+            await refreshBlacklistList();
+          } catch (err) {
+            alert('Gagal menghapus: ' + err.message);
+          }
+        };
+
+        right.appendChild(btnRemove);
+        el.appendChild(left);
+        el.appendChild(right);
+        container.appendChild(el);
+      });
+    }
+  } catch (err) {
+    if (container) container.innerHTML = `<div style="padding:12px; color:var(--text-danger);">Gagal memuat: ${err.message}</div>`;
+  } finally {
+    if (btn) {
+      btn.innerText = '✅ Terupdate!';
+      setTimeout(() => {
+        btn.innerText = '🔄 Refresh';
+        btn.disabled = false;
+      }, 1000);
+    }
+  }
+}
+
+async function blacklistClear() {
+  if (!confirm('Clear semua entri blacklist sementara?')) return;
+  try {
+    await authFetch('/api/blacklist/clear', { method: 'POST' }).then((r) => r.json());
+    await refreshBlacklistList();
+  } catch (err) {
+    alert('Gagal clear: ' + err.message);
+  }
+}
+
+window.refreshBlacklistList = refreshBlacklistList;
+
 function setAuthToken(token) {
   try {
     localStorage.setItem('wicksniper_auth_token', token);
@@ -707,7 +810,14 @@ function renderActivePositions(positions) {
       }
 
       const layersHtml = (pos.layers || [])
-        .map((l) => `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status} • $${l.marginUsdt.toFixed(2)})</span>`)
+        .map((l) => {
+          let timeTag = '';
+          if (l.filledAt) {
+            const dt = new Date(l.filledAt);
+            timeTag = ` • ⏱️${dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`;
+          }
+          return `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status}${timeTag} • $${l.marginUsdt.toFixed(2)})</span>`;
+        })
         .join('');
 
       return `
@@ -1174,19 +1284,46 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
     let layersHtml = '';
     if (Array.isArray(layers) && layers.length > 0) {
+      let prevFilledTime = null;
       layersHtml = `
         <div class="td-section-title">🧱 Rincian Layer Jaring Terisi (${t.layersFilled || 'Grid'})</div>
         <div class="td-layers-wrap">
           ${layers
-            .map((l) => {
+            .map((l, idx) => {
               const priceNum = Number(l.price || 0);
               const marginNum = Number(l.marginUsdt || 0);
-              const layerIdx = l.layerIndex !== undefined ? l.layerIndex : '-';
+              const layerIdx = l.layerIndex !== undefined ? l.layerIndex : idx;
               const statusStr = l.status || 'PENDING';
+
+              // Hitung waktu terisi & jeda waktu antar layer
+              let timeHtml = '';
+              if (l.filledAt) {
+                const filledDate = new Date(l.filledAt);
+                const timeStr = filledDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                let diffStr = '';
+                if (prevFilledTime && l.filledAt >= prevFilledTime) {
+                  const diffSec = Math.round((l.filledAt - prevFilledTime) / 1000);
+                  if (diffSec < 60) {
+                    diffStr = `(+${diffSec}s)`;
+                  } else {
+                    const m = Math.floor(diffSec / 60);
+                    const s = diffSec % 60;
+                    diffStr = `(+${m}m ${s}s)`;
+                  }
+                } else if (layerIdx === 0 || idx === 0) {
+                  diffStr = '(Entry)';
+                }
+                timeHtml = `<span class="td-layer-time">⏱️ ${timeStr} <small style="opacity: 0.85;">${diffStr}</small></span>`;
+                prevFilledTime = l.filledAt;
+              } else if (statusStr === 'FILLED') {
+                timeHtml = `<span style="font-size: 10.5px; color: var(--text-muted);">⏱️ Terisi</span>`;
+              }
+
               return `
                 <div class="td-layer-row ${statusStr === 'FILLED' ? 'filled' : ''}">
                   <span><b>Layer #${layerIdx}</b>: $${formatCryptoPrice(priceNum)}</span>
                   <span>Margin: $${marginNum.toFixed(2)} USDT</span>
+                  ${timeHtml}
                   <span class="${statusStr === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${statusStr}]</b></span>
                 </div>
               `;
@@ -1244,6 +1381,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Spike Lookback', snap.spikeLookbackSeconds, currScanner.spikeLookbackSeconds, ' Detik')}
       ${renderCompareRow('Volume Spike Multiplier', snap.volumeSpikeMultiplier, currScanner.volumeSpikeMultiplier, 'x')}
       ${renderCompareRow('Min Volume 24 Jam', snap.min24hVolumeUsdt, currScanner.min24hVolumeUsdt, '', formatVolumeUsdt)}
+      ${renderCompareRow('Max Volume 24 Jam', snap.max24hVolumeUsdt, currScanner.max24hVolumeUsdt, '', formatVolumeUsdt)}
       ${renderCompareRow('Maksimal Spread Bid-Ask', snap.maxSpreadPct, currScanner.maxSpreadPct, '%')}
       ${renderCompareRow('Cooldown Antar Koin', snap.cooldownMinutes, currScanner.cooldownMinutes, ' Menit')}
       ${renderCompareRow('Filter Bottom Rejection (Sweep)', snap.skipBottomRejectionEnabled, currScanner.skipBottomRejectionEnabled)}
@@ -1486,6 +1624,7 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-spike-pct', snap.spikeMinPercent);
   setVal('cfg-cooldown', snap.cooldownMinutes);
   setVal('cfg-min-24h-vol', snap.min24hVolumeUsdt);
+  setVal('cfg-max-24h-vol', snap.max24hVolumeUsdt ?? 300000000);
   setVal('cfg-max-spread', snap.maxSpreadPct);
 
   if (snap.skipBottomRejectionEnabled !== undefined) {
@@ -1799,7 +1938,10 @@ function populateSettingsForm(cfg) {
   setVal('cfg-margin-type', cfg.marginType || 'CROSSED');
   setVal('cfg-spike-pct', cfg.scanner?.spikeMinPercent || 2.0);
   setVal('cfg-min-24h-vol', cfg.scanner?.min24hVolumeUsdt ?? 1500000);
+  setVal('cfg-max-24h-vol', cfg.scanner?.max24hVolumeUsdt ?? 300000000);
   setVal('cfg-max-spread', cfg.scanner?.maxSpreadPct ?? 0.25);
+  const abCheckbox = document.getElementById('cfg-auto-blacklist');
+  if (abCheckbox) abCheckbox.checked = !!cfg.scanner?.autoBlacklist;
   setVal('cfg-max-24h-change', cfg.scanner?.max24hChangePct ?? 40);
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
@@ -1913,6 +2055,7 @@ function populateSettingsForm(cfg) {
   setChecked('cfg-tg-on-layer', tg.notifyOnLayerFill);
   setChecked('cfg-tg-on-close', tg.notifyOnClose);
   setChecked('cfg-tg-on-emergency', tg.notifyOnEmergency !== false);
+  setChecked('cfg-tg-on-autobl', tg.notifyOnAutoBlacklist !== false);
   setVal('cfg-tg-heartbeat-hours', tg.heartbeatIntervalHours ?? 6);
 
   // Risk Management
@@ -1953,7 +2096,9 @@ function getSettingsFormData() {
       ...(currentConfig?.scanner || {}),
       spikeMinPercent: parseFloat(getVal('cfg-spike-pct', '2.0')) || 2.0,
       min24hVolumeUsdt: parseFloat(getVal('cfg-min-24h-vol', '1500000')) || 0,
+      max24hVolumeUsdt: parseFloat(getVal('cfg-max-24h-vol', '300000000')) || 0,
       maxSpreadPct: parseFloat(getVal('cfg-max-spread', '0.25')) || 0,
+    autoBlacklist: !!document.getElementById('cfg-auto-blacklist')?.checked,
       max24hChangePct: parseFloat(getVal('cfg-max-24h-change', '40')) || 0,
       skipBottomRejectionEnabled: !!document.getElementById('cfg-bottom-rejection-enabled')?.checked,
       bottomRejectionMinRangePct: parseFloat(getVal('cfg-bottom-rejection-range', '1.5')) || 1.5,
@@ -2026,6 +2171,7 @@ function getSettingsFormData() {
       notifyOnLayerFill: !!document.getElementById('cfg-tg-on-layer')?.checked,
       notifyOnClose: !!document.getElementById('cfg-tg-on-close')?.checked,
       notifyOnEmergency: !!document.getElementById('cfg-tg-on-emergency')?.checked,
+      notifyOnAutoBlacklist: !!document.getElementById('cfg-tg-on-autobl')?.checked,
       heartbeatIntervalHours: parseInt(getVal('cfg-tg-heartbeat-hours', '6'), 10) || 0,
     },
   };

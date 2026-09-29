@@ -2600,6 +2600,7 @@ export class WickSniperEngine {
           qty: l.qty,
           marginUsdt: l.marginUsdt,
           status: l.status,
+          filledAt: l.filledAt,
         })),
         paramsSnapshot: pos.paramsSnapshot || this.captureParamsSnapshot(),
       };
@@ -3095,6 +3096,10 @@ export class WickSniperEngine {
 
   public getRecentSpikes(): SpikeAlert[] {
     return this.scanner.getRecentSpikes();
+  }
+
+  public getScanner(): SpikeScanner {
+    return this.scanner;
   }
 
   public getStatus(): EngineStatus {

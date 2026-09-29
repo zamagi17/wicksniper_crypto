@@ -27,6 +27,9 @@ export interface BotConfig {
     upperWickPullbackMaxWaitSeconds?: number;
     upperWickCooldownMinutes?: number;
     min24hVolumeUsdt?: number;
+    max24hVolumeUsdt?: number;
+    blacklistTemporaryHours?: number;
+    autoBlacklist?: boolean;
     maxSpreadPct?: number;
     tradeGapFilterEnabled?: boolean;
     maxTradeGapSeconds?: number;
@@ -83,7 +86,8 @@ export interface BotConfig {
     notifyOnNewOrder?: boolean;
     notifyOnLayerFill?: boolean;
     notifyOnClose?: boolean;
-    notifyOnEmergency?: boolean;
+      notifyOnEmergency?: boolean;
+      notifyOnAutoBlacklist?: boolean;
     heartbeatIntervalHours?: number;
   };
   security?: {
@@ -184,6 +188,7 @@ export interface ClosedTrade {
     qty: number;
     marginUsdt: number;
     status: string;
+    filledAt?: number;
   }[];
   paramsSnapshot?: Record<string, any>;
 }

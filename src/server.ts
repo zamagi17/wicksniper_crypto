@@ -12,6 +12,7 @@ import { telegram } from './services/telegram';
 import { db } from './services/db';
 
 import crypto from 'crypto';
+import fs from 'fs';
 
 const app = express();
 const server = http.createServer(app);
@@ -328,6 +329,36 @@ app.get('/api/spikes', async (req, res) => {
   const spikes = list.slice(offset, offset + limit);
 
   return res.json({ success: true, spikes, total, page, totalPages });
+});
+
+// Blacklist management endpoints (protected)
+app.get('/api/blacklist', requireAuth, (req, res) => {
+  try {
+    const list = engine.getScanner().getBlacklist();
+    return res.json({ success: true, list });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/blacklist/clear', requireAuth, (req, res) => {
+  try {
+    engine.getScanner().clearBlacklist();
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/blacklist/remove', requireAuth, (req, res) => {
+  try {
+    const { symbol } = req.body || {};
+    if (!symbol) return res.status(400).json({ success: false, message: 'symbol required' });
+    engine.getScanner().removeBlacklist(symbol);
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 // WebSocket Realtime Broadcaster

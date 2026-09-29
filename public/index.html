@@ -352,7 +352,6 @@
             <p>Akses cepat menu bot wick sniper</p>
           </div>
         </div>
-        <button type="button" class="btn-close" onclick="closeMobileDrawer()">&times;</button>
       </div>
 
       <div class="drawer-body">
@@ -504,6 +503,18 @@
             <label>🛡️ Maksimal Spread Bid-Ask (%)</label>
             <input type="number" id="cfg-max-spread" min="0.05" max="2.0" step="0.05" class="form-control" placeholder="0.25">
             <small class="form-hint">Proteksi orderbook kosong. Lewati jika selisih Ask - Bid > X% (Standar: 0.25%).</small>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label>🛑 Max Volume 24 Jam (USDT)</label>
+            <input type="number" id="cfg-max-24h-vol" min="0" step="10000000" class="form-control" placeholder="300000000">
+            <small class="form-hint">Batas koin mania/frenzy (Saran: 300.000.000 USDT). Isi 0 jika tanpa batas.</small>
+          </div>
+          <div class="form-group" style="flex: 1; align-self: center; display:flex; gap:8px; align-items:center;">
+            <label style="margin:0; display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="cfg-auto-blacklist" style="width:16px; height:16px;" />
+              <span style="font-weight:600;">Aktifkan Auto Blacklist</span>
+            </label>
+            <small class="form-hint" style="margin-left:6px;">Jika aktif, koin bervolume > Max Volume otomatis di-blacklist 24 jam.</small>
           </div>
         </div>
 
@@ -880,8 +891,11 @@
         <div class="form-row" style="margin-top: 8px;">
           <div class="form-group" style="grid-column: span 2;">
             <label>Daftar Koin Blacklist / Exclude (Pisahkan dengan koma)</label>
-            <input type="text" id="cfg-exclude-symbols" class="form-control" placeholder="USDCUSDT, FDUSDUSDT, BTCUSDT, ETHUSDT, OURAUSDT">
-            <small class="form-hint">Koin-koin ini akan selalu diabaikan oleh scanner (tidak akan pernah discan atau ditembak).</small>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="text" id="cfg-exclude-symbols" class="form-control" placeholder="USDCUSDT, FDUSDUSDT, BTCUSDT, ETHUSDT, OURAUSDT" style="flex:1">
+              <button type="button" class="btn btn-warning" id="btn-open-blacklist" onclick="openBlacklistModal()">Manage Blacklist</button>
+            </div>
+            <small class="form-hint">Koin-koin ini akan selalu diabaikan oleh scanner (tidak akan pernah discan atau ditembak). Gunakan tombol <b>Manage Blacklist</b> untuk melihat & menghapus entri sementara.</small>
           </div>
         </div>
 
@@ -911,6 +925,14 @@
             </label>
             <small class="form-hint">Telegram berfungsi sebagai alert penting. Log lokal dan dashboard tetap menjadi audit utama untuk detail order, layer, dan close.</small>
           </div>
+
+            <div class="form-group" style="grid-column: span 2; margin-top:8px;">
+              <label style="display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="cfg-tg-on-autobl" style="width:16px; height:16px;" />
+                <span style="font-weight:600;">Kirim Notifikasi saat Auto-Blacklist</span>
+              </label>
+              <small class="form-hint">Jika dicentang, Telegram hanya akan menerima pesan ketika sistem menambahkan koin ke blacklist (opsional).</small>
+            </div>
         </div>
 
         <div id="telegram-input-group">
@@ -1017,6 +1039,34 @@
       <div class="modal-footer floating-footer">
         <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
         <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 Simpan Perubahan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BLACKLIST MODAL -->
+  <div id="blacklist-modal" class="modal-backdrop" style="z-index: 12000;" onclick="if(event.target===this)closeBlacklistModal()">
+    <div class="modal-card" style="max-width:720px; width:92%;">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3>🛑 Manage Blacklist</h3>
+        </div>
+        <button type="button" class="btn-close" onclick="closeBlacklistModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;">
+        <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+          <div style="font-size:13px; color:var(--text-muted);">Daftar entri koin yang sedang di-blacklist oleh sistem.</div>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="btn btn-danger" onclick="blacklistClear()">Clear All</button>
+            <button type="button" class="btn btn-secondary" id="btn-refresh-blacklist" onclick="refreshBlacklistList(this)">🔄 Refresh</button>
+          </div>
+        </div>
+
+        <div id="blacklist-list-container" style="max-height:360px; overflow-y:auto; border-radius:6px; border:1px solid var(--border-color); padding:8px; background:var(--panel-bg);">
+          <div id="blacklist-empty" style="padding:12px; color:var(--text-muted);">Memuat...</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:10px 20px; display:flex; justify-content:flex-end;">
+        <button type="button" class="btn btn-secondary" onclick="closeBlacklistModal()">Tutup</button>
       </div>
     </div>
   </div>

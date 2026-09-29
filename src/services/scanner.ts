@@ -1,6 +1,18 @@
 import { BotConfig, SpikeAlert, TickerSnapshot } from '../types';
 import { binanceFutures } from './binance';
 import { logger } from './logger';
+import fs from 'fs';
+import path from 'path';
+import { telegram } from './telegram';
+
+export interface BlacklistEntry {
+  symbol: string;
+  reason: string;
+  vol24?: number;
+  addedAt: number;
+  expiresAt?: number;
+  auto?: boolean;
+}
 
 export class SpikeScanner {
   private config: BotConfig['scanner'];
@@ -13,9 +25,109 @@ export class SpikeScanner {
   private lastTickReset: number = Date.now();
   private ticksPerSecond: number = 0;
   private lastDataAt: number = 0;
+  private blacklistMap: Map<string, BlacklistEntry> = new Map();
+  private blacklistSaveTimer: NodeJS.Timeout | null = null;
 
   constructor(config: BotConfig['scanner']) {
     this.config = config;
+    this.loadBlacklistFromDisk();
+  }
+
+  private getBlacklistPath(): string {
+    return path.resolve(__dirname, '../../data_cache/blacklist.json');
+  }
+
+  private loadBlacklistFromDisk() {
+    try {
+      const p = this.getBlacklistPath();
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      if (!fs.existsSync(p)) {
+        fs.writeFileSync(p, '[]', 'utf-8');
+        return;
+      }
+      const raw = fs.readFileSync(p, 'utf-8');
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        const now = Date.now();
+        for (const it of list) {
+          if (it && it.symbol && (!it.expiresAt || it.expiresAt > now)) {
+            this.blacklistMap.set(it.symbol, it);
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  private saveBlacklistToDisk() {
+    try {
+      const p = this.getBlacklistPath();
+      const arr = Array.from(this.blacklistMap.values());
+      fs.writeFileSync(p, JSON.stringify(arr, null, 2), 'utf-8');
+    } catch {
+      // ignore
+    }
+  }
+
+  private scheduleSaveBlacklist() {
+    if (this.blacklistSaveTimer) return;
+    this.blacklistSaveTimer = setTimeout(() => {
+      this.blacklistSaveTimer = null;
+      this.saveBlacklistToDisk();
+    }, 1000);
+  }
+
+  public getBlacklist(): BlacklistEntry[] {
+    const now = Date.now();
+    let hasExpired = false;
+    for (const [sym, entry] of this.blacklistMap.entries()) {
+      if (entry.expiresAt && entry.expiresAt <= now) {
+        this.blacklistMap.delete(sym);
+        hasExpired = true;
+      }
+    }
+    if (hasExpired) this.scheduleSaveBlacklist();
+    return Array.from(this.blacklistMap.values());
+  }
+
+  public isBlacklisted(symbol: string): boolean {
+    const entry = this.blacklistMap.get(symbol);
+    if (!entry) return false;
+    if (entry.expiresAt && entry.expiresAt <= Date.now()) {
+      this.blacklistMap.delete(symbol);
+      this.scheduleSaveBlacklist();
+      return false;
+    }
+    return true;
+  }
+
+  public addTemporaryBlacklist(symbol: string, entry: Partial<BlacklistEntry>) {
+    const now = Date.now();
+    const existing = this.blacklistMap.get(symbol);
+    const updated: BlacklistEntry = {
+      symbol,
+      reason: entry.reason || existing?.reason || 'Auto-blacklisted',
+      vol24: entry.vol24 || existing?.vol24,
+      addedAt: existing?.addedAt || now,
+      expiresAt: entry.expiresAt || existing?.expiresAt || (now + ((this.config.blacklistTemporaryHours || 24) * 3600 * 1000)),
+      auto: entry.auto ?? true,
+    };
+    this.blacklistMap.set(symbol, updated);
+    this.scheduleSaveBlacklist();
+    logger.log('WARN', `🔒 [BLACKLIST] ${symbol} flagged: ${updated.reason}`, symbol);
+  }
+
+  public removeBlacklist(symbol: string): boolean {
+    const deleted = this.blacklistMap.delete(symbol);
+    if (deleted) this.scheduleSaveBlacklist();
+    return deleted;
+  }
+
+  public clearBlacklist(): void {
+    this.blacklistMap.clear();
+    this.saveBlacklistToDisk();
   }
 
   public getTotalMonitoredSymbols(): number {
@@ -136,6 +248,28 @@ export class SpikeScanner {
       if (this.config.min24hVolumeUsdt && this.config.min24hVolumeUsdt > 0 && t.q !== undefined) {
         const quoteVol24h = parseFloat(t.q || '0');
         if (quoteVol24h < this.config.min24hVolumeUsdt) {
+          continue;
+        }
+      }
+
+      // skip if already blacklisted
+      if (this.isBlacklisted(symbol)) {
+        continue;
+      }
+
+      // Auto-blacklist volume ekstrim (hanya jika autoBlacklist aktif & batas atas max24hVolumeUsdt diset > 0)
+      if (this.config.autoBlacklist && this.config.max24hVolumeUsdt && this.config.max24hVolumeUsdt > 0) {
+        const vol24 = parseFloat(t.q || '0');
+        if (vol24 >= this.config.max24hVolumeUsdt) {
+          const reason = `24h volume $${Math.round(vol24).toLocaleString('en-US')} >= limit $${this.config.max24hVolumeUsdt.toLocaleString('en-US')}`;
+          this.addTemporaryBlacklist(symbol, {
+            reason,
+            vol24,
+            auto: true,
+          });
+          try {
+            telegram.notifyAutoBlacklist('Auto Blacklist: Volume Ekstrem', reason, symbol);
+          } catch {}
           continue;
         }
       }
