@@ -57,6 +57,8 @@ export interface BotConfig {
     earlyExitMinBullishCandles?: number;
     earlyExitMinRisePct?: number;
     earlyExitCooldownMinutes?: number;
+    earlyExitMinLayersPct?: number;
+    earlyExitMinLossSlPct?: number;
     hardStopCooldownMinutes?: number;
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)
@@ -200,6 +202,10 @@ export interface ClosedTrade {
     status: string;
     filledAt?: number;
   }[];
+  targetTpPrice?: number;
+  targetTp2Price?: number;
+  hardSlPrice?: number;
+  partialTpDone?: boolean;
   paramsSnapshot?: Record<string, any>;
   postExit30m?: PostExitSnapshot;
 }

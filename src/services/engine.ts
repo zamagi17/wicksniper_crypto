@@ -133,9 +133,11 @@ export class WickSniperEngine {
         ],
         maxHoldMinutes: 60,
         earlyExitMomentumEnabled: false,
-        earlyExitMinBullishCandles: 3,
-        earlyExitMinRisePct: 0.5,
+        earlyExitMinBullishCandles: 5,
+        earlyExitMinRisePct: 1.5,
         earlyExitCooldownMinutes: 60,
+        earlyExitMinLayersPct: 40,
+        earlyExitMinLossSlPct: 50,
         hardStopCooldownMinutes: 180,
         partialTpEnabled: false,
         partialTpRatio: 0.7,
@@ -1159,7 +1161,11 @@ export class WickSniperEngine {
 
       pos.currentPrice = currentPrice;
       const samples = this.priceMomentum.get(symbol) || [];
-      samples.push({ price: currentPrice, time: Date.now() });
+      // Subsample: max 1 sample per 15s agar "bullish candle" = tren 15 detik, bukan tick noise
+      const lastSample = samples.length > 0 ? samples[samples.length - 1] : null;
+      if (!lastSample || Date.now() - lastSample.time >= 15_000) {
+        samples.push({ price: currentPrice, time: Date.now() });
+      }
       const recentSamples = samples.filter((sample) => Date.now() - sample.time <= 90_000).slice(-8);
       this.priceMomentum.set(symbol, recentSamples);
 
@@ -1376,17 +1382,25 @@ export class WickSniperEngine {
     if (!exitCfg.earlyExitMomentumEnabled || pos.partialTpDone || samples.length < 2) return false;
     if (pos.currentPrice <= pos.avgEntryPrice) return false;
 
+    // Hanya trigger jika unrealized loss sudah >= ambang batas perjalanan ke Hard SL
+    // Mencegah early exit prematur saat posisi baru sedikit di atas entry & masih bisa recovery
+    const lossPct = ((pos.currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
+    const minLossRatio = (exitCfg.earlyExitMinLossSlPct !== undefined ? exitCfg.earlyExitMinLossSlPct : 50) / 100;
+    const slThreshold = (exitCfg.hardStopLossPct || 4.5) * minLossRatio;
+    if (lossPct < slThreshold) return false;
+
     const installedLayerCount = pos.layers.filter((layer) => layer.status !== 'CANCELLED').length;
     const filledLayerCount = pos.layers.filter((layer) => layer.status === 'FILLED').length;
-    const minimumFilledLayers = Math.ceil(installedLayerCount / 2);
+    const minLayersRatio = (exitCfg.earlyExitMinLayersPct !== undefined ? exitCfg.earlyExitMinLayersPct : 40) / 100;
+    const minimumFilledLayers = Math.max(1, Math.ceil(installedLayerCount * minLayersRatio));
     if (installedLayerCount === 0 || filledLayerCount < minimumFilledLayers) return false;
 
-    const requiredSamples = Math.max(2, exitCfg.earlyExitMinBullishCandles || 3);
+    const requiredSamples = Math.max(2, exitCfg.earlyExitMinBullishCandles || 5);
     if (samples.length < requiredSamples) return false;
     const window = samples.slice(-requiredSamples);
     const rising = window.every((sample, index) => index === 0 || sample.price > window[index - 1].price);
     const risePct = ((window[window.length - 1].price - window[0].price) / window[0].price) * 100;
-    return rising && risePct >= (exitCfg.earlyExitMinRisePct || 0.5);
+    return rising && risePct >= (exitCfg.earlyExitMinRisePct || 1.5);
   }
 
   /**
@@ -2126,6 +2140,8 @@ export class WickSniperEngine {
       earlyExitMinBullishCandles: this.config.exit?.earlyExitMinBullishCandles,
       earlyExitMinRisePct: this.config.exit?.earlyExitMinRisePct,
       earlyExitCooldownMinutes: this.config.exit?.earlyExitCooldownMinutes,
+      earlyExitMinLayersPct: this.config.exit?.earlyExitMinLayersPct,
+      earlyExitMinLossSlPct: this.config.exit?.earlyExitMinLossSlPct,
       hardStopCooldownMinutes: this.config.exit?.hardStopCooldownMinutes,
 
       // Scanner & Filters
@@ -2615,6 +2631,10 @@ export class WickSniperEngine {
           filledAt: l.filledAt,
         })),
         paramsSnapshot: pos.paramsSnapshot || this.captureParamsSnapshot(),
+        targetTpPrice: pos.targetTpPrice,
+        targetTp2Price: pos.targetTp2Price,
+        hardSlPrice: pos.hardSlPrice,
+        partialTpDone: pos.partialTpDone || false,
       };
 
       this.closedTrades.unshift(trade);

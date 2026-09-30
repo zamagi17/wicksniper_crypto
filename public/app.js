@@ -1438,6 +1438,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Durasi Ekstensi Candle Merah', snap.extendHoldSeconds, currExit.extendHoldSeconds, ' Detik')}
       ${renderCompareRow('Maks Ekstensi Candle Merah', snap.maxHoldExtensions, currExit.maxHoldExtensions, 'x')}
       ${renderCompareRow('Early Exit Momentum', snap.earlyExitMomentumEnabled, currExit.earlyExitMomentumEnabled)}
+      ${renderCompareRow('Early Exit Min Layer Terisi', snap.earlyExitMinLayersPct, currExit.earlyExitMinLayersPct, '%')}
+      ${renderCompareRow('Early Exit Ambang Rugi dari SL', snap.earlyExitMinLossSlPct, currExit.earlyExitMinLossSlPct, '%')}
       ${renderCompareRow('Early Exit Min Candle Bullish', snap.earlyExitMinBullishCandles, currExit.earlyExitMinBullishCandles, ' Candle')}
       ${renderCompareRow('Early Exit Kenaikan Min', snap.earlyExitMinRisePct, currExit.earlyExitMinRisePct, '%')}
       ${renderCompareRow('Cooldown Early Exit', snap.earlyExitCooldownMinutes, currExit.earlyExitCooldownMinutes, ' Menit')}
@@ -1542,6 +1544,72 @@ function openTradeDetailModal(tradeId, tradeIndex) {
             <div class="td-kpi-val text-purple">${t.layersFilled || '-'}</div>
           </div>
         </div>
+
+        <!-- TP / SL INFO -->
+        ${(() => {
+          const snapData = snap || {};
+          const entryP = Number(t.entryPrice || 0);
+          // Use stored prices, or compute from entry + snapshot %
+          const tpPrice = t.targetTpPrice || (entryP && snapData.takeProfitPct ? entryP * (1 - snapData.takeProfitPct / 100) : 0);
+          const tp2Pct = snapData.takeProfit2Pct || (snapData.takeProfitPct ? snapData.takeProfitPct * 2 : 0);
+          const tp2Price = t.targetTp2Price || (entryP && tp2Pct ? entryP * (1 - tp2Pct / 100) : 0);
+          const slPrice = t.hardSlPrice || (entryP && snapData.hardStopLossPct ? entryP * (1 + snapData.hardStopLossPct / 100) : 0);
+          const hasTpSl = tpPrice || slPrice;
+          const isPartialTpOn = snapData.partialTpEnabled || t.partialTpDone;
+          const tpRatio = snapData.partialTpRatio || 0.7;
+
+          if (!hasTpSl) return '';
+
+          let tpHtml = '';
+          if (tpPrice) {
+            if (isPartialTpOn && tp2Price) {
+              const tp1Pct = Math.round(tpRatio * 100);
+              const tp2Pct = 100 - tp1Pct;
+              tpHtml = `
+                <div class="td-kpi-card" style="flex: 1;">
+                  <div class="td-kpi-label">🎯 TP 1 (Stage 1 — ${tp1Pct}% Posisi)</div>
+                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tpPrice)} <small style="opacity:0.7; font-weight:400;">(−${snapData.takeProfitPct || '?'}%)</small></div>
+                </div>
+                <div class="td-kpi-card" style="flex: 1;">
+                  <div class="td-kpi-label">🎯 TP 2 (Stage 2 — ${tp2Pct}% Sisa)</div>
+                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tp2Price)} <small style="opacity:0.7; font-weight:400;">(−${snapData.takeProfit2Pct || (snapData.takeProfitPct ? snapData.takeProfitPct * 2 : '?')}%)</small></div>
+                </div>`;
+            } else {
+              tpHtml = `
+                <div class="td-kpi-card" style="flex: 1;">
+                  <div class="td-kpi-label">🎯 Target Take Profit</div>
+                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tpPrice)} <small style="opacity:0.7; font-weight:400;">(−${snapData.takeProfitPct || '?'}%)</small></div>
+                </div>`;
+            }
+          }
+
+          let slHtml = '';
+          if (slPrice) {
+            slHtml = `
+              <div class="td-kpi-card" style="flex: 1;">
+                <div class="td-kpi-label">🛑 Hard Stop Loss</div>
+                <div class="td-kpi-val text-red">$${formatCryptoPrice(slPrice)} <small style="opacity:0.7; font-weight:400;">(+${snapData.hardStopLossPct || '?'}%)</small></div>
+              </div>`;
+          }
+
+          const partialBadge = isPartialTpOn
+            ? `<span class="badge-mode live" style="font-size: 10px; margin-left: 6px;">Dual TP Aktif</span>`
+            : '';
+          const partialDoneHtml = t.partialTpDone
+            ? `<div class="td-kpi-card" style="flex: 1;">
+                 <div class="td-kpi-label">✅ Stage 1 (Partial TP)</div>
+                 <div class="td-kpi-val text-green">Sudah Tercairkan</div>
+               </div>`
+            : '';
+
+          return `
+            <div class="td-section-title" style="margin-top: 12px;">🎯 Target TP & SL Saat Trade${partialBadge}</div>
+            <div class="td-kpi-grid" style="margin-bottom: 8px;">
+              ${tpHtml}
+              ${slHtml}
+              ${partialDoneHtml}
+            </div>`;
+        })()}
 
         <!-- SNAPSHOT 30 MENIT PASCA-EXIT -->
         <div id="td-post-exit-container">
@@ -1727,8 +1795,10 @@ function applySnapshotParamsToConfig() {
   if (snap.earlyExitMomentumEnabled !== undefined) {
     setChecked('cfg-early-exit-momentum-enabled', snap.earlyExitMomentumEnabled);
   }
-  setVal('cfg-early-exit-candles', snap.earlyExitMinBullishCandles);
-  setVal('cfg-early-exit-rise', snap.earlyExitMinRisePct);
+  setVal('cfg-early-exit-min-layers-pct', snap.earlyExitMinLayersPct ?? 40);
+  setVal('cfg-early-exit-min-loss-sl-pct', snap.earlyExitMinLossSlPct ?? 50);
+  setVal('cfg-early-exit-candles', snap.earlyExitMinBullishCandles ?? 5);
+  setVal('cfg-early-exit-rise', snap.earlyExitMinRisePct ?? 1.5);
   setVal('cfg-early-exit-cooldown', snap.earlyExitCooldownMinutes);
   setVal('cfg-hard-sl-cooldown', snap.hardStopCooldownMinutes);
 
@@ -2091,8 +2161,10 @@ function populateSettingsForm(cfg) {
   setVal('cfg-trade-gap-cooldown', cfg.scanner?.tradeGapCooldownMinutes ?? 5);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
-  setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 3);
-  setVal('cfg-early-exit-rise', cfg.exit?.earlyExitMinRisePct || 0.5);
+  setVal('cfg-early-exit-min-layers-pct', cfg.exit?.earlyExitMinLayersPct ?? 40);
+  setVal('cfg-early-exit-min-loss-sl-pct', cfg.exit?.earlyExitMinLossSlPct ?? 50);
+  setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 5);
+  setVal('cfg-early-exit-rise', cfg.exit?.earlyExitMinRisePct || 1.5);
   setVal('cfg-early-exit-cooldown', cfg.exit?.earlyExitCooldownMinutes || 60);
   setVal('cfg-hard-sl-cooldown', cfg.exit?.hardStopCooldownMinutes || 180);
 
@@ -2191,6 +2263,28 @@ function populateSettingsForm(cfg) {
   setVal('cfg-exclude-symbols', (cfg.scanner?.excludeSymbols ?? ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT']).join(', '));
 }
 
+// Preset Early Exit Momentum
+window.applyEarlyExitPreset = function(preset) {
+  const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
+  if (eemCheckbox) eemCheckbox.checked = true;
+
+  if (preset === 'A') {
+    setVal('cfg-early-exit-min-layers-pct', 40);
+    setVal('cfg-early-exit-min-loss-sl-pct', 50);
+    setVal('cfg-early-exit-candles', 5);
+    setVal('cfg-early-exit-rise', 1.5);
+    setVal('cfg-early-exit-cooldown', 60);
+    alert('🎯 Preset Opsi A (Longgar & Santai) berhasil dipasang!\n• Min Layer Terisi: 40%\n• Ambang Rugi: 50% dari Hard SL\n• Candle Momentum: 5 (75s)\n• Kenaikan Min: 1.5%\n• Cooldown: 60 Menit\n\nKlik "Simpan Pengaturan" untuk menyimpan ke server.');
+  } else if (preset === 'B') {
+    setVal('cfg-early-exit-min-layers-pct', 35);
+    setVal('cfg-early-exit-min-loss-sl-pct', 40);
+    setVal('cfg-early-exit-candles', 4);
+    setVal('cfg-early-exit-rise', 1.2);
+    setVal('cfg-early-exit-cooldown', 60);
+    alert('🛡️ Preset Opsi B (Protektif) berhasil dipasang!\n• Min Layer Terisi: 35%\n• Ambang Rugi: 40% dari Hard SL\n• Candle Momentum: 4 (60s)\n• Kenaikan Min: 1.2%\n• Cooldown: 60 Menit\n\nKlik "Simpan Pengaturan" untuk menyimpan ke server.');
+  }
+};
+
 function getSettingsFormData() {
   const getVal = (id, def) => {
     const el = document.getElementById(id);
@@ -2238,8 +2332,10 @@ function getSettingsFormData() {
       hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
       maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
       earlyExitMomentumEnabled: !!document.getElementById('cfg-early-exit-momentum-enabled')?.checked,
-      earlyExitMinBullishCandles: parseInt(getVal('cfg-early-exit-candles', '3')) || 3,
-      earlyExitMinRisePct: parseFloat(getVal('cfg-early-exit-rise', '0.5')) || 0.5,
+      earlyExitMinLayersPct: parseFloat(getVal('cfg-early-exit-min-layers-pct', '40')) || 40,
+      earlyExitMinLossSlPct: parseFloat(getVal('cfg-early-exit-min-loss-sl-pct', '50')) || 50,
+      earlyExitMinBullishCandles: parseInt(getVal('cfg-early-exit-candles', '5')) || 5,
+      earlyExitMinRisePct: parseFloat(getVal('cfg-early-exit-rise', '1.5')) || 1.5,
       earlyExitCooldownMinutes: parseInt(getVal('cfg-early-exit-cooldown', '60')) || 60,
       hardStopCooldownMinutes: parseInt(getVal('cfg-hard-sl-cooldown', '180')) || 180,
       bepDefenseEnabled: !!document.getElementById('cfg-bep-defense-enabled')?.checked,
@@ -2932,6 +3028,12 @@ function applyConfigToBacktestInputs(cfg) {
 
   const bteemCheckbox = document.getElementById('bt-early-exit-momentum-enabled');
   if (bteemCheckbox) bteemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
+  if (cfg.exit?.earlyExitMinLayersPct !== undefined && document.getElementById('bt-early-exit-min-layers-pct')) {
+    document.getElementById('bt-early-exit-min-layers-pct').value = cfg.exit.earlyExitMinLayersPct;
+  }
+  if (cfg.exit?.earlyExitMinLossSlPct !== undefined && document.getElementById('bt-early-exit-min-loss-sl-pct')) {
+    document.getElementById('bt-early-exit-min-loss-sl-pct').value = cfg.exit.earlyExitMinLossSlPct;
+  }
   if (cfg.exit?.earlyExitMinBullishCandles !== undefined) document.getElementById('bt-early-exit-candles').value = cfg.exit.earlyExitMinBullishCandles;
   if (cfg.exit?.earlyExitMinRisePct !== undefined) document.getElementById('bt-early-exit-rise').value = cfg.exit.earlyExitMinRisePct;
   if (cfg.exit?.earlyExitCooldownMinutes !== undefined) document.getElementById('bt-early-exit-cooldown').value = cfg.exit.earlyExitCooldownMinutes;
@@ -3146,8 +3248,10 @@ async function executeBacktest() {
     hardStopLossPct: getNum('bt-sl', 4.5),
     trailingSlEnabled: !!document.getElementById('bt-trailing-sl-enabled')?.checked,
     earlyExitMomentumEnabled: !!document.getElementById('bt-early-exit-momentum-enabled')?.checked,
-    earlyExitMinBullishCandles: getInt('bt-early-exit-candles', 3),
-    earlyExitMinRisePct: getNum('bt-early-exit-rise', 0.5),
+    earlyExitMinLayersPct: getNum('bt-early-exit-min-layers-pct', 40),
+    earlyExitMinLossSlPct: getNum('bt-early-exit-min-loss-sl-pct', 50),
+    earlyExitMinBullishCandles: getInt('bt-early-exit-candles', 5),
+    earlyExitMinRisePct: getNum('bt-early-exit-rise', 1.5),
     earlyExitCooldownMinutes: getInt('bt-early-exit-cooldown', 60),
     hardStopCooldownMinutes: getInt('bt-hard-sl-cooldown', 180),
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,

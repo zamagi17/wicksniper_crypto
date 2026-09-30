@@ -22,6 +22,8 @@ export interface BacktestParams {
   earlyExitMinBullishCandles?: number;
   earlyExitMinRisePct?: number;
   earlyExitCooldownMinutes?: number;
+  earlyExitMinLayersPct?: number;
+  earlyExitMinLossSlPct?: number;
   hardStopCooldownMinutes?: number;
   partialTpEnabled?: boolean;
   partialTpRatio?: number;
@@ -166,8 +168,10 @@ export class WickSniperBacktester {
     const earlyExitCooldownMinutes = params.earlyExitCooldownMinutes || 60;
     const hardStopCooldownMinutes = params.hardStopCooldownMinutes || 180;
     const earlyExitMomentumEnabled = params.earlyExitMomentumEnabled === true;
-    const earlyExitMinBullishCandles = Math.max(2, params.earlyExitMinBullishCandles || 3);
-    const earlyExitMinRisePct = params.earlyExitMinRisePct || 0.5;
+    const earlyExitMinBullishCandles = Math.max(2, params.earlyExitMinBullishCandles || 5);
+    const earlyExitMinRisePct = params.earlyExitMinRisePct || 1.5;
+    const earlyExitMinLayersPct = params.earlyExitMinLayersPct !== undefined ? params.earlyExitMinLayersPct : 40;
+    const earlyExitMinLossSlPct = params.earlyExitMinLossSlPct !== undefined ? params.earlyExitMinLossSlPct : 50;
     const partialTpEnabled = params.partialTpEnabled === true;
     const partialTpRatio = params.partialTpRatio !== undefined ? params.partialTpRatio : 0.7;
     const takeProfit2Pct = params.takeProfit2Pct && params.takeProfit2Pct > 0 ? params.takeProfit2Pct : takeProfitPct * 2;
@@ -397,8 +401,18 @@ export class WickSniperBacktester {
 
           const installedLayerCount = layers.filter((layer) => layer.status !== 'CANCELLED').length;
           const filledLayerCount = layers.filter((layer) => layer.status === 'FILLED').length;
-          const minimumFilledLayers = Math.ceil(installedLayerCount / 2);
-          if (earlyExitMomentumEnabled && !partialDone && filledLayerCount >= minimumFilledLayers && evalCandle.close > avgPrice && k - earlyExitMinBullishCandles + 1 >= i) {
+          const minLayersRatio = earlyExitMinLayersPct / 100;
+          const minimumFilledLayers = Math.max(1, Math.ceil(installedLayerCount * minLayersRatio));
+          const lossPct = ((evalCandle.close - avgPrice) / avgPrice) * 100;
+          const slThreshold = (hardStopLossPct || 4.5) * (earlyExitMinLossSlPct / 100);
+          if (
+            earlyExitMomentumEnabled &&
+            !partialDone &&
+            filledLayerCount >= minimumFilledLayers &&
+            lossPct >= slThreshold &&
+            evalCandle.close > avgPrice &&
+            k - earlyExitMinBullishCandles + 1 >= i
+          ) {
             const momentumCandles = candles.slice(k - earlyExitMinBullishCandles + 1, k + 1);
             const bullish = momentumCandles.every((candle) => candle.close > candle.open);
             const risePct = ((momentumCandles[momentumCandles.length - 1].close - momentumCandles[0].open) / momentumCandles[0].open) * 100;
