@@ -256,7 +256,7 @@ export class DatabaseService {
           t.isPaper,
           t.closedAt,
           t.timestamp,
-          t.paramsSnapshot ? JSON.stringify(t.paramsSnapshot) : null,
+          t.paramsSnapshot ? JSON.stringify({ ...t.paramsSnapshot, ...(t.marketSnapshot ? { marketSnapshot: t.marketSnapshot } : {}) }) : (t.marketSnapshot ? JSON.stringify({ marketSnapshot: t.marketSnapshot }) : null),
           t.layersDetail ? JSON.stringify(t.layersDetail) : null,
           t.fee !== undefined ? t.fee : null,
           t.grossPnl !== undefined ? t.grossPnl : null,
@@ -310,6 +310,7 @@ export class DatabaseService {
         timestamp: parseInt(r.timestamp, 10),
         layersFilled: r.layersFilled || undefined,
         paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
+        marketSnapshot: (typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot)?.marketSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
         postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
       }));
@@ -369,6 +370,7 @@ export class DatabaseService {
         timestamp: parseInt(r.timestamp, 10),
         layersFilled: r.layersFilled || undefined,
         paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
+        marketSnapshot: (typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot)?.marketSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
         postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
       };
@@ -584,6 +586,7 @@ export class DatabaseService {
         timestamp: parseInt(r.timestamp, 10),
         layersFilled: r.layersFilled || undefined,
         paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
+        marketSnapshot: (typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot)?.marketSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
         postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
       }));

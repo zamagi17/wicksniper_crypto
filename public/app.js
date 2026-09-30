@@ -546,6 +546,14 @@ function formatCryptoPrice(val) {
   return num.toFixed(decimals);
 }
 
+function formatShortUsdt(num) {
+  if (!num || isNaN(num)) return '0';
+  const n = Number(num);
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toFixed(0);
+}
+
 function formatDateTime(val, splitLines = false) {
   if (!val) return '-';
   let ts = val;
@@ -816,7 +824,10 @@ function renderActivePositions(positions) {
             const dt = new Date(l.filledAt);
             timeTag = ` • ⏱️${dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`;
           }
-          return `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status}${timeTag} • $${l.marginUsdt.toFixed(2)})</span>`;
+          const volUsdt = l.volumeUsdt !== undefined ? Number(l.volumeUsdt) : ((Number(l.price || 0) * Number(l.qty || 0)) || (Number(l.marginUsdt || 0) * Number(pos.leverage || 5)));
+          const vol24hTag = l.vol24hUsdt ? ` • 🌐Vol24h: $${formatShortUsdt(l.vol24hUsdt)}` : '';
+          const rsiTag = l.rsi !== undefined ? ` • 📊RSI ${Number(l.rsi).toFixed(1)}` : '';
+          return `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status}${timeTag} • $${Number(l.marginUsdt || 0).toFixed(2)} Mgn • $${volUsdt.toFixed(1)} Vol${vol24hTag}${rsiTag})</span>`;
         })
         .join('');
 
@@ -826,6 +837,8 @@ function renderActivePositions(positions) {
             <div class="pos-symbol">
               ${pos.symbol}
               <span class="badge-side short">SHORT ${pos.leverage}x</span>
+              ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
+              ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
               <span class="badge-margin-tag">💰 Margin: $${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT</span>
             </div>
@@ -1396,10 +1409,37 @@ function openTradeDetailModal(tradeId, tradeIndex) {
                 timeHtml = `<span style="font-size: 10.5px; color: var(--text-muted);">⏱️ Terisi</span>`;
               }
 
+              const volUsdt = l.volumeUsdt !== undefined && l.volumeUsdt !== null
+                ? Number(l.volumeUsdt)
+                : ((priceNum * Number(l.qty || 0)) || (marginNum * Number(snap.leverage || 5)));
+
+              const layerVol24h = l.vol24hUsdt || (t.marketSnapshot && t.marketSnapshot.vol24hUsdt) || (snap.marketSnapshot && snap.marketSnapshot.vol24hUsdt);
+              let vol24hHtml = '';
+              if (layerVol24h) {
+                const fullVol24Str = Number(layerVol24h).toLocaleString('en-US');
+                vol24hHtml = `<span class="badge-vol24h" title="Vol. 24 Jam(USDT): $${fullVol24Str} USDT saat layer terisi">🌐 Vol 24h: <b>$${formatShortUsdt(layerVol24h)} USDT</b></span>`;
+              }
+
+              let rsiHtml = '';
+              if (l.rsi !== undefined && l.rsi !== null) {
+                const rVal = Number(l.rsi);
+                const rClass = rVal >= 80 ? 'rsi-hot' : rVal >= 70 ? 'rsi-warm' : '';
+                rsiHtml = `<span class="badge-rsi ${rClass}" title="RSI 14 (1m) saat layer terisi">📊 RSI: <b>${rVal.toFixed(1)}</b></span>`;
+              }
+
+              let vol1mHtml = '';
+              if (l.marketVolume1mUsdt) {
+                vol1mHtml = `<span class="badge-vol1m" title="Volume pasar koin 1m saat layer terisi">🌊 Vol 1m: <b>$${formatShortUsdt(l.marketVolume1mUsdt)}</b></span>`;
+              }
+
               return `
                 <div class="td-layer-row ${statusStr === 'FILLED' ? 'filled' : ''}">
                   <span><b>Layer #${layerIdx}</b>: $${formatCryptoPrice(priceNum)}</span>
                   <span>Margin: $${marginNum.toFixed(2)} USDT</span>
+                  <span>Vol Order: <b class="text-cyan">$${volUsdt.toFixed(2)}</b> USDT</span>
+                  ${vol24hHtml}
+                  ${rsiHtml}
+                  ${vol1mHtml}
                   ${timeHtml}
                   <span class="${statusStr === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${statusStr}]</b></span>
                 </div>
@@ -1543,7 +1583,86 @@ function openTradeDetailModal(tradeId, tradeIndex) {
             <div class="td-kpi-label">Layer Terisi</div>
             <div class="td-kpi-val text-purple">${t.layersFilled || '-'}</div>
           </div>
+          ${t.maePct !== undefined && t.maePct !== null ? `
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Drawdown Terdalam (MAE)</div>
+            <div class="td-kpi-val text-red">${Number(t.maePct) > 0 ? '-' : ''}${Math.abs(Number(t.maePct)).toFixed(1)}%</div>
+          </div>` : ''}
+          ${t.peakPnlPct !== undefined && Number(t.peakPnlPct) > 0 ? `
+          <div class="td-kpi-card">
+            <div class="td-kpi-label">Puncak Cuan (MFE)</div>
+            <div class="td-kpi-val text-green">+${Number(t.peakPnlPct).toFixed(1)}%</div>
+          </div>` : ''}
         </div>
+
+        <!-- MARKET SNAPSHOT SAAT ENTRY -->
+        ${(() => {
+          const mSnap = t.marketSnapshot || snap.marketSnapshot || (t.paramsSnapshot && t.paramsSnapshot.marketSnapshot) || null;
+          if (!mSnap || (mSnap.rsi1m === undefined && !mSnap.vol1mUsdt && !mSnap.vol24hUsdt && !mSnap.surgePct)) {
+            return '';
+          }
+          const rsiVal = mSnap.rsi1m !== undefined ? Number(mSnap.rsi1m) : null;
+          const rsiClass = rsiVal !== null ? (rsiVal >= 80 ? 'text-red' : rsiVal >= 70 ? 'text-yellow' : 'text-cyan') : '';
+          const rsiTag = rsiVal !== null ? (rsiVal >= 80 ? '<small style="font-size:10px; color:#ff4d4d; font-weight:600;"> (Extreme Overbought 🔥)</small>' : rsiVal >= 70 ? '<small style="font-size:10px; color:#f0b90b;"> (Overbought)</small>' : '') : '';
+
+          const highStr = mSnap.high24h ? `$${formatCryptoPrice(mSnap.high24h)}` : '';
+          const lowStr = mSnap.low24h ? `$${formatCryptoPrice(mSnap.low24h)}` : '';
+          const rangeInfo = highStr && lowStr ? `<small style="font-size:10px; color:var(--text-muted); display:block;">H: ${highStr} | L: ${lowStr}</small>` : '';
+
+          return `
+            <div class="td-section-title" style="margin-top: 14px;">📊 Snapshot Pasar Saat Entry (Layer #0)</div>
+            <div class="td-kpi-grid">
+              ${mSnap.vol24hUsdt ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🌐 Vol. 24 Jam (USDT)</div>
+                <div class="td-kpi-val text-cyan" title="$${Number(mSnap.vol24hUsdt).toLocaleString('en-US')} USDT">
+                  <b>$${formatShortUsdt(mSnap.vol24hUsdt)} USDT</b>
+                </div>
+              </div>` : ''}
+              ${rsiVal !== null ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">📊 RSI (14) 1m Saat Entry</div>
+                <div class="td-kpi-val ${rsiClass}"><b>${rsiVal.toFixed(1)}</b>${rsiTag}</div>
+              </div>` : ''}
+              ${mSnap.fundingRatePct !== undefined && mSnap.fundingRatePct !== null ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🪙 Pendanaan (Funding Rate)</div>
+                <div class="td-kpi-val ${Number(mSnap.fundingRatePct) < 0 ? 'text-red' : 'text-green'}">
+                  <b>${Number(mSnap.fundingRatePct) >= 0 ? '+' : ''}${Number(mSnap.fundingRatePct).toFixed(4)}%</b>
+                  ${Number(mSnap.fundingRatePct) <= -0.5 ? '<small style="font-size:10px; color:#ff4d4d; font-weight:600;"> (High Squeeze ⚠️)</small>' : ''}
+                </div>
+              </div>` : ''}
+              ${mSnap.openInterestUsdt ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🔓 Minat Terbuka (OI USDT)</div>
+                <div class="td-kpi-val" style="color: #38bdf8;" title="$${Number(mSnap.openInterestUsdt).toLocaleString('en-US')} USDT">
+                  <b>$${formatShortUsdt(mSnap.openInterestUsdt)} USDT</b>
+                </div>
+              </div>` : ''}
+              ${mSnap.priceChange24hPct !== undefined && mSnap.priceChange24hPct !== null ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">📈 Perubahan 24 Jam</div>
+                <div class="td-kpi-val ${Number(mSnap.priceChange24hPct) >= 0 ? 'text-green' : 'text-red'}">
+                  <b>${Number(mSnap.priceChange24hPct) >= 0 ? '+' : ''}${Number(mSnap.priceChange24hPct).toFixed(1)}%</b>
+                  ${rangeInfo}
+                </div>
+              </div>` : ''}
+              ${mSnap.surgePct ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">⚡ Lonjakan Spike</div>
+                <div class="td-kpi-val text-green">+${Number(mSnap.surgePct).toFixed(2)}% <small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(${mSnap.lookbackSeconds || snap.spikeLookbackSeconds || 20}s)</small></div>
+              </div>` : ''}
+              ${mSnap.vol1mUsdt ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🌊 Volume Candle 1m</div>
+                <div class="td-kpi-val text-cyan">
+                  $${formatShortUsdt(mSnap.vol1mUsdt)} USDT
+                  ${mSnap.volRatio ? `<small style="font-size:10px; color:var(--text-muted); font-weight:normal;"> (${mSnap.volRatio}x Normal)</small>` : ''}
+                </div>
+              </div>` : ''}
+            </div>
+          `;
+        })()}
 
         <!-- TP / SL INFO -->
         ${(() => {

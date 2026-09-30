@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, PostExitSnapshot, SpikeAlert } from '../types';
+import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SpikeAlert } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { logger } from './logger';
@@ -19,6 +19,42 @@ function formatCryptoPrice(val: number): string {
   if (abs < 10) return val.toFixed(4);
   if (abs < 100) return val.toFixed(3);
   return val.toFixed(2);
+}
+
+/**
+ * Menghitung Relative Strength Index (RSI) periode 14 standar.
+ */
+export function calculateRsi(closes: number[], period: number = 14): number | undefined {
+  if (!closes || closes.length < period + 1) return undefined;
+
+  let gains = 0;
+  let losses = 0;
+
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? Math.abs(diff) : 0;
+
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+
+  if (avgLoss === 0 && avgGain === 0) return 50;
+  if (avgLoss === 0) return 100;
+  if (avgGain === 0) return 0;
+
+  const rs = avgGain / avgLoss;
+  const rsi = 100 - 100 / (1 + rs);
+  return Math.round(rsi * 10) / 10;
 }
 
 export class WickSniperEngine {
@@ -59,6 +95,7 @@ export class WickSniperEngine {
   private lastRadarPulseAt: number = Date.now();
   private lastAutoBlacklistRefreshAt: number = Date.now();
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
+  private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
 
   constructor(configPath: string) {
     this.configPath = configPath;
@@ -801,11 +838,17 @@ export class WickSniperEngine {
       return;
     }
 
+    const currentTickerStats = this.scanner.getTickerStats(symbol);
+    const initial24hVol = currentTickerStats?.vol24hUsdt;
+
+    const layer0VolumeUsdt = parseFloat((layer0Qty * currentPrice).toFixed(2));
     layers.push({
       layerIndex: 0,
       price: currentPrice,
       qty: layer0Qty,
       marginUsdt: layer0ActualMargin,
+      volumeUsdt: layer0VolumeUsdt,
+      vol24hUsdt: initial24hVol,
       status: 'FILLED',
       filledAt: Date.now(),
     });
@@ -828,11 +871,14 @@ export class WickSniperEngine {
         break;
       }
 
+      const layerVolumeUsdt = parseFloat((layerQty * layerPrice).toFixed(2));
       layers.push({
         layerIndex: i,
         price: parseFloat(binanceFutures.formatPrice(symbol, layerPrice)),
         qty: layerQty,
         marginUsdt: layerActualMargin,
+        volumeUsdt: layerVolumeUsdt,
+        vol24hUsdt: initial24hVol,
         status: 'PENDING',
       });
       totalPlannedMargin += layerActualMargin;
@@ -973,6 +1019,7 @@ export class WickSniperEngine {
           layers[0].qty = executedQty;
           initialPos.totalQty = executedQty;
           layers[0].marginUsdt = (executedQty * realEntryPrice) / leverage;
+          layers[0].volumeUsdt = parseFloat((executedQty * realEntryPrice).toFixed(2));
           initialPos.totalMarginUsed = layers[0].marginUsdt;
         }
 
@@ -999,6 +1046,7 @@ export class WickSniperEngine {
           layers[i].price = formattedPrice;
           layers[i].qty = formattedQty;
           layers[i].marginUsdt = actualMargin;
+          layers[i].volumeUsdt = parseFloat((formattedQty * formattedPrice).toFixed(2));
           validLayers.push(layers[i]);
           runningTotalMargin += actualMargin;
         }
@@ -1142,6 +1190,9 @@ export class WickSniperEngine {
       `⚡ [EXEC SPEED] ${symbol} Layer #0 Paper Order terisi instan (12ms) @ $${initialPos.avgEntryPrice.toFixed(6)} | ${paperTpLog}`,
       symbol
     );
+
+    // Asinkron perkaya snapshot indikator pasar saat Entry (0ms delay pada eksekusi order)
+    this.enrichMarketSnapshot(initialPos, surgePct, lookbackSeconds).catch(() => {});
   }
 
   /**
@@ -1177,6 +1228,8 @@ export class WickSniperEngine {
           if (layer.status === 'PENDING' && currentPrice >= layer.price) {
             layer.status = 'FILLED';
             layer.filledAt = Date.now();
+            layer.volumeUsdt = layer.volumeUsdt || parseFloat((layer.qty * layer.price).toFixed(2));
+            this.enrichLayerMarketData(pos.symbol, layer).catch(() => {});
             layersChanged = true;
             logger.log(
               'SNIPER',
@@ -1209,6 +1262,9 @@ export class WickSniperEngine {
 
       if (pos.pnlPct > pos.peakPnlPct) {
         pos.peakPnlPct = pos.pnlPct;
+      }
+      if (pos.maxAdversePnlPct === undefined || pos.pnlPct < pos.maxAdversePnlPct) {
+        pos.maxAdversePnlPct = pos.pnlPct;
       }
 
       // 4. Evaluasi Kondisi Exit:
@@ -1784,6 +1840,8 @@ export class WickSniperEngine {
       if (layer && layer.status === 'PENDING') {
         layer.status = 'FILLED';
         layer.filledAt = Date.now();
+        layer.volumeUsdt = layer.volumeUsdt || parseFloat((layer.qty * (fillPrice || layer.price)).toFixed(2));
+        this.enrichLayerMarketData(pos.symbol, layer).catch(() => {});
         if (!layer.orderId) layer.orderId = orderId;
 
         logger.log(
@@ -2627,10 +2685,20 @@ export class WickSniperEngine {
           price: l.price,
           qty: l.qty,
           marginUsdt: l.marginUsdt,
+          volumeUsdt: l.volumeUsdt ?? parseFloat(((l.price || 0) * (l.qty || 0)).toFixed(2)),
+          vol24hUsdt: l.vol24hUsdt,
+          rsi: l.rsi,
+          marketVolume1mUsdt: l.marketVolume1mUsdt,
           status: l.status,
           filledAt: l.filledAt,
         })),
-        paramsSnapshot: pos.paramsSnapshot || this.captureParamsSnapshot(),
+        paramsSnapshot: {
+          ...(pos.paramsSnapshot || this.captureParamsSnapshot()),
+          ...(pos.marketSnapshot ? { marketSnapshot: pos.marketSnapshot } : {}),
+        },
+        marketSnapshot: pos.marketSnapshot,
+        maePct: pos.maxAdversePnlPct,
+        peakPnlPct: pos.peakPnlPct,
         targetTpPrice: pos.targetTpPrice,
         targetTp2Price: pos.targetTp2Price,
         hardSlPrice: pos.hardSlPrice,
@@ -2705,6 +2773,7 @@ export class WickSniperEngine {
     } finally {
       this.closingSymbols.delete(pos.symbol);
       this.candle1mCache.delete(pos.symbol);
+      this.indicatorCache.delete(pos.symbol);
     }
   }
 
@@ -2742,6 +2811,150 @@ export class WickSniperEngine {
 
     // Untuk posisi SHORT: Candle 1m MERAH jika harga saat ini lebih rendah dari harga Open candle berjalan
     return currentPrice < cached.open;
+  }
+
+  /**
+   * Mengambil indikator pasar real-time (RSI 14 periode 1m, volume 1m USDT, rasio volume, dan funding rate).
+   * Dilengkapi cache singkat (8 detik) agar tidak membebani kuota API.
+   */
+  public async fetchMarketIndicators(symbol: string): Promise<{
+    rsi1m?: number;
+    vol1mUsdt?: number;
+    avgVol1mUsdt?: number;
+    volRatio?: number;
+    fundingRatePct?: number;
+    openInterestUsdt?: number;
+  }> {
+    const now = Date.now();
+    const cached = this.indicatorCache.get(symbol);
+    if (cached && now - cached.timestamp < 8000) {
+      return cached.data;
+    }
+
+    let rsi1m: number | undefined;
+    let vol1mUsdt: number | undefined;
+    let avgVol1mUsdt: number | undefined;
+    let volRatio: number | undefined;
+    let fundingRatePct: number | undefined;
+    let openInterestUsdt: number | undefined;
+
+    try {
+      const client = await binanceFutures.getHttpClient();
+      const klinePromise = client.get('/fapi/v1/klines', {
+        params: { symbol, interval: '1m', limit: 25 },
+        timeout: 1500,
+      });
+      const fundingPromise = client.get('/fapi/v1/premiumIndex', {
+        params: { symbol },
+        timeout: 1500,
+      }).catch(() => null);
+      const oiPromise = client.get('/fapi/v1/openInterest', {
+        params: { symbol },
+        timeout: 1500,
+      }).catch(() => null);
+
+      const [klineRes, fundingRes, oiRes] = await Promise.all([klinePromise, fundingPromise, oiPromise]);
+
+      let closes: number[] = [];
+      if (klineRes && Array.isArray(klineRes.data) && klineRes.data.length >= 15) {
+        const klines = klineRes.data;
+        closes = klines.map((k: any) => parseFloat(k[4]));
+        rsi1m = calculateRsi(closes, 14);
+
+        const currentCandle = klines[klines.length - 1];
+        vol1mUsdt = Math.round(parseFloat(currentCandle[7] || '0'));
+
+        const prevCandles = klines.slice(0, -1);
+        if (prevCandles.length > 0) {
+          const totalVol = prevCandles.reduce((acc: number, k: any) => acc + parseFloat(k[7] || '0'), 0);
+          avgVol1mUsdt = Math.round(totalVol / prevCandles.length);
+          if (avgVol1mUsdt > 0 && vol1mUsdt > 0) {
+            volRatio = Math.round((vol1mUsdt / avgVol1mUsdt) * 10) / 10;
+          }
+        }
+
+        const openTime = currentCandle[0];
+        const open = parseFloat(currentCandle[1]);
+        this.candle1mCache.set(symbol, { open, openTime, fetchedAt: now });
+      }
+
+      if (fundingRes && fundingRes.data && fundingRes.data.lastFundingRate) {
+        const fr = parseFloat(fundingRes.data.lastFundingRate);
+        if (!isNaN(fr)) {
+          fundingRatePct = Math.round(fr * 10000) / 100;
+        }
+      }
+
+      if (oiRes && oiRes.data && oiRes.data.openInterest) {
+        const oiQty = parseFloat(oiRes.data.openInterest);
+        const currentP = this.scanner.getCurrentPrice(symbol) || (closes && closes.length > 0 ? closes[closes.length - 1] : 0);
+        if (!isNaN(oiQty) && currentP > 0) {
+          openInterestUsdt = Math.round(oiQty * currentP);
+        }
+      }
+    } catch {
+      // Abaikan error non-kritis
+    }
+
+    const data = { rsi1m, vol1mUsdt, avgVol1mUsdt, volRatio, fundingRatePct, openInterestUsdt };
+    this.indicatorCache.set(symbol, { timestamp: now, data });
+    return data;
+  }
+
+  /**
+   * Memperkaya ActivePosition dengan snapshot kondisi pasar saat Entry secara asinkron tanpa menunda order eksekusi
+   */
+  private async enrichMarketSnapshot(pos: ActivePosition, surgePct: number, lookbackSeconds: number) {
+    try {
+      const indicators = await this.fetchMarketIndicators(pos.symbol);
+      const tickerStats = this.scanner.getTickerStats(pos.symbol);
+
+      const snapshot: MarketSnapshot = {
+        rsi1m: indicators.rsi1m,
+        vol1mUsdt: indicators.vol1mUsdt,
+        avgVol1mUsdt: indicators.avgVol1mUsdt,
+        volRatio: indicators.volRatio,
+        vol24hUsdt: tickerStats?.vol24hUsdt,
+        priceChange24hPct: tickerStats?.change24hPct,
+        high24h: tickerStats?.high24h,
+        low24h: tickerStats?.low24h,
+        surgePct: surgePct,
+        lookbackSeconds: lookbackSeconds,
+        fundingRatePct: indicators.fundingRatePct,
+        openInterestUsdt: indicators.openInterestUsdt,
+        capturedAt: Date.now(),
+      };
+
+      pos.marketSnapshot = snapshot;
+
+      if (pos.layers && pos.layers[0]) {
+        pos.layers[0].rsi = indicators.rsi1m;
+        pos.layers[0].marketVolume1mUsdt = indicators.vol1mUsdt;
+        if (tickerStats?.vol24hUsdt) {
+          pos.layers[0].vol24hUsdt = tickerStats.vol24hUsdt;
+        }
+      }
+
+      if (pos.paramsSnapshot) {
+        pos.paramsSnapshot.marketSnapshot = snapshot;
+      }
+    } catch {}
+  }
+
+  /**
+   * Memperkaya Layer Grid dengan data pasar saat terisi (Vol 24h USDT, RSI & Volume 1m)
+   */
+  private async enrichLayerMarketData(symbol: string, layer: GridLayer) {
+    try {
+      const tickerStats = this.scanner.getTickerStats(symbol);
+      if (tickerStats?.vol24hUsdt) {
+        layer.vol24hUsdt = tickerStats.vol24hUsdt;
+      }
+
+      const indicators = await this.fetchMarketIndicators(symbol);
+      if (indicators.rsi1m !== undefined) layer.rsi = indicators.rsi1m;
+      if (indicators.vol1mUsdt !== undefined) layer.marketVolume1mUsdt = indicators.vol1mUsdt;
+    } catch {}
   }
 
   /**
@@ -2913,6 +3126,8 @@ export class WickSniperEngine {
                     if (accum <= liveQty + 1e-4 && layer.status === 'PENDING') {
                       layer.status = 'FILLED';
                       layer.filledAt = Date.now();
+                      layer.volumeUsdt = layer.volumeUsdt || parseFloat((layer.qty * layer.price).toFixed(2));
+                      this.enrichLayerMarketData(pos.symbol, layer).catch(() => {});
                       logger.log(
                         'SNIPER',
                         `🕸️ [LAYER TERISI RIIL BINANCE] ${symbol} Layer #${layer.layerIndex} terisi di Binance! Total Qty: ${liveQty} @ Avg $${pos.avgEntryPrice.toFixed(6)}`,

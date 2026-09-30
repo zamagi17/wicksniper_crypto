@@ -21,6 +21,7 @@ export class SpikeScanner {
   private alertListeners: ((alert: SpikeAlert) => void)[] = [];
   private recentSpikes: SpikeAlert[] = [];
   private lastPrices: Map<string, number> = new Map();
+  private tickerStats: Map<string, { price: number; vol24hUsdt: number; change24hPct: number; high24h?: number; low24h?: number }> = new Map();
   private tickCount: number = 0;
   private lastTickReset: number = Date.now();
   private ticksPerSecond: number = 0;
@@ -246,6 +247,10 @@ export class SpikeScanner {
     return this.lastPrices.get(symbol) || 0;
   }
 
+  public getTickerStats(symbol: string): { price: number; vol24hUsdt: number; change24hPct: number; high24h?: number; low24h?: number } | undefined {
+    return this.tickerStats.get(symbol);
+  }
+
   public getStats() {
     return {
       trackedPairs: this.getTotalMonitoredSymbols(),
@@ -315,6 +320,13 @@ export class SpikeScanner {
       if (currentPrice < this.config.minPriceUsdt || currentPrice > this.config.maxPriceUsdt) continue;
 
       this.lastPrices.set(symbol, currentPrice);
+      this.tickerStats.set(symbol, {
+        price: currentPrice,
+        vol24hUsdt: parseFloat(t.q || '0'),
+        change24hPct: parseFloat(t.P || '0'),
+        high24h: parseFloat(t.h || '0'),
+        low24h: parseFloat(t.l || '0'),
+      });
 
       // Simpan riwayat tick
       let history = this.priceHistory.get(symbol);

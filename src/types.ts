@@ -118,12 +118,32 @@ export interface SpikeAlert {
   skipReason?: string;
 }
 
+export interface MarketSnapshot {
+  rsi1m?: number;
+  vol1mUsdt?: number;
+  avgVol1mUsdt?: number;
+  volRatio?: number;
+  vol24hUsdt?: number;
+  priceChange24hPct?: number;
+  surgePct?: number;
+  lookbackSeconds?: number;
+  fundingRatePct?: number;
+  openInterestUsdt?: number;
+  high24h?: number;
+  low24h?: number;
+  capturedAt?: number;
+}
+
 export interface GridLayer {
   layerIndex: number;
   orderId?: string;
   price: number;
   qty: number;
   marginUsdt: number;
+  volumeUsdt?: number;
+  vol24hUsdt?: number;
+  marketVolume1mUsdt?: number;
+  rsi?: number;
   status: 'PENDING' | 'FILLED' | 'CANCELLED';
   filledAt?: number;
 }
@@ -139,6 +159,7 @@ export interface ActivePosition {
   unrealizedPnl: number;
   pnlPct: number;
   peakPnlPct: number;
+  maxAdversePnlPct?: number;
   totalMarginUsed: number;
   layers: GridLayer[];
   openedAt: number;
@@ -164,6 +185,7 @@ export interface ActivePosition {
   tp2OrderId?: string;
   lastTpAttempt?: number;
   paramsSnapshot?: Record<string, any>;
+  marketSnapshot?: MarketSnapshot;
 }
 
 export interface PostExitSnapshot {
@@ -199,6 +221,10 @@ export interface ClosedTrade {
     price: number;
     qty: number;
     marginUsdt: number;
+    volumeUsdt?: number;
+    vol24hUsdt?: number;
+    marketVolume1mUsdt?: number;
+    rsi?: number;
     status: string;
     filledAt?: number;
   }[];
@@ -207,6 +233,9 @@ export interface ClosedTrade {
   hardSlPrice?: number;
   partialTpDone?: boolean;
   paramsSnapshot?: Record<string, any>;
+  marketSnapshot?: MarketSnapshot;
+  maePct?: number;
+  peakPnlPct?: number;
   postExit30m?: PostExitSnapshot;
 }
 
