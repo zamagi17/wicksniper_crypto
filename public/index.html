@@ -700,7 +700,6 @@
           </div>
         </div>
 
-<<<<<<< Updated upstream
         <!-- RSI 1M MINIMUM & VOLUME BREAKOUT FILTER (ANTI OVERSOLD SHORT & RUNAWAY MOMENTUM) -->
         <div class="form-row" style="background: rgba(168, 85, 247, 0.04); border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
@@ -723,7 +722,7 @@
             <div class="form-group" style="flex: 1; min-width: 160px;">
               <label>Maksimal Rasio Volume Breakout (x)</label>
               <input type="number" id="cfg-max-vol-ratio" min="0" max="100" step="1" class="form-control" placeholder="20.0">
-              <small class="form-hint">Standar: 20x (Lewati jika Volume 1m &gt; X kali lipat normal)</small>
+              <small class="form-hint">Standar: 20x (Lewati jika Volume 1m &gt; X kali lipat normal. 0 = Nonaktif)</small>
             </div>
             <div class="form-group" style="flex: 1; min-width: 140px;">
               <label>Cooldown Volume Breakout (Menit)</label>
@@ -734,30 +733,9 @@
               💡 <b>Cara Kerja:</b><br/>
               • <b>RSI 1m &lt; 30 Ditolak:</b> Jika koin dump ke jurang lalu mantul sedikit, bot tidak akan membuka posisi SHORT di dasar lembah.<br/>
               • <b>Volume &gt; 20x Normal Ditolak:</b> Jika volume 1 menit tiba-tiba meledak 20x lipat dari rata-rata (pembelian institusi/breakout), bot tidak akan nekat menghadang roket.
-=======
-        <!-- MAX VOL RATIO FILTER (ANTI-MONSTER BREAKOUT WHALE / NEWS) -->
-        <div class="form-row" style="background: rgba(175, 82, 222, 0.04); border: 1px dashed rgba(175, 82, 222, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
-          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
-            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #af52de;">
-              <input type="checkbox" id="cfg-max-vol-ratio-enabled" onchange="toggleMaxVolRatioInput()" style="width: 16px; height: 16px; accent-color: #af52de;">
-              📊 Aktifkan Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale)
-            </label>
-            <small class="form-hint">Mencegah menembak Short saat spike diiringi volume raksasa (candle breakout berita/whale). Jika volume 1m lonjakan melebihi X kali lipat rata-rata 25 menit sebelumnya, order otomatis dibatalkan (SKIP) dan koin diistirahatkan.</small>
+            </div>
           </div>
-          <div id="cfg-max-vol-ratio-params" style="display: none; grid-column: span 2; gap: 12px; flex-wrap: wrap;">
-            <div class="form-group" style="flex: 1; min-width: 160px;">
-              <label>Maksimal Rasio Volume (x Normal)</label>
-              <input type="number" id="cfg-max-vol-ratio" min="2" max="100" step="1" class="form-control" placeholder="20">
-              <small class="form-hint">Standar: 20x (skip jika volume 1m &gt; X kali rata-rata)</small>
-            </div>
-            <div class="form-group" style="flex: 1; min-width: 160px;">
-              <label>Cooldown Breakout Whale (Menit)</label>
-              <input type="number" id="cfg-max-vol-ratio-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
-              <small class="form-hint">Jeda koin saat tertolak lonjakan volume ekstrem (Default: 10 menit)</small>
-            </div>
-            <div style="grid-column: span 2; width: 100%; padding: 8px 12px; background: rgba(175, 82, 222, 0.08); border-radius: var(--radius-sm, 6px); font-size: 11px; line-height: 1.5; color: #af52de;">
-              💡 <b>Cara Kerja:</b> Saat spike terdeteksi, bot menghitung rasio volume 1 menit berjalan dibanding rata-rata volume 25 candle 1m terakhir. Koin dengan lonjakan volume raksasa (&gt;20x) seperti PHAROS (28.6x) atau MUU (26.6x) adalah breakout institusional/whale yang berisiko tinggi menabrak SL, sehingga otomatis dilewati demi keamanan modal.
->>>>>>> Stashed changes
+        </div>
             </div>
           </div>
         </div>

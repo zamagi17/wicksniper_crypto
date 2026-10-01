@@ -1513,13 +1513,10 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Filter Jeda Tape / Trade Gap', snap.tradeGapFilterEnabled, currScanner.tradeGapFilterEnabled)}
       ${renderCompareRow('Maksimal Jeda Trade (Gap)', snap.maxTradeGapSeconds, currScanner.maxTradeGapSeconds, ' Detik')}
       ${renderCompareRow('Cooldown Koin Sepi (Gap)', snap.tradeGapCooldownMinutes, currScanner.tradeGapCooldownMinutes, ' Menit')}
-<<<<<<< Updated upstream
       ${renderCompareRow('Batas Min RSI 1m (Anti-Oversold)', snap.minRsi1m, currScanner.minRsi1m, '', (v) => v ? `≥ ${v}` : 'Nonaktif')}
+      ${renderCompareRow('Cooldown RSI Rendah', snap.minRsiCooldownMinutes, currScanner.minRsiCooldownMinutes, ' Menit')}
       ${renderCompareRow('Maksimal Rasio Volume Breakout', snap.maxVolRatio, currScanner.maxVolRatio, 'x', (v) => v ? `≤ ${v}x` : 'Nonaktif')}
-=======
-      ${renderCompareRow('Maksimal Rasio Volume', snap.maxVolRatio, currScanner.maxVolRatio, 'x Normal')}
       ${renderCompareRow('Cooldown Breakout Whale', snap.maxVolRatioCooldownMinutes, currScanner.maxVolRatioCooldownMinutes, ' Menit')}
->>>>>>> Stashed changes
       ${renderCompareRow('Whitelist Koin', snap.whitelistEnabled, currScanner.whitelistEnabled)}
 
       ${renderGroupHeader('⚙️ Mode Akun & Manajemen Risiko')}
@@ -2298,19 +2295,9 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-max-trade-gap-seconds', cfg.scanner?.maxTradeGapSeconds ?? 10);
   setVal('cfg-trade-gap-cooldown', cfg.scanner?.tradeGapCooldownMinutes ?? 5);
-<<<<<<< Updated upstream
   setVal('cfg-min-rsi', cfg.scanner?.minRsi1m ?? 30);
   setVal('cfg-min-rsi-cooldown', cfg.scanner?.minRsiCooldownMinutes ?? 10);
   setVal('cfg-max-vol-ratio', cfg.scanner?.maxVolRatio ?? 20.0);
-=======
-
-  const maxVolRatioCheckbox = document.getElementById('cfg-max-vol-ratio-enabled');
-  if (maxVolRatioCheckbox) {
-    maxVolRatioCheckbox.checked = cfg.scanner?.maxVolRatio !== undefined && cfg.scanner?.maxVolRatio > 0;
-    toggleMaxVolRatioInput();
-  }
-  setVal('cfg-max-vol-ratio', cfg.scanner?.maxVolRatio ?? 20);
->>>>>>> Stashed changes
   setVal('cfg-max-vol-ratio-cooldown', cfg.scanner?.maxVolRatioCooldownMinutes ?? 10);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
@@ -2469,15 +2456,9 @@ function getSettingsFormData() {
       tradeGapFilterEnabled: !!document.getElementById('cfg-trade-gap-enabled')?.checked,
       maxTradeGapSeconds: parseFloat(getVal('cfg-max-trade-gap-seconds', '10')) || 10,
       tradeGapCooldownMinutes: parseInt(getVal('cfg-trade-gap-cooldown', '5'), 10) || 5,
-<<<<<<< Updated upstream
       minRsi1m: parseFloat(getVal('cfg-min-rsi', '30')) || 0,
       minRsiCooldownMinutes: parseInt(getVal('cfg-min-rsi-cooldown', '10'), 10) || 10,
       maxVolRatio: parseFloat(getVal('cfg-max-vol-ratio', '20.0')) || 0,
-=======
-      maxVolRatio: document.getElementById('cfg-max-vol-ratio-enabled')?.checked
-        ? (parseFloat(getVal('cfg-max-vol-ratio', '20')) || 20)
-        : 0,
->>>>>>> Stashed changes
       maxVolRatioCooldownMinutes: parseInt(getVal('cfg-max-vol-ratio-cooldown', '10'), 10) || 10,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,

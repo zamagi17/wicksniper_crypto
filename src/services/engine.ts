@@ -145,13 +145,9 @@ export class WickSniperEngine {
         upperWickPullbackMaxWaitSeconds: 5,
         min24hVolumeUsdt: 1500000,
         maxSpreadPct: 0.25,
-<<<<<<< Updated upstream
         minRsi1m: 30,
         minRsiCooldownMinutes: 10,
-        maxVolRatio: 20.0,
-=======
         maxVolRatio: 20,
->>>>>>> Stashed changes
         maxVolRatioCooldownMinutes: 10,
       },
       grid: {
@@ -2389,11 +2385,8 @@ export class WickSniperEngine {
       tradeGapFilterEnabled: this.config.scanner?.tradeGapFilterEnabled,
       maxTradeGapSeconds: this.config.scanner?.maxTradeGapSeconds,
       tradeGapCooldownMinutes: this.config.scanner?.tradeGapCooldownMinutes,
-<<<<<<< Updated upstream
       minRsi1m: this.config.scanner?.minRsi1m,
       minRsiCooldownMinutes: this.config.scanner?.minRsiCooldownMinutes,
-=======
->>>>>>> Stashed changes
       maxVolRatio: this.config.scanner?.maxVolRatio,
       maxVolRatioCooldownMinutes: this.config.scanner?.maxVolRatioCooldownMinutes,
       whitelistEnabled: this.config.scanner?.whitelistEnabled,
