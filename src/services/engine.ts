@@ -145,9 +145,13 @@ export class WickSniperEngine {
         upperWickPullbackMaxWaitSeconds: 5,
         min24hVolumeUsdt: 1500000,
         maxSpreadPct: 0.25,
+<<<<<<< Updated upstream
         minRsi1m: 30,
         minRsiCooldownMinutes: 10,
         maxVolRatio: 20.0,
+=======
+        maxVolRatio: 20,
+>>>>>>> Stashed changes
         maxVolRatioCooldownMinutes: 10,
       },
       grid: {
@@ -658,6 +662,28 @@ export class WickSniperEngine {
           }
         } catch (e: any) {
           logger.log('INFO', `[BOTTOM REJECTION FILTER] Lewati cek kline cepat ${symbol}: ${e.message}`);
+        }
+      }
+
+      // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita)
+      if (this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
+        try {
+          const indicators = await this.fetchMarketIndicators(symbol);
+          if (indicators && typeof indicators.volRatio === 'number' && indicators.volRatio > this.config.scanner.maxVolRatio) {
+            alert.status = 'SKIPPED';
+            alert.skipReason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
+            const volCooldownMins = this.config.scanner.maxVolRatioCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
+            this.scanner.setCooldown(symbol, volCooldownMins);
+            logger.log(
+              'WARN',
+              `🛡️ [MAX VOL RATIO SKIP] ${symbol} dilewati: Rasio volume 1m (${indicators.volRatio}x) melebihi batas aman maks (${this.config.scanner.maxVolRatio}x). Terdeteksi lonjakan volume breakout abnormal/whale (cooldown ${volCooldownMins}m).`,
+              symbol
+            );
+            db.saveSpike(alert).catch(() => { });
+            return;
+          }
+        } catch (e: any) {
+          logger.log('INFO', `[MAX VOL RATIO FILTER] Lewati cek volRatio ${symbol}: ${e.message}`);
         }
       }
 
@@ -2363,8 +2389,11 @@ export class WickSniperEngine {
       tradeGapFilterEnabled: this.config.scanner?.tradeGapFilterEnabled,
       maxTradeGapSeconds: this.config.scanner?.maxTradeGapSeconds,
       tradeGapCooldownMinutes: this.config.scanner?.tradeGapCooldownMinutes,
+<<<<<<< Updated upstream
       minRsi1m: this.config.scanner?.minRsi1m,
       minRsiCooldownMinutes: this.config.scanner?.minRsiCooldownMinutes,
+=======
+>>>>>>> Stashed changes
       maxVolRatio: this.config.scanner?.maxVolRatio,
       maxVolRatioCooldownMinutes: this.config.scanner?.maxVolRatioCooldownMinutes,
       whitelistEnabled: this.config.scanner?.whitelistEnabled,

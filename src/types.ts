@@ -34,8 +34,11 @@ export interface BotConfig {
     tradeGapFilterEnabled?: boolean;
     maxTradeGapSeconds?: number;
     tradeGapCooldownMinutes?: number;
+<<<<<<< Updated upstream
     minRsi1m?: number;
     minRsiCooldownMinutes?: number;
+=======
+>>>>>>> Stashed changes
     maxVolRatio?: number;
     maxVolRatioCooldownMinutes?: number;
   };

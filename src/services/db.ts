@@ -78,6 +78,15 @@ export class DatabaseService {
             config JSONB NOT NULL,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
+
+          -- Migrasi aman: tambahkan default maxVolRatio ke config database production jika belum ada
+          UPDATE wicksniper_config
+          SET config = jsonb_set(
+            jsonb_set(config, '{scanner,maxVolRatio}', '20'::jsonb, true),
+            '{scanner,maxVolRatioCooldownMinutes}', '10'::jsonb, true
+          ),
+          updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1 AND (config->'scanner'->>'maxVolRatio') IS NULL;
         `);
 
         // 2. Tabel State Posisi & Saldo
