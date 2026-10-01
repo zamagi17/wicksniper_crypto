@@ -516,7 +516,7 @@ export class WickSniperEngine {
       const todayStartTs = this.getStartOfDayWibTimestamp();
       const currentDailyPnl = this.cachedDbStats
         ? this.cachedDbStats.dailyPnl
-        : Math.round(this.closedTrades.filter(t => t.timestamp >= todayStartTs).reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
+        : Math.round(this.closedTrades.filter(t => t.timestamp >= todayStartTs && (this.config.tradingMode === 'PAPER' ? t.isPaper : !t.isPaper)).reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
 
       if (currentDailyPnl <= -Math.abs(maxDailyLoss)) {
         alert.status = 'SKIPPED';
@@ -538,23 +538,22 @@ export class WickSniperEngine {
 
     // Proteksi Batas Saldo Bebas Minimal (Min Safety Balance Floor)
     const minSafetyBalance = this.config.risk?.minSafetyBalanceUsdt ?? 0;
-    if (this.config.tradingMode === 'LIVE' && minSafetyBalance > 0 && this.liveAvailableBalance > 0) {
-      if (this.liveAvailableBalance < minSafetyBalance) {
-        alert.status = 'SKIPPED';
-        alert.skipReason = `Saldo bebas ($${this.liveAvailableBalance.toFixed(2)}) di bawah batas aman ($${minSafetyBalance})`;
-        logger.log(
-          'WARN',
-          `🛡️ [MIN BALANCE SKIP] Saldo bebas ($${this.liveAvailableBalance.toFixed(2)} USDT) kurang dari batas aman ($${minSafetyBalance} USDT). Lonjakan ${symbol} dilewati.`,
-          symbol
-        );
-        telegram.notifyEmergencyAlert(
-          'Saldo Bebas di Bawah Batas Aman 🛡️',
-          `Saldo bebas saat ini $${this.liveAvailableBalance.toFixed(2)} USDT kurang dari batas aman ($${minSafetyBalance} USDT).\n\nPenembakan spike dibatalkan agar tidak membuka posisi tanpa jaring pengaman.`,
-          symbol
-        );
-        db.saveSpike(alert).catch(() => {});
-        return;
-      }
+    const currentBalance = this.config.tradingMode === 'LIVE' ? this.liveAvailableBalance : this.virtualBalance;
+    if (minSafetyBalance > 0 && currentBalance > 0 && currentBalance < minSafetyBalance) {
+      alert.status = 'SKIPPED';
+      alert.skipReason = `Saldo (${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} $${currentBalance.toFixed(2)}) di bawah batas aman ($${minSafetyBalance})`;
+      logger.log(
+        'WARN',
+        `🛡️ [MIN BALANCE SKIP] Saldo (${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} $${currentBalance.toFixed(2)} USDT) kurang dari batas aman ($${minSafetyBalance} USDT). Lonjakan ${symbol} dilewati.`,
+        symbol
+      );
+      telegram.notifyEmergencyAlert(
+        'Saldo di Bawah Batas Aman 🛡️',
+        `Saldo ${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} saat ini $${currentBalance.toFixed(2)} USDT kurang dari batas aman ($${minSafetyBalance} USDT).\n\nPenembakan spike dibatalkan agar tidak membuka posisi tanpa jaring pengaman.`,
+        symbol
+      );
+      db.saveSpike(alert).catch(() => {});
+      return;
     }
 
     // Proteksi Lapis 1 (SYNCHRONOUS ATOMIC LOCK):
@@ -944,6 +943,7 @@ export class WickSniperEngine {
       layers,
       openedAt: Date.now(),
       targetTpPrice: currentPrice * (1 - exitCfg.takeProfitPct / 100),
+      targetTp2Price: currentPrice * (1 - (exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) / 100),
       hardSlPrice: currentPrice * (1 + exitCfg.hardStopLossPct / 100),
       status: 'SNIPING',
       paramsSnapshot: this.captureParamsSnapshot(),
@@ -1287,14 +1287,17 @@ export class WickSniperEngine {
               pos.layers.filter((l) => l.status === 'FILLED').length,
               pos.layers.length
             );
-            // Update trailing SL when layer fills
-            this.updateTrailingSL(pos);
+            // Layer terisi
           }
         }
 
         // 2. Jika ada layer baru yang terisi, hitung ulang Average Entry Price & Target TP
         if (layersChanged) {
           this.recalculatePositionAverage(pos);
+          this.updateTrailingSL(pos);
+          pos.trailingTpActive = false;
+          pos.lowestPrice = undefined;
+          pos.peakPnlPct = 0;
           db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
         }
       }
@@ -1357,23 +1360,26 @@ export class WickSniperEngine {
         if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
           if (this.config.tradingMode === 'LIVE') {
             // JIKA TRAILING TP DIAKTIFKAN:
-            // Aktifkan runner jika harga dump tembus lebih dalam (>= 0.3% di bawah target TP)
-            if (this.config.exit.trailingTpEnabled && currentPrice <= pos.targetTpPrice * 0.997) {
-              pos.trailingTpActive = true;
-              pos.lowestPrice = currentPrice;
-              logger.log(
-                'INFO',
-                `🚀 [TRAILING TP AKTIF] ${pos.symbol}: Harga menembus target TP awal ke $${currentPrice.toFixed(6)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
-                pos.symbol
-              );
-              if (pos.tpOrderId) binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
-              if (pos.tp2OrderId) binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => {});
-              pos.tpOrderId = undefined;
-              pos.tp2OrderId = undefined;
+            // Aktifkan runner jika harga menyentuh atau melampaui target TP
+            if (this.config.exit.trailingTpEnabled) {
+              if (!pos.trailingTpActive) {
+                pos.trailingTpActive = true;
+                pos.lowestPrice = currentPrice;
+                logger.log(
+                  'INFO',
+                  `🚀 [TRAILING TP AKTIF] ${pos.symbol}: Target TP awal ($${formatCryptoPrice(pos.targetTpPrice)}) tercapai di $${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
+                  pos.symbol
+                );
+                if (pos.tpOrderId) binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
+                if (pos.tp2OrderId) binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => {});
+                pos.lastTpOrderId = pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId;
+                pos.tpOrderId = undefined;
+                pos.tp2OrderId = undefined;
+              }
               continue;
             }
 
-            // Mode LIVE: Order Limit TP Maker sudah antre di Binance matching engine.
+            // Mode LIVE tanpa Trailing TP: Order Limit TP Maker sudah antre di Binance matching engine.
             // DILARANG melempar Market Order di sini! Matching engine Binance mengeksekusi sebagai MAKER (0.02% fee, 0 slippage).
             // Notifikasi pengisian akan diterima instan melalui Private User Data Stream / syncLivePositions.
             continue;
@@ -1389,6 +1395,7 @@ export class WickSniperEngine {
                 pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - safePartialQty));
                 pos.partialTpDone = true;
                 pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
+                pos.partialExitPrice = currentPrice;
                 if (pos.layers) {
                   for (const l of pos.layers) {
                     if (l.status === 'PENDING') l.status = 'CANCELLED';
@@ -1401,11 +1408,15 @@ export class WickSniperEngine {
                   : this.config.exit.takeProfitPct * 2;
                 pos.targetTp2Price = pos.avgEntryPrice * (1 - tp2Pct / 100);
                 pos.targetTpPrice = pos.targetTp2Price;
+                if (this.config.exit.trailingTpEnabled) {
+                  pos.trailingTpActive = true;
+                  pos.lowestPrice = currentPrice;
+                }
                 const tp1PctStr = Math.round(ratio * 100);
                 const tp2PctStr = 100 - tp1PctStr;
                 logger.log(
                   'SUCCESS',
-                  `🎯 [STAGE 1 PARTIAL TP ${tp1PctStr}%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke Auto BEP: $${formatCryptoPrice(pos.hardSlPrice)} (Buffer ${effectiveBufferPct}%). Sisa ${pos.totalQty} koin (${tp2PctStr}%) memburu Stage 2 TP @ $${formatCryptoPrice(pos.targetTpPrice)}.`,
+                  `🎯 [STAGE 1 PARTIAL TP ${tp1PctStr}%] ${pos.symbol}: Cuan +$${partialPnl.toFixed(2)} berhasil diamankan! Grid pending dibatalkan, Hard SL dipindah ke Auto BEP: $${formatCryptoPrice(pos.hardSlPrice)} (Buffer ${effectiveBufferPct}%). Sisa ${pos.totalQty} koin (${tp2PctStr}%) ${this.config.exit.trailingTpEnabled ? 'memburu Trailing Runner' : `memburu Stage 2 TP @ $${formatCryptoPrice(pos.targetTpPrice)}`}.`,
                   pos.symbol
                 );
                 telegram.notifyPartialTp(
@@ -1421,13 +1432,29 @@ export class WickSniperEngine {
               }
             }
 
+            // 2. Jika Stage 1 Partial TP sudah selesai dan harga menyentuh target Stage 2 TP: Tutup sisa posisi!
+            if (this.config.exit.partialTpEnabled && pos.partialTpDone) {
+              if (this.config.exit.trailingTpEnabled) {
+                pos.trailingTpActive = true;
+                pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
+                continue;
+              }
+              logger.log(
+                'SUCCESS',
+                `🎯 [STAGE 2 TP TERPENUHI PAPER] ${pos.symbol}: Target TP Tahap 2 tercapai di $${formatCryptoPrice(currentPrice)} (<= $${formatCryptoPrice(pos.targetTpPrice)}). Menutup 100% sisa posisi...`,
+                pos.symbol
+              );
+              this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
+              continue;
+            }
+
             if (this.config.exit.trailingTpEnabled) {
               pos.trailingTpActive = true;
               pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
               continue;
             }
 
-            this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
+            this.closePosition(pos, pos.isBepDefenseActive ? 'BEP_DEFENSE' : 'TAKE_PROFIT', currentPrice);
             continue;
           }
         }
@@ -1447,6 +1474,15 @@ export class WickSniperEngine {
         // PROTEKSI 1: Jika pantulan harga memantul naik mendekati BEP (di atas batas aman), DILARANG tutup rugi!
         // Segera batalkan mode trailing dan pasang kembali Limit TP Maker di Binance agar posisi tetap terjaga dalam jaring
         if (currentPrice > safeTrailingMaxPrice) {
+          if (pos.partialTpDone) {
+            logger.log(
+              'INFO',
+              `🛡️ [TRAILING PROFIT FLOOR] ${pos.symbol}: Pantulan harga mendekati floor aman ($${formatCryptoPrice(currentPrice)} > $${formatCryptoPrice(safeTrailingMaxPrice)}). Mengamankan sisa posisi runner sebelum tersentuh Auto BEP.`,
+              pos.symbol
+            );
+            this.closePosition(pos, 'TRAILING_TP', currentPrice);
+            continue;
+          }
           logger.log(
             'WARN',
             `🛡️ [TRAILING RE-ANCHOR GUARD] ${pos.symbol}: Pantulan harga mendekati BEP ($${currentPrice.toFixed(6)} > batas aman $${safeTrailingMaxPrice.toFixed(6)}). Trailing TP distandbykan & Limit TP dipasang kembali di Binance agar posisi tetap aman dalam jaring.`,
@@ -1574,10 +1610,16 @@ export class WickSniperEngine {
       ? exitCfg.takeProfit2Pct
       : exitCfg.takeProfitPct * 2;
     const normalTp2 = pos.avgEntryPrice * (1 - tp2Pct / 100);
+
+    if (exitCfg.partialTpEnabled && pos.partialTpDone) {
+      return { targetTpPrice: normalTp2, targetTp2Price: normalTp2, isBepActive: false };
+    }
+
     return { targetTpPrice: normalTp1, targetTp2Price: normalTp2, isBepActive: false };
   }
 
   private recalculatePositionAverage(pos: ActivePosition) {
+    if (pos.partialTpDone) return;
     const filledLayers = pos.layers.filter((l) => l.status === 'FILLED');
     let totalNotional = 0;
     let totalQty = 0;
@@ -1672,6 +1714,7 @@ export class WickSniperEngine {
       : Math.round((pos.avgEntryPrice - (orderFill?.fillPrice || pos.targetTpPrice || pos.avgEntryPrice)) * closedQty * 100) / 100;
     pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, remainingQty));
     pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
+    pos.partialExitPrice = orderFill?.fillPrice || pos.targetTpPrice;
 
     this.auditTradeLifecycle(pos.symbol, 'PARTIAL_CLOSE_CONFIRMED', {
       side: 'BUY',
@@ -1683,6 +1726,7 @@ export class WickSniperEngine {
 
     // 1. Batalkan seluruh jaring pending grid di Binance
     await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
+    pos.lastTpOrderId = pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId;
     pos.tpOrderId = undefined;
     pos.tp2OrderId = undefined;
     if (pos.layers) {
@@ -1717,16 +1761,27 @@ export class WickSniperEngine {
     pos.targetTp2Price = pos.avgEntryPrice * (1 - tp2Pct / 100);
     pos.targetTpPrice = pos.targetTp2Price;
 
-    // 4. Pasang order Limit BUY TP2 baru untuk sisa volume di Binance
-    if (pos.totalQty > 0) {
-      await this.syncLiveTakeProfitOrder(pos);
-    }
-
     const tp1PctStr = Math.round((this.config.exit.partialTpRatio || 0.7) * 100);
     const tp2PctStr = 100 - tp1PctStr;
+
+    // 4. Pasang order Limit BUY TP2 baru atau aktifkan Trailing Runner
+    if (pos.totalQty > 0) {
+      if (this.config.exit.trailingTpEnabled) {
+        pos.trailingTpActive = true;
+        pos.lowestPrice = orderFill?.fillPrice || pos.currentPrice || pos.targetTpPrice;
+        logger.log(
+          'SUCCESS',
+          `🚀 [TRAILING RUNNER DIAKTIFKAN] ${pos.symbol}: TP1 berhasil diamankan. Sisa ${pos.totalQty} koin (${tp2PctStr}%) kini memburu profit trailing lebih dalam dengan proteksi Auto BEP!`,
+          pos.symbol
+        );
+      } else {
+        await this.syncLiveTakeProfitOrder(pos);
+      }
+    }
+
     logger.log(
       'SUCCESS',
-      `🎯 [STAGE 1 TP ${tp1PctStr}% TERISI DI BINANCE] ${pos.symbol}: Cuan Maker +$${partialPnl.toFixed(2)} aman! Grid pending dibatalkan, Hard SL digeser ke Auto BEP: $${formatCryptoPrice(pos.hardSlPrice)} (Buffer ${effectiveBufferPct}%). Sisa ${pos.totalQty} koin (${tp2PctStr}%) memburu TP2 @ $${formatCryptoPrice(pos.targetTp2Price || 0)}.`,
+      `🎯 [STAGE 1 TP ${tp1PctStr}% TERISI DI BINANCE] ${pos.symbol}: Cuan Maker +$${partialPnl.toFixed(2)} aman! Grid pending dibatalkan, Hard SL digeser ke Auto BEP: $${formatCryptoPrice(pos.hardSlPrice)} (Buffer ${effectiveBufferPct}%). Sisa ${pos.totalQty} koin (${tp2PctStr}%) ${this.config.exit.trailingTpEnabled ? 'memburu Trailing Runner' : `memburu TP2 @ $${formatCryptoPrice(pos.targetTp2Price || 0)}`}.`,
       pos.symbol
     );
     telegram.notifyPartialTp(
@@ -2014,49 +2069,75 @@ export class WickSniperEngine {
 
         if (canSplit) {
           const tpStartTime = Date.now();
-          const [tp1Res, tp2Res] = await Promise.all([
-            binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp1Qty, tp1Price, true),
-            binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp2Qty, tp2Price, true),
-          ]);
-          const tpLatencyMs = Date.now() - tpStartTime;
+          if (exitCfg.trailingTpEnabled) {
+            // BEST PRACTICE HYBRID DUAL TP + TRAILING:
+            // Pasang Limit Order Maker HANYA untuk TP1 (70%).
+            // Sisa 30% runner TIDAK dipasangi order limit kaku, melainkan disiapkan sebagai TRAILING RUNNER saat TP1 terisi!
+            const tp1Res = await binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp1Qty, tp1Price, true);
+            const tpLatencyMs = Date.now() - tpStartTime;
+            if (tp1Res?.orderId) {
+              pos.tpOrderId = String(tp1Res.orderId);
+              this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
+                side: 'BUY',
+                targetTpPrice: tp1Price,
+                qty: tp1Qty,
+                orderId: pos.tpOrderId,
+                status: 'ACTIVE_STAGE1',
+              });
+              const tp1RatioStr = Math.round(ratio * 100);
+              const tp2RatioStr = 100 - tp1RatioStr;
+              logger.log(
+                'SUCCESS',
+                `🎯 [HYBRID DUAL TP + TRAILING AKTIF] ${pos.symbol}: TP1 Maker (${tp1RatioStr}%: ${tp1Qty} koin @ $${tp1Price.toFixed(6)}) terpasang di Binance. Sisa ${tp2Qty} koin (${tp2RatioStr}%) disiapkan sebagai TRAILING RUNNER dinamis (${tpLatencyMs}ms).`,
+                pos.symbol
+              );
+              return;
+            }
+          } else {
+            const [tp1Res, tp2Res] = await Promise.all([
+              binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp1Qty, tp1Price, true),
+              binanceFutures.placeLimitOrder(pos.symbol, 'BUY', tp2Qty, tp2Price, true),
+            ]);
+            const tpLatencyMs = Date.now() - tpStartTime;
 
-          if (tp1Res?.orderId) {
-            pos.tpOrderId = String(tp1Res.orderId);
-            this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
-              side: 'BUY',
-              targetTpPrice: tp1Price,
-              qty: tp1Qty,
-              orderId: pos.tpOrderId,
-              status: 'ACTIVE_STAGE1',
-            });
-          }
-          if (tp2Res?.orderId) {
-            pos.tp2OrderId = String(tp2Res.orderId);
-            this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
-              side: 'BUY',
-              targetTpPrice: tp2Price,
-              qty: tp2Qty,
-              orderId: pos.tp2OrderId,
-              status: 'ACTIVE_STAGE2',
-            });
-          }
+            if (tp1Res?.orderId) {
+              pos.tpOrderId = String(tp1Res.orderId);
+              this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
+                side: 'BUY',
+                targetTpPrice: tp1Price,
+                qty: tp1Qty,
+                orderId: pos.tpOrderId,
+                status: 'ACTIVE_STAGE1',
+              });
+            }
+            if (tp2Res?.orderId) {
+              pos.tp2OrderId = String(tp2Res.orderId);
+              this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
+                side: 'BUY',
+                targetTpPrice: tp2Price,
+                qty: tp2Qty,
+                orderId: pos.tp2OrderId,
+                status: 'ACTIVE_STAGE2',
+              });
+            }
 
-          if (pos.tpOrderId && pos.tp2OrderId) {
-            const tp1RatioStr = Math.round(ratio * 100);
-            const tp2RatioStr = 100 - tp1RatioStr;
-            logger.log(
-              'SUCCESS',
-              `🎯 [DUAL LIMIT TP AKTIF] ${pos.symbol}: TP1 (${tp1RatioStr}%: ${tp1Qty} koin @ $${tp1Price.toFixed(6)}) & TP2 (${tp2RatioStr}%: ${tp2Qty} koin @ $${tp2Price.toFixed(6)}) terpasang (${tpLatencyMs}ms | Maker 0.02%)`,
-              pos.symbol
-            );
-            return;
-          } else if (pos.tpOrderId || pos.tp2OrderId) {
-            logger.log(
-              'WARN',
-              `⚠️ [DUAL TP SEBAGIAN] ${pos.symbol}: Satu order TP terpasang (TP1: ${pos.tpOrderId ? '#' + pos.tpOrderId : 'GAGAL'}, TP2: ${pos.tp2OrderId ? '#' + pos.tp2OrderId : 'GAGAL'}).`,
-              pos.symbol
-            );
-            return;
+            if (pos.tpOrderId && pos.tp2OrderId) {
+              const tp1RatioStr = Math.round(ratio * 100);
+              const tp2RatioStr = 100 - tp1RatioStr;
+              logger.log(
+                'SUCCESS',
+                `🎯 [DUAL LIMIT TP AKTIF] ${pos.symbol}: TP1 (${tp1RatioStr}%: ${tp1Qty} koin @ $${tp1Price.toFixed(6)}) & TP2 (${tp2RatioStr}%: ${tp2Qty} koin @ $${tp2Price.toFixed(6)}) terpasang (${tpLatencyMs}ms | Maker 0.02%)`,
+                pos.symbol
+              );
+              return;
+            } else if (pos.tpOrderId || pos.tp2OrderId) {
+              logger.log(
+                'WARN',
+                `⚠️ [DUAL TP SEBAGIAN] ${pos.symbol}: Satu order TP terpasang (TP1: ${pos.tpOrderId ? '#' + pos.tpOrderId : 'GAGAL'}, TP2: ${pos.tp2OrderId ? '#' + pos.tp2OrderId : 'GAGAL'}).`,
+                pos.symbol
+              );
+              return;
+            }
           }
         } else {
           logger.log(
@@ -2069,6 +2150,16 @@ export class WickSniperEngine {
 
       // KASUS B: Partial TP Aktif dan Tahap 1 sudah selesai -> Pasang Limit Order TP2 untuk sisa volume
       if (exitCfg.partialTpEnabled && pos.partialTpDone) {
+        if (exitCfg.trailingTpEnabled) {
+          pos.trailingTpActive = true;
+          pos.lowestPrice = Math.min(pos.lowestPrice || pos.avgEntryPrice, pos.currentPrice || pos.avgEntryPrice);
+          logger.log(
+            'SUCCESS',
+            `🚀 [STAGE 2 TRAILING RUNNER AKTIF] ${pos.symbol}: Sisa ${pos.totalQty} koin memburu profit trailing lebih dalam tanpa order limit kaku!`,
+            pos.symbol
+          );
+          return;
+        }
         const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0
           ? exitCfg.takeProfit2Pct
           : exitCfg.takeProfitPct * 2;
@@ -2100,6 +2191,14 @@ export class WickSniperEngine {
       }
 
       // KASUS C: Single TP Biasa (100% Volume)
+      if (exitCfg.trailingTpEnabled) {
+        logger.log(
+          'INFO',
+          `🎯 [TRAILING TP SIAGA] ${pos.symbol}: Mode Trailing TP aktif (100% Volume). Menunggu harga mencapai target $${pos.targetTpPrice.toFixed(6)} untuk mengaktifkan trailing runner...`,
+          pos.symbol
+        );
+        return;
+      }
       const tpStartTime = Date.now();
       const tpRes = await binanceFutures.placeLimitOrder(
         pos.symbol,
@@ -2147,7 +2246,7 @@ export class WickSniperEngine {
    * Only tighten (lower), never relax (raise)
    */
   private updateTrailingSL(pos: ActivePosition) {
-    if (!this.config.exit.trailingSlEnabled || !pos.layers) return;
+    if (!this.config.exit.trailingSlEnabled || !pos.layers || pos.partialTpDone) return;
 
     const exitCfg = this.config.exit;
     const leverage = pos.leverage || this.config.leverage || 5;
@@ -2445,11 +2544,12 @@ export class WickSniperEngine {
           }
           const freshBuyTrades = recentTrades.filter((tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime);
 
-          if (pos.tpOrderId || pos.tp2OrderId) {
+          if (pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId) {
             const tpMatches = recentTrades.filter(
               (tr: any) =>
                 (pos.tpOrderId && String(tr.orderId) === String(pos.tpOrderId)) ||
-                (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId))
+                (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId)) ||
+                (pos.lastTpOrderId && String(tr.orderId) === String(pos.lastTpOrderId))
             );
             if (tpMatches.length > 0) {
               confirmedClose = true;
@@ -2548,11 +2648,12 @@ export class WickSniperEngine {
               closingTrades = recentTrades.filter(
                 (tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime
               );
-            } else if (pos.tpOrderId || pos.tp2OrderId) {
+            } else if (pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId) {
               closingTrades = recentTrades.filter(
                 (tr: any) =>
                   (pos.tpOrderId && String(tr.orderId) === String(pos.tpOrderId)) ||
-                  (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId))
+                  (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId)) ||
+                  (pos.lastTpOrderId && String(tr.orderId) === String(pos.lastTpOrderId))
               );
             }
             if (closingTrades.length === 0 && closeResOrderId) {
@@ -2564,9 +2665,9 @@ export class WickSniperEngine {
               );
             }
 
-            if (closingTrades.length === 0 && (pos.tp2OrderId || pos.tpOrderId)) {
+            if (closingTrades.length === 0 && (pos.tp2OrderId || pos.tpOrderId || pos.lastTpOrderId)) {
               try {
-                const targetOid = pos.tp2OrderId || pos.tpOrderId;
+                const targetOid = pos.tp2OrderId || pos.tpOrderId || pos.lastTpOrderId;
                 const tpOrder = await binanceFutures.getOrder(pos.symbol, targetOid!);
                 if (tpOrder && parseFloat(tpOrder.avgPrice || '0') > 0) {
                   actualExitPrice = parseFloat(tpOrder.avgPrice);
@@ -2623,11 +2724,12 @@ export class WickSniperEngine {
               const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
               actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
 
-              const isTpOrderMatch = pos.tpOrderId || pos.tp2OrderId
+              const isTpOrderMatch = pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId
                 ? closingTrades.some(
                     (tr: any) =>
                       (pos.tpOrderId && String(tr.orderId) === String(pos.tpOrderId)) ||
-                      (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId))
+                      (pos.tp2OrderId && String(tr.orderId) === String(pos.tp2OrderId)) ||
+                      (pos.lastTpOrderId && String(tr.orderId) === String(pos.lastTpOrderId))
                   )
                 : false;
 
@@ -2688,13 +2790,35 @@ export class WickSniperEngine {
         }
       } else {
         // Mode PAPER TRADING: Potong estimasi komisi riil Binance (round-trip ~0.07% notional)
-        const entryFee = pos.avgEntryPrice * pos.totalQty * 0.00035;
-        const exitFee = closePrice * pos.totalQty * (reason === 'TAKE_PROFIT' ? 0.0002 : 0.0005);
+        const filledPaperLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
+        const paperTradeQty = filledPaperLayers.length > 0
+          ? parseFloat(binanceFutures.formatQty(pos.symbol, filledPaperLayers.reduce((sum, l) => sum + l.qty, 0)))
+          : pos.totalQty;
+        const paperTradeMargin = filledPaperLayers.length > 0
+          ? Math.round(filledPaperLayers.reduce((sum, l) => sum + l.marginUsdt, 0) * 100) / 100
+          : pos.totalMarginUsed;
+
+        const partialQty = (pos.partialTpDone && paperTradeQty > pos.totalQty) ? (paperTradeQty - pos.totalQty) : 0;
+        const entryFee = pos.avgEntryPrice * paperTradeQty * 0.00035;
+        const isMakerExit = reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE';
+        const exitFee = (partialQty * pos.avgEntryPrice * 0.0002) + (closePrice * pos.totalQty * (isMakerExit ? 0.0002 : 0.0005));
         actualFee = Math.round((entryFee + exitFee) * 1000) / 1000;
         actualRealizedPnl = Math.round((finalRealizedPnl - actualFee) * 100) / 100;
-        const marginBase = pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1;
+        const marginBase = paperTradeMargin > 0 ? paperTradeMargin : (pos.totalMarginUsed > 0 ? pos.totalMarginUsed : 1);
         actualPnlPct = Math.round((actualRealizedPnl / marginBase) * 1000) / 10;
-        this.virtualBalance += actualRealizedPnl;
+
+        // Hitung rata-rata tertimbang exit price jika ada partial TP
+        if (pos.partialTpDone && partialQty > 0) {
+          const partialPrice = pos.partialExitPrice || pos.avgEntryPrice * (1 - (this.config.exit.takeProfitPct || 1) / 100);
+          actualExitPrice = ((partialQty * partialPrice) + (pos.totalQty * closePrice)) / paperTradeQty;
+        }
+
+        // Hindari double-credit virtualBalance: saat Stage 1 Partial TP, partialPnl sudah dikreditkan.
+        // Saat penutupan sisa posisi, hanya kreditkan selisih PnL akhir ke virtualBalance.
+        const incrementalPnl = pos.partialTpDone
+          ? Math.round((actualRealizedPnl - (pos.partialRealizedPnl || 0)) * 100) / 100
+          : actualRealizedPnl;
+        this.virtualBalance += incrementalPnl;
       }
 
       const filledLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
@@ -3109,8 +3233,14 @@ export class WickSniperEngine {
                     detectedReason = 'HARD_STOP_LOSS';
                   } else if (pos.isBepDefenseActive) {
                     detectedReason = 'BEP_DEFENSE';
-                  } else if (pos.tpOrderId && String(latestBuy.orderId) === String(pos.tpOrderId)) {
+                  } else if (
+                    (pos.tpOrderId && String(latestBuy.orderId) === String(pos.tpOrderId)) ||
+                    (pos.tp2OrderId && String(latestBuy.orderId) === String(pos.tp2OrderId)) ||
+                    (pos.lastTpOrderId && String(latestBuy.orderId) === String(pos.lastTpOrderId))
+                  ) {
                     detectedReason = 'TAKE_PROFIT';
+                  } else if (pos.trailingTpActive) {
+                    detectedReason = 'TRAILING_TP';
                   }
                 }
               } catch {}
@@ -3204,14 +3334,18 @@ export class WickSniperEngine {
           const isLiveLongPos = realPos && (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0));
           if (!isLiveLongPos && realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol) && !this.closingSymbols.has(symbol)) {
             try {
-              const openOrders = await binanceFutures.getOpenOrders(symbol);
-              const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
-              if (!hasTpOrder && pos.status === 'SNIPING' && !this.closingSymbols.has(symbol)) {
-                const now = Date.now();
-                if (!pos.lastTpAttempt || now - pos.lastTpAttempt >= 10000) {
-                  pos.lastTpAttempt = now;
-                  logger.log('WARN', `⚠️ [TP HILANG] ${symbol}: Tidak ada order Take Profit aktif di Binance. Memasang Limit TP baru...`, symbol);
-                  await this.syncLiveTakeProfitOrder(pos);
+              // Best practice: Jangan pasang order Limit TP kaku jika Trailing Runner sedang aktif
+              const isTrailingRunnerActive = pos.trailingTpActive || (this.config.exit.trailingTpEnabled && (pos.partialTpDone || !this.config.exit.partialTpEnabled));
+              if (!isTrailingRunnerActive) {
+                const openOrders = await binanceFutures.getOpenOrders(symbol);
+                const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
+                if (!hasTpOrder && pos.status === 'SNIPING' && !this.closingSymbols.has(symbol)) {
+                  const now = Date.now();
+                  if (!pos.lastTpAttempt || now - pos.lastTpAttempt >= 10000) {
+                    pos.lastTpAttempt = now;
+                    logger.log('WARN', `⚠️ [TP HILANG] ${symbol}: Tidak ada order Take Profit aktif di Binance. Memasang Limit TP baru...`, symbol);
+                    await this.syncLiveTakeProfitOrder(pos);
+                  }
                 }
               }
             } catch { }

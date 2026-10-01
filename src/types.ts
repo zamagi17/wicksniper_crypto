@@ -181,12 +181,14 @@ export interface ActivePosition {
   status: 'SNIPING' | 'HOLDING' | 'CLOSING' | 'CLOSED';
   partialTpDone?: boolean;
   partialRealizedPnl?: number;
+  partialExitPrice?: number;
   isBepDefenseActive?: boolean;
   bepDefenseReason?: string;
   trailingTpActive?: boolean;
   lowestPrice?: number;
   tpOrderId?: string;
   tp2OrderId?: string;
+  lastTpOrderId?: string;
   lastTpAttempt?: number;
   paramsSnapshot?: Record<string, any>;
   marketSnapshot?: MarketSnapshot;
