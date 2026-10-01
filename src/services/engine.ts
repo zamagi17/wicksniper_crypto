@@ -145,6 +145,10 @@ export class WickSniperEngine {
         upperWickPullbackMaxWaitSeconds: 5,
         min24hVolumeUsdt: 1500000,
         maxSpreadPct: 0.25,
+        minRsi1m: 30,
+        minRsiCooldownMinutes: 10,
+        maxVolRatio: 20.0,
+        maxVolRatioCooldownMinutes: 10,
       },
       grid: {
         maxConcurrentCoins: 2,
@@ -696,6 +700,47 @@ export class WickSniperEngine {
           }
         } catch (e: any) {
           logger.log('INFO', `[TRADE GAP FILTER] Lewati cek trades ${symbol}: ${e.message}`);
+        }
+      }
+
+      // Filter RSI 1m Minimum (Dilarang SHORT jika RSI 1m < 30) & Maksimal Rasio Volume Breakout
+      const minRsi1m = this.config.scanner?.minRsi1m;
+      const maxVolRatio = this.config.scanner?.maxVolRatio;
+      if ((minRsi1m !== undefined && minRsi1m > 0) || (maxVolRatio !== undefined && maxVolRatio > 0)) {
+        try {
+          const indicators = await this.fetchMarketIndicators(symbol);
+
+          // Cek 1: Filter RSI 1m Minimum (Mencegah SHORT pada koin yang baru memantul dari oversold)
+          if (minRsi1m !== undefined && minRsi1m > 0 && indicators.rsi1m !== undefined && indicators.rsi1m < minRsi1m) {
+            alert.status = 'SKIPPED';
+            alert.skipReason = `RSI 1m (${indicators.rsi1m.toFixed(1)}) di bawah batas aman (${minRsi1m}) untuk SHORT (rawan pantulan oversold)`;
+            const rsiCooldown = this.config.scanner?.minRsiCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 10;
+            this.scanner.setCooldown(symbol, rsiCooldown);
+            logger.log(
+              'WARN',
+              `🛡️ [MIN RSI SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena RSI 1m (${indicators.rsi1m.toFixed(1)}) < batas aman (${minRsi1m}). Menghindari SHORT saat oversold/rebound (cooldown ${rsiCooldown}m).`,
+              symbol
+            );
+            db.saveSpike(alert).catch(() => {});
+            return;
+          }
+
+          // Cek 2: Filter Maksimal Rasio Volume Breakout (Mencegah menghadang breakout volume masif)
+          if (maxVolRatio !== undefined && maxVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio > maxVolRatio) {
+            alert.status = 'SKIPPED';
+            alert.skipReason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) melebihi batas breakout maks (${maxVolRatio}x normal)`;
+            const volCooldown = this.config.scanner?.maxVolRatioCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 10;
+            this.scanner.setCooldown(symbol, volCooldown);
+            logger.log(
+              'WARN',
+              `🛡️ [MAX VOL BREAKOUT SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena volume 1m (${indicators.volRatio.toFixed(1)}x rata-rata) melampaui batas (${maxVolRatio}x). Menghindari roket breakout volume masif (cooldown ${volCooldown}m).`,
+              symbol
+            );
+            db.saveSpike(alert).catch(() => {});
+            return;
+          }
+        } catch (e: any) {
+          logger.log('INFO', `[INDICATOR FILTER] Lewati cek indikator ${symbol}: ${e.message}`);
         }
       }
 
@@ -2219,6 +2264,10 @@ export class WickSniperEngine {
       tradeGapFilterEnabled: this.config.scanner?.tradeGapFilterEnabled,
       maxTradeGapSeconds: this.config.scanner?.maxTradeGapSeconds,
       tradeGapCooldownMinutes: this.config.scanner?.tradeGapCooldownMinutes,
+      minRsi1m: this.config.scanner?.minRsi1m,
+      minRsiCooldownMinutes: this.config.scanner?.minRsiCooldownMinutes,
+      maxVolRatio: this.config.scanner?.maxVolRatio,
+      maxVolRatioCooldownMinutes: this.config.scanner?.maxVolRatioCooldownMinutes,
       whitelistEnabled: this.config.scanner?.whitelistEnabled,
       whitelistSymbols: this.config.scanner?.whitelistSymbols,
 

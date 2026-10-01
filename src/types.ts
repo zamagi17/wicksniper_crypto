@@ -34,6 +34,10 @@ export interface BotConfig {
     tradeGapFilterEnabled?: boolean;
     maxTradeGapSeconds?: number;
     tradeGapCooldownMinutes?: number;
+    minRsi1m?: number;
+    minRsiCooldownMinutes?: number;
+    maxVolRatio?: number;
+    maxVolRatioCooldownMinutes?: number;
   };
   grid: {
     maxConcurrentCoins: number;

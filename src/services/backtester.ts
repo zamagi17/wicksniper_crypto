@@ -36,6 +36,8 @@ export interface BacktestParams {
   bottomRejectionDominanceRatio?: number;
   upperWickPullbackEnabled?: boolean;
   upperWickPullbackMinPct?: number;
+  minRsi1m?: number;
+  maxVolRatio?: number;
   bypassCache?: boolean;
 }
 

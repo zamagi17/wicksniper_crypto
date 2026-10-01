@@ -700,6 +700,43 @@
           </div>
         </div>
 
+        <!-- RSI 1M MINIMUM & VOLUME BREAKOUT FILTER (ANTI OVERSOLD SHORT & RUNAWAY MOMENTUM) -->
+        <div class="form-row" style="background: rgba(168, 85, 247, 0.04); border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #c084fc;">
+              📊 Filter RSI 1m Minimum & Maksimal Rasio Volume Breakout
+            </label>
+            <small class="form-hint">Mencegah jebakan fatal: (1) Membuka SHORT saat koin oversold/mantul dari jurang (RSI &lt; 30), dan (2) Menghadang roket breakout volume raksasa (&gt; 20x volume rata-rata).</small>
+          </div>
+          <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 160px;">
+              <label>Batas Minimum RSI 1m (Anti-Oversold)</label>
+              <input type="number" id="cfg-min-rsi" min="0" max="90" step="1" class="form-control" placeholder="30">
+              <small class="form-hint">Standar: 30 (Dilarang SHORT jika RSI &lt; 30. 0 = Nonaktif)</small>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Cooldown RSI Rendah (Menit)</label>
+              <input type="number" id="cfg-min-rsi-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
+              <small class="form-hint">Jeda koin saat tertolak RSI &lt; 30 (Default: 10m)</small>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 160px;">
+              <label>Maksimal Rasio Volume Breakout (x)</label>
+              <input type="number" id="cfg-max-vol-ratio" min="0" max="100" step="1" class="form-control" placeholder="20.0">
+              <small class="form-hint">Standar: 20x (Lewati jika Volume 1m &gt; X kali lipat normal)</small>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Cooldown Volume Breakout (Menit)</label>
+              <input type="number" id="cfg-max-vol-ratio-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
+              <small class="form-hint">Jeda koin saat tertolak volume breakout (Default: 10m)</small>
+            </div>
+            <div style="grid-column: span 2; width: 100%; padding: 8px 12px; background: rgba(168, 85, 247, 0.08); border-radius: var(--radius-sm, 6px); font-size: 11px; line-height: 1.5; color: #e9d5ff;">
+              💡 <b>Cara Kerja:</b><br/>
+              • <b>RSI 1m &lt; 30 Ditolak:</b> Jika koin dump ke jurang lalu mantul sedikit, bot tidak akan membuka posisi SHORT di dasar lembah.<br/>
+              • <b>Volume &gt; 20x Normal Ditolak:</b> Jika volume 1 menit tiba-tiba meledak 20x lipat dari rata-rata (pembelian institusi/breakout), bot tidak akan nekat menghadang roket.
+            </div>
+          </div>
+        </div>
+
         <!-- TRAILING STOP LOSS SECTION -->
         <div class="form-row" style="background: rgba(255, 150, 0, 0.03); border: 1px dashed rgba(255, 150, 0, 0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
