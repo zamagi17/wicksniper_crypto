@@ -1958,15 +1958,6 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-max-vol-ratio', snap.maxVolRatio ?? '');
   setVal('cfg-max-vol-ratio-cooldown', snap.maxVolRatioCooldownMinutes ?? '');
 
-  if (snap.maxVolRatio !== undefined) {
-    setChecked('cfg-max-vol-ratio-enabled', snap.maxVolRatio > 0);
-    if (typeof toggleMaxVolRatioInput === 'function') toggleMaxVolRatioInput();
-    setVal('cfg-max-vol-ratio', snap.maxVolRatio);
-  }
-  if (snap.maxVolRatioCooldownMinutes !== undefined) {
-    setVal('cfg-max-vol-ratio-cooldown', snap.maxVolRatioCooldownMinutes);
-  }
-
   if (snap.whitelistEnabled !== undefined) {
     setChecked('cfg-whitelist-enabled', snap.whitelistEnabled);
     if (typeof toggleWhitelistInput === 'function') toggleWhitelistInput();
