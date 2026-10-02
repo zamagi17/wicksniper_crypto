@@ -573,13 +573,13 @@
           </div>
           <div class="form-group">
             <label>Min Layer Terisi (%)</label>
-            <input type="number" id="cfg-early-exit-min-layers-pct" min="10" max="100" step="5" class="form-control" placeholder="40" value="40">
-            <small class="form-hint">Ambang minimal layer terisi (cth: 40% dari 18 layer = 8 layer).</small>
+            <input type="number" id="cfg-early-exit-min-layers-pct" min="10" max="100" step="5" class="form-control" placeholder="60" value="60">
+            <small class="form-hint">Ambang minimal layer terisi (cth: 60% dari 6 layer = 4 layer).</small>
           </div>
           <div class="form-group">
             <label>Ambang Rugi (% dari Hard SL)</label>
-            <input type="number" id="cfg-early-exit-min-loss-sl-pct" min="10" max="90" step="5" class="form-control" placeholder="50" value="50">
-            <small class="form-hint">Trigger hanya saat rugi ≥ X% jarak ke Hard SL (cth: 50% dari SL 12% = 6.0%).</small>
+            <input type="number" id="cfg-early-exit-min-loss-sl-pct" min="10" max="90" step="5" class="form-control" placeholder="60" value="60">
+            <small class="form-hint">Trigger hanya saat rugi ≥ X% jarak ke Hard SL (cth: 60% dari SL 4.5% = 2.7%).</small>
           </div>
           <div class="form-group">
             <label>Jumlah Candle Bullish</label>
@@ -601,15 +601,15 @@
           </div>
           <div style="grid-column: span 2; width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; padding: 10px 12px; background: rgba(255, 59, 48, 0.06); border-radius: var(--radius-sm, 6px); font-size: 11.5px; line-height: 1.5;">
             <div>
-              💡 <b>Preset Rekomendasi (Opsi A - Longgar & Santai):</b><br/>
-              Layer Terisi: <code>40%</code>, Ambang Rugi: <code>50%</code>, Candle: <code>5 (75s)</code>, Kenaikan: <code>1.5%</code>.
+              💡 <b>Preset Rekomendasi (Opsi A - Anti-Keluar Dini):</b><br/>
+              Layer Terisi: <code>60%</code>, Ambang Rugi: <code>60%</code>, Candle: <code>5 (75s)</code>, Kenaikan: <code>1.5%</code>.
             </div>
             <div style="display: flex; gap: 6px;">
               <button type="button" class="btn btn-sm" onclick="applyEarlyExitPreset('A')" style="background: rgba(46, 213, 115, 0.15); color: var(--color-green, #2ed573); border: 1px solid rgba(46, 213, 115, 0.3); font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 4px;">
-                🎯 Pasang Opsi A (Longgar)
+                🎯 Pasang Opsi A (Anti-Keluar Dini)
               </button>
               <button type="button" class="btn btn-sm" onclick="applyEarlyExitPreset('B')" style="background: rgba(255, 159, 10, 0.15); color: var(--color-warning, #ff9f0a); border: 1px solid rgba(255, 159, 10, 0.3); font-size: 11px; padding: 4px 10px; cursor: pointer; border-radius: 4px;">
-                🛡️ Pasang Opsi B (Protektif)
+                🛡️ Pasang Opsi B (Moderat)
               </button>
             </div>
           </div>
@@ -904,6 +904,96 @@
             <label>Pengali Martingale (x)</label>
             <input type="number" id="cfg-martingale" min="1.0" max="2.5" step="0.05" class="form-control" placeholder="1.1">
             <small class="form-hint">Faktor kelipatan modal pada layer berikutnya.</small>
+          </div>
+        </div>
+
+        <!-- MOMENTUM BREAKOUT & SHORT SQUEEZE LONG SECTION -->
+        <div class="form-row" style="background: rgba(0, 230, 118, 0.04); border: 1px solid rgba(0, 230, 118, 0.35); border-radius: var(--radius-sm); padding: 14px; margin-top: 16px; margin-bottom: 16px;">
+          <div style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; color: #00e676; font-size: 14px;">
+              <input type="checkbox" id="cfg-long-enabled" onchange="toggleLongSettingsGroup()" style="width: 18px; height: 18px; accent-color: #00e676;">
+              🚀 Aktifkan Peluang MOMENTUM LONG (Short Squeeze & Trend Runner)
+            </label>
+            <span style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 230, 118, 0.15); color: #00e676; font-weight: 700;">STRATEGI LONG</span>
+          </div>
+          <div style="grid-column: span 2; margin-bottom: 10px;">
+            <small class="form-hint" style="color: rgba(255,255,255,0.75);">Menangkap koin yang meledak super-trend seperti SANDUSDT. Jika lonjakan harga diiringi volume raksasa dan funding rate minus, bot otomatis beralih menembak <b>BUY LONG</b> (bukan SHORT).</small>
+          </div>
+
+          <div id="cfg-long-params-group" style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Min Spike Lonjakan (%)</label>
+              <input type="number" id="cfg-long-min-surge" min="1.0" max="20.0" step="0.1" class="form-control" placeholder="3.0">
+              <small class="form-hint">Syarat kenaikan harga kilat (Standar: 3.0%)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Min Rasio Volume 1m (x)</label>
+              <input type="number" id="cfg-long-min-vol-ratio" min="1.5" max="50.0" step="0.5" class="form-control" placeholder="4.0">
+              <small class="form-hint">Volume 1m wajib &ge; X kali lipat normal (Standar: 4.0x)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Maks Funding Rate (%)</label>
+              <input type="number" id="cfg-long-max-funding" min="-2.0" max="0.5" step="0.01" class="form-control" placeholder="0.05">
+              <small class="form-hint">Syarat squeeze: lolos jika funding &le; X% (Standar: 0.05%)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 120px;">
+              <label>Modal Margin (USDT)</label>
+              <input type="number" id="cfg-long-margin" min="1" step="1" class="form-control" placeholder="3">
+              <small class="form-hint">Margin per posisi LONG (Standar: 3 USDT)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 120px;">
+              <label>Leverage LONG (x)</label>
+              <input type="number" id="cfg-long-leverage" min="1" max="50" step="1" class="form-control" placeholder="5">
+              <small class="form-hint">Leverage posisi LONG (Standar: 5x)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Target TP Awal (%)</label>
+              <input type="number" id="cfg-long-tp" min="1.0" max="50.0" step="0.5" class="form-control" placeholder="6.0">
+              <small class="form-hint">Target cuan awal jika tanpa trailing (Standar: 6.0%)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Hard Stop Loss (%)</label>
+              <input type="number" id="cfg-long-sl" min="0.5" max="15.0" step="0.1" class="form-control" placeholder="2.5">
+              <small class="form-hint">Cut loss mutlak jika breakout gagal (Standar: 2.5%)</small>
+            </div>
+
+            <div class="form-group" style="grid-column: span 2; width: 100%; margin-top: 4px; padding: 10px 12px; background: rgba(0, 230, 118, 0.06); border-radius: var(--radius-sm, 6px); border-left: 3px solid #00e676;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #00e676; font-size: 13px;">
+                <input type="checkbox" id="cfg-long-trailing-enabled" checked style="width: 15px; height: 15px; accent-color: #00e676;">
+                📈 Aktifkan Trailing Take Profit LONG (Memburu Puncak Tren)
+              </label>
+              <small class="form-hint" style="color: rgba(255,255,255,0.7); margin-top: 4px;">Setelah floating profit melampaui target aktivasi, bot terus mencatat titik tertinggi. Bot hanya exit saat harga memantul turun sebesar Callback % dari puncak.</small>
+              <div style="display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 140px;">
+                  <label style="font-size: 12px;">Ambang Mulai Trailing (%)</label>
+                  <input type="number" id="cfg-long-trailing-activation" min="0.5" max="10.0" step="0.1" class="form-control" placeholder="1.5" style="padding: 6px 10px; font-size: 12px;">
+                  <small class="form-hint">Mulai aktif saat profit &ge; X% (Standar: 1.5%)</small>
+                </div>
+                <div style="flex: 1; min-width: 140px;">
+                  <label style="font-size: 12px;">Callback Dari Puncak (%)</label>
+                  <input type="number" id="cfg-long-trailing-callback" min="0.2" max="5.0" step="0.1" class="form-control" placeholder="0.8" style="padding: 6px 10px; font-size: 12px;">
+                  <small class="form-hint">Exit jika turun X% dari harga puncak (Standar: 0.8%)</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Maksimal Hold LONG (Menit)</label>
+              <input type="number" id="cfg-long-max-hold" min="5" max="720" step="5" class="form-control" placeholder="60">
+              <small class="form-hint">Batas durasi tahan posisi LONG (Standar: 60 menit)</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Cooldown Koin LONG (Menit)</label>
+              <input type="number" id="cfg-long-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="15">
+              <small class="form-hint">Jeda istirahat koin setelah exit LONG (Standar: 15 menit)</small>
+            </div>
           </div>
         </div>
 

@@ -96,12 +96,29 @@ export interface BotConfig {
       notifyOnAutoBlacklist?: boolean;
     heartbeatIntervalHours?: number;
   };
+  momentumLong?: MomentumLongConfig;
   security?: {
     password?: string;
   };
   server: {
     port: number;
   };
+}
+
+export interface MomentumLongConfig {
+  enabled: boolean;
+  minSurgePct?: number;
+  minVolRatio?: number;
+  maxFundingRatePct?: number;
+  marginUsdt?: number;
+  leverage?: number;
+  takeProfitPct?: number;
+  trailingTpEnabled?: boolean;
+  trailingActivationPct?: number;
+  trailingCallbackPct?: number;
+  stopLossPct?: number;
+  maxHoldMinutes?: number;
+  cooldownMinutes?: number;
 }
 
 export interface TickerSnapshot {
@@ -155,7 +172,8 @@ export interface GridLayer {
 export interface ActivePosition {
   id: string;
   symbol: string;
-  side: 'SHORT';
+  side: 'SHORT' | 'LONG';
+  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG';
   leverage: number;
   totalQty: number;
   avgEntryPrice: number;
@@ -186,6 +204,7 @@ export interface ActivePosition {
   bepDefenseReason?: string;
   trailingTpActive?: boolean;
   lowestPrice?: number;
+  highestPrice?: number;
   tpOrderId?: string;
   tp2OrderId?: string;
   lastTpOrderId?: string;
@@ -207,7 +226,8 @@ export interface PostExitSnapshot {
 export interface ClosedTrade {
   id: string;
   symbol: string;
-  side: 'SHORT';
+  side: 'SHORT' | 'LONG';
+  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG';
   entryPrice: number;
   exitPrice: number;
   qty: number;

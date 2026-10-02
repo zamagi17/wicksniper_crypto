@@ -836,7 +836,7 @@ function renderActivePositions(positions) {
           <div class="pos-header">
             <div class="pos-symbol">
               ${pos.symbol}
-              <span class="badge-side short">SHORT ${pos.leverage}x</span>
+              <span class="badge-side ${pos.side === 'LONG' ? 'long' : 'short'}">${pos.side || 'SHORT'} ${pos.leverage}x</span>
               ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
@@ -1123,7 +1123,7 @@ function renderClosedTradesTable(trades) {
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
-          <td><b>${t.symbol}</b> <span class="badge-side short">SHORT</span> ${layerBadge}</td>
+          <td><b>${t.symbol}</b> <span class="badge-side ${t.side === 'LONG' ? 'long' : 'short'}">${t.side || 'SHORT'}</span> ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
           <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
@@ -2292,8 +2292,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-max-vol-ratio-cooldown', cfg.scanner?.maxVolRatioCooldownMinutes ?? 10);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
   if (eemCheckbox) eemCheckbox.checked = !!cfg.exit?.earlyExitMomentumEnabled;
-  setVal('cfg-early-exit-min-layers-pct', cfg.exit?.earlyExitMinLayersPct ?? 40);
-  setVal('cfg-early-exit-min-loss-sl-pct', cfg.exit?.earlyExitMinLossSlPct ?? 50);
+  setVal('cfg-early-exit-min-layers-pct', cfg.exit?.earlyExitMinLayersPct ?? 60);
+  setVal('cfg-early-exit-min-loss-sl-pct', cfg.exit?.earlyExitMinLossSlPct ?? 60);
   setVal('cfg-early-exit-candles', cfg.exit?.earlyExitMinBullishCandles || 5);
   setVal('cfg-early-exit-rise', cfg.exit?.earlyExitMinRisePct || 1.5);
   setVal('cfg-early-exit-cooldown', cfg.exit?.earlyExitCooldownMinutes || 60);
@@ -2392,27 +2392,69 @@ function populateSettingsForm(cfg) {
     renderCoinSelector('cfg-whitelist');
   }
   setVal('cfg-exclude-symbols', (cfg.scanner?.excludeSymbols ?? ['USDCUSDT', 'FDUSDUSDT', 'BTCUSDT', 'ETHUSDT']).join(', '));
+
+  // Momentum Long
+  const longEnabledCheckbox = document.getElementById('cfg-long-enabled');
+  if (longEnabledCheckbox) {
+    longEnabledCheckbox.checked = cfg.momentumLong?.enabled !== false;
+    toggleLongSettingsGroup();
+  }
+  setVal('cfg-long-min-surge', cfg.momentumLong?.minSurgePct ?? 3.0);
+  setVal('cfg-long-min-vol-ratio', cfg.momentumLong?.minVolRatio ?? 4.0);
+  setVal('cfg-long-max-funding', cfg.momentumLong?.maxFundingRatePct ?? 0.05);
+  setVal('cfg-long-margin', cfg.momentumLong?.marginUsdt ?? 3);
+  setVal('cfg-long-leverage', cfg.momentumLong?.leverage ?? 5);
+  setVal('cfg-long-tp', cfg.momentumLong?.takeProfitPct ?? 6.0);
+  const longTrailingCheckbox = document.getElementById('cfg-long-trailing-enabled');
+  if (longTrailingCheckbox) {
+    longTrailingCheckbox.checked = cfg.momentumLong?.trailingTpEnabled !== false;
+  }
+  setVal('cfg-long-trailing-activation', cfg.momentumLong?.trailingActivationPct ?? 1.5);
+  setVal('cfg-long-trailing-callback', cfg.momentumLong?.trailingCallbackPct ?? 0.8);
+  setVal('cfg-long-sl', cfg.momentumLong?.stopLossPct ?? 2.5);
+  setVal('cfg-long-max-hold', cfg.momentumLong?.maxHoldMinutes ?? 60);
+  setVal('cfg-long-cooldown', cfg.momentumLong?.cooldownMinutes ?? 15);
 }
+
+window.toggleLongSettingsGroup = function() {
+  const isEnabled = document.getElementById('cfg-long-enabled')?.checked;
+  const group = document.getElementById('cfg-long-params-group');
+  if (group) group.style.display = isEnabled ? 'flex' : 'none';
+};
 
 // Preset Early Exit Momentum
 window.applyEarlyExitPreset = function(preset) {
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) {
+      el.value = val;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
-  if (eemCheckbox) eemCheckbox.checked = true;
+  if (eemCheckbox) {
+    eemCheckbox.checked = true;
+    eemCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  isFormModifiedByUser = true;
 
   if (preset === 'A') {
-    setVal('cfg-early-exit-min-layers-pct', 40);
-    setVal('cfg-early-exit-min-loss-sl-pct', 50);
+    setVal('cfg-early-exit-min-layers-pct', 60);
+    setVal('cfg-early-exit-min-loss-sl-pct', 60);
     setVal('cfg-early-exit-candles', 5);
     setVal('cfg-early-exit-rise', 1.5);
     setVal('cfg-early-exit-cooldown', 60);
-    alert('🎯 Preset Opsi A (Longgar & Santai) berhasil dipasang!\n• Min Layer Terisi: 40%\n• Ambang Rugi: 50% dari Hard SL\n• Candle Momentum: 5 (75s)\n• Kenaikan Min: 1.5%\n• Cooldown: 60 Menit\n\nKlik "Simpan Pengaturan" untuk menyimpan ke server.');
+    alert('🎯 Preset Opsi A (Anti-Keluar Dini / Longgar) berhasil dipasang!\n• Min Layer Terisi: 60% (butuh min 4 dari 6 layer)\n• Ambang Rugi: 60% dari Hard SL\n• Candle Momentum: 5 (75s candle hijau nonstop)\n• Kenaikan Min: 1.5%\n• Cooldown: 60 Menit\n\nKlik "Simpan Pengaturan" untuk menyimpan ke server.');
   } else if (preset === 'B') {
-    setVal('cfg-early-exit-min-layers-pct', 35);
-    setVal('cfg-early-exit-min-loss-sl-pct', 40);
+    setVal('cfg-early-exit-min-layers-pct', 50);
+    setVal('cfg-early-exit-min-loss-sl-pct', 50);
     setVal('cfg-early-exit-candles', 4);
     setVal('cfg-early-exit-rise', 1.2);
     setVal('cfg-early-exit-cooldown', 60);
-    alert('🛡️ Preset Opsi B (Protektif) berhasil dipasang!\n• Min Layer Terisi: 35%\n• Ambang Rugi: 40% dari Hard SL\n• Candle Momentum: 4 (60s)\n• Kenaikan Min: 1.2%\n• Cooldown: 60 Menit\n\nKlik "Simpan Pengaturan" untuk menyimpan ke server.');
+    alert('🛡️ Preset Opsi B (Moderat) berhasil dipasang!\n• Min Layer Terisi: 50% (butuh min 3 dari 6 layer)\n• Ambang Rugi: 50% dari Hard SL\n• Candle Momentum: 4 (60s candle hijau)\n• Kenaikan Min: 1.2%\n• Cooldown: 60 Menit\n\nKlik "Simpan Pengaturan" untuk menyimpan ke server.');
   }
 };
 
@@ -2467,8 +2509,8 @@ function getSettingsFormData() {
       hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
       maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
       earlyExitMomentumEnabled: !!document.getElementById('cfg-early-exit-momentum-enabled')?.checked,
-      earlyExitMinLayersPct: parseFloat(getVal('cfg-early-exit-min-layers-pct', '40')) || 40,
-      earlyExitMinLossSlPct: parseFloat(getVal('cfg-early-exit-min-loss-sl-pct', '50')) || 50,
+      earlyExitMinLayersPct: parseFloat(getVal('cfg-early-exit-min-layers-pct', '60')) || 60,
+      earlyExitMinLossSlPct: parseFloat(getVal('cfg-early-exit-min-loss-sl-pct', '60')) || 60,
       earlyExitMinBullishCandles: parseInt(getVal('cfg-early-exit-candles', '5')) || 5,
       earlyExitMinRisePct: parseFloat(getVal('cfg-early-exit-rise', '1.5')) || 1.5,
       earlyExitCooldownMinutes: parseInt(getVal('cfg-early-exit-cooldown', '60')) || 60,
@@ -2516,6 +2558,21 @@ function getSettingsFormData() {
       notifyOnEmergency: !!document.getElementById('cfg-tg-on-emergency')?.checked,
       notifyOnAutoBlacklist: !!document.getElementById('cfg-tg-on-autobl')?.checked,
       heartbeatIntervalHours: parseInt(getVal('cfg-tg-heartbeat-hours', '6'), 10) || 0,
+    },
+    momentumLong: {
+      enabled: !!document.getElementById('cfg-long-enabled')?.checked,
+      minSurgePct: parseFloat(getVal('cfg-long-min-surge', '3.0')) || 3.0,
+      minVolRatio: parseFloat(getVal('cfg-long-min-vol-ratio', '4.0')) || 4.0,
+      maxFundingRatePct: parseFloat(getVal('cfg-long-max-funding', '0.05')) ?? 0.05,
+      marginUsdt: parseFloat(getVal('cfg-long-margin', '3')) || 3,
+      leverage: parseInt(getVal('cfg-long-leverage', '5')) || 5,
+      takeProfitPct: parseFloat(getVal('cfg-long-tp', '6.0')) || 6.0,
+      trailingTpEnabled: !!document.getElementById('cfg-long-trailing-enabled')?.checked,
+      trailingActivationPct: parseFloat(getVal('cfg-long-trailing-activation', '1.5')) || 1.5,
+      trailingCallbackPct: parseFloat(getVal('cfg-long-trailing-callback', '0.8')) || 0.8,
+      stopLossPct: parseFloat(getVal('cfg-long-sl', '2.5')) || 2.5,
+      maxHoldMinutes: parseInt(getVal('cfg-long-max-hold', '60')) || 60,
+      cooldownMinutes: parseInt(getVal('cfg-long-cooldown', '15')) || 15,
     },
   };
 }

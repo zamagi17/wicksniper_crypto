@@ -497,6 +497,12 @@ body {
   border: 1px solid var(--color-red);
 }
 
+.badge-side.long {
+  background: rgba(0, 230, 118, 0.2);
+  color: #00e676;
+  border: 1px solid #00e676;
+}
+
 .badge-margin-tag {
   font-size: 11px;
   font-weight: 700;

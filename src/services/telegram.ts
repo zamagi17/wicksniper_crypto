@@ -141,17 +141,20 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
     const modeTag = tradingMode === 'LIVE' ? '🟢 <b>LIVE FUTURES</b>' : '🧪 <b>PAPER TRADING</b>';
     const vol0Usdt = pos.layers[0]?.volumeUsdt || (pos.avgEntryPrice * pos.totalQty);
     const rsiLine = pos.marketSnapshot?.rsi1m !== undefined ? `\n📈 <b>RSI 1m:</b> <b>${pos.marketSnapshot.rsi1m.toFixed(1)}</b>` : '';
+    const isLong = pos.side === 'LONG';
+    const tpSign = isLong ? '+' : '-';
+    const slSign = isLong ? '-' : '+';
     const msg =
 `🚀 <b>[ORDER BARU DITERBITKAN]</b> 🎯
 
 🪙 <b>Koin:</b> <code>${pos.symbol}</code>
-📊 <b>Aksi:</b> <b>SHORT ${pos.leverage}x</b>
+📊 <b>Aksi:</b> <b>${pos.side || 'SHORT'} ${pos.leverage}x</b>
 ⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}
 💵 <b>Layer #0 Entry:</b> <code>$${formatCryptoPrice(pos.avgEntryPrice)}</code>
 🕸️ <b>Jaring Terpasang:</b> ${pos.layers.length} Layer (Jarak ${spacingPct}%)
 💰 <b>Modal Awal Layer #0:</b> $${pos.totalMarginUsed.toFixed(2)} USDT (Vol: $${vol0Usdt.toFixed(2)} USDT)
-🎯 <b>Target TP:</b> <code>$${formatCryptoPrice(pos.targetTpPrice)}</code> (-${tpPct}%)
-🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (+${slPct}%)
+🎯 <b>Target TP:</b> <code>$${formatCryptoPrice(pos.targetTpPrice)}</code> (${tpSign}${tpPct}%)
+🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}%)
 ⚙️ <b>Mode:</b> ${modeTag}`;
 
     this.sendMessage(msg).catch(() => {});
@@ -206,7 +209,7 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
     const msg =
 `${emoji} <b>[${title}]</b> ${emoji}
 
-🪙 <b>Koin:</b> <code>${trade.symbol}</code> SHORT
+🪙 <b>Koin:</b> <code>${trade.symbol}</code> ${trade.side || 'SHORT'}
 🏁 <b>Alasan Exit:</b> ${reasonLabel}
 💵 <b>Harga:</b> <code>$${formatCryptoPrice(trade.entryPrice)}</code> ➜ <code>$${formatCryptoPrice(trade.exitPrice)}</code>
 ⏱️ <b>Durasi Trade:</b> ${durationStr}

@@ -177,8 +177,8 @@ export class WickSniperEngine {
         earlyExitMinBullishCandles: 5,
         earlyExitMinRisePct: 1.5,
         earlyExitCooldownMinutes: 60,
-        earlyExitMinLayersPct: 40,
-        earlyExitMinLossSlPct: 50,
+        earlyExitMinLayersPct: 60,
+        earlyExitMinLossSlPct: 60,
         hardStopCooldownMinutes: 180,
         partialTpEnabled: false,
         partialTpRatio: 0.7,
@@ -223,6 +223,9 @@ export class WickSniperEngine {
       scanner: { ...this.config.scanner, ...(newConfig.scanner || {}) },
       grid: { ...this.config.grid, ...(newConfig.grid || {}) },
       telegram: { ...this.config.telegram, ...(newConfig.telegram || {}) },
+      momentumLong: newConfig.momentumLong !== undefined
+        ? { ...(this.config.momentumLong || { enabled: false }), ...(newConfig.momentumLong || {}) }
+        : this.config.momentumLong,
       security: { ...this.config.security, ...(newConfig.security || {}) },
     };
     this.scanner.updateConfig(this.config.scanner);
@@ -661,25 +664,50 @@ export class WickSniperEngine {
         }
       }
 
-      // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita)
+      // Fetch indikator pasar (RSI 1m, Volume 1m, Funding Rate, OI) untuk evaluasi LONG & SHORT
+      let indicators: any = null;
+      try {
+        indicators = await this.fetchMarketIndicators(symbol);
+      } catch (e: any) {
+        logger.log('INFO', `[INDICATOR CHECK] Lewati cek indikator cepat ${symbol}: ${e.message}`);
+      }
+
+      // 1. Evaluasi Peluang MOMENTUM LONG (Menangkap Super-Trend / Short Squeeze Breakout seperti SANDUSDT)
+      const longCfg = this.config.momentumLong;
+      if (longCfg?.enabled) {
+        const minVolRatio = longCfg.minVolRatio ?? 4.0;
+        const maxFunding = longCfg.maxFundingRatePct ?? 0.05;
+        const minSurge = longCfg.minSurgePct ?? (this.config.scanner.spikeMinPercent || 3.0);
+
+        const isVolExplosive = indicators?.volRatio !== undefined && indicators.volRatio >= minVolRatio;
+        const isFundingSqueeze = indicators?.fundingRatePct === undefined || indicators.fundingRatePct <= maxFunding;
+
+        if (alert.surgePct >= minSurge && isVolExplosive && isFundingSqueeze) {
+          logger.log(
+            'SNIPER',
+            `🚀 [MOMENTUM LONG TRIGGER] ${symbol} memenuhi kriteria Super-Trend/Squeeze: Lonjakan +${alert.surgePct}%, Volume 1m ${indicators.volRatio.toFixed(1)}x rata-rata, Funding: ${indicators.fundingRatePct !== undefined ? indicators.fundingRatePct.toFixed(3) + '%' : 'N/A'}. Mengalihkan ke eksekusi LONG!`,
+            symbol
+          );
+          alert.status = 'EXECUTING';
+          await this.deployLongPosition(symbol, alert.currentPrice, alert, indicators);
+          return;
+        }
+      }
+
+      // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita) untuk SHORT
       if (this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
-        try {
-          const indicators = await this.fetchMarketIndicators(symbol);
-          if (indicators && typeof indicators.volRatio === 'number' && indicators.volRatio > this.config.scanner.maxVolRatio) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
-            const volCooldownMins = this.config.scanner.maxVolRatioCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
-            this.scanner.setCooldown(symbol, volCooldownMins);
-            logger.log(
-              'WARN',
-              `🛡️ [MAX VOL RATIO SKIP] ${symbol} dilewati: Rasio volume 1m (${indicators.volRatio}x) melebihi batas aman maks (${this.config.scanner.maxVolRatio}x). Terdeteksi lonjakan volume breakout abnormal/whale (cooldown ${volCooldownMins}m).`,
-              symbol
-            );
-            db.saveSpike(alert).catch(() => { });
-            return;
-          }
-        } catch (e: any) {
-          logger.log('INFO', `[MAX VOL RATIO FILTER] Lewati cek volRatio ${symbol}: ${e.message}`);
+        if (indicators && typeof indicators.volRatio === 'number' && indicators.volRatio > this.config.scanner.maxVolRatio) {
+          alert.status = 'SKIPPED';
+          alert.skipReason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
+          const volCooldownMins = this.config.scanner.maxVolRatioCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
+          this.scanner.setCooldown(symbol, volCooldownMins);
+          logger.log(
+            'WARN',
+            `🛡️ [MAX VOL RATIO SKIP] ${symbol} dilewati: Rasio volume 1m (${indicators.volRatio}x) melebihi batas aman maks (${this.config.scanner.maxVolRatio}x). Terdeteksi lonjakan volume breakout abnormal/whale (cooldown ${volCooldownMins}m).`,
+            symbol
+          );
+          db.saveSpike(alert).catch(() => { });
+          return;
         }
       }
 
@@ -867,6 +895,123 @@ export class WickSniperEngine {
       // Lepaskan kunci konkurensi (slot kini sudah resmi tercatat di this.activePositions atau dibatalkan)
       this.deployingSymbols.delete(symbol);
     }
+  }
+
+  /**
+   * Membuat dan mengeksekusi Posisi MOMENTUM LONG (Paper Trading / Single Layer)
+   */
+  private async deployLongPosition(
+    symbol: string,
+    currentPrice: number,
+    alert: SpikeAlert,
+    indicators?: any
+  ) {
+    const longCfg = this.config.momentumLong || { enabled: true };
+    const leverage = longCfg.leverage || this.config.leverage || 5;
+    const prec = binanceFutures.getPrecision(symbol);
+    const margin = longCfg.marginUsdt || 3;
+
+    let plannedQty = (margin * leverage) / currentPrice;
+    if (plannedQty * currentPrice < prec.minNotional) {
+      plannedQty = (prec.minNotional * 1.05) / currentPrice;
+    }
+    const qty = parseFloat(binanceFutures.formatQty(symbol, plannedQty));
+    const actualMargin = (qty * currentPrice) / leverage;
+
+    const tpPct = longCfg.takeProfitPct || 6.0;
+    const slPct = longCfg.stopLossPct || 2.5;
+    const tpPrice = parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + tpPct / 100)));
+    const slPrice = parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - slPct / 100)));
+
+    const currentTickerStats = this.scanner.getTickerStats(symbol);
+    const initial24hVol = currentTickerStats?.vol24hUsdt;
+
+    const layer0: GridLayer = {
+      layerIndex: 0,
+      price: currentPrice,
+      qty,
+      marginUsdt: actualMargin,
+      volumeUsdt: parseFloat((qty * currentPrice).toFixed(2)),
+      vol24hUsdt: initial24hVol,
+      marketVolume1mUsdt: indicators?.vol1mUsdt,
+      rsi: indicators?.rsi1m,
+      status: 'FILLED',
+      filledAt: Date.now(),
+    };
+
+    const initialPos: ActivePosition = {
+      id: `${symbol}_LONG_${Date.now()}`,
+      symbol,
+      side: 'LONG',
+      strategyType: 'MOMENTUM_LONG',
+      leverage,
+      totalQty: qty,
+      avgEntryPrice: currentPrice,
+      currentPrice,
+      unrealizedPnl: 0,
+      pnlPct: 0,
+      peakPnlPct: 0,
+      totalMarginUsed: actualMargin,
+      layers: [layer0],
+      openedAt: Date.now(),
+      targetTpPrice: tpPrice,
+      hardSlPrice: slPrice,
+      status: 'SNIPING',
+      trailingTpActive: false,
+      highestPrice: currentPrice,
+      paramsSnapshot: {
+        strategy: 'MOMENTUM_LONG',
+        surgePct: alert.surgePct,
+        volRatio: indicators?.volRatio,
+        fundingRatePct: indicators?.fundingRatePct,
+        takeProfitPct: tpPct,
+        stopLossPct: slPct,
+        trailingTpEnabled: longCfg.trailingTpEnabled ?? true,
+        trailingActivationPct: longCfg.trailingActivationPct ?? 1.5,
+        trailingCallbackPct: longCfg.trailingCallbackPct ?? 0.8,
+        tradingMode: this.config.tradingMode,
+        marginUsdt: actualMargin,
+        leverage,
+      },
+      marketSnapshot: {
+        volRatio: indicators?.volRatio,
+        fundingRatePct: indicators?.fundingRatePct,
+        rsi1m: indicators?.rsi1m,
+        vol1mUsdt: indicators?.vol1mUsdt,
+        avgVol1mUsdt: indicators?.avgVol1mUsdt,
+        openInterestUsdt: indicators?.openInterestUsdt,
+        surgePct: alert.surgePct,
+        lookbackSeconds: alert.lookbackSeconds,
+        vol24hUsdt: initial24hVol,
+        high24h: currentTickerStats?.high24h,
+        low24h: currentTickerStats?.low24h,
+        capturedAt: Date.now(),
+      },
+    };
+
+    this.activePositions.set(symbol, initialPos);
+    this.spikesDetectedToday++;
+
+    await db.saveSpike(alert).catch(() => {});
+    await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+
+    logger.log(
+      'SUCCESS',
+      `🚀 [MOMENTUM LONG PAPER ENTRY] ${symbol}: Terisi instan @ $${formatCryptoPrice(currentPrice)} (Margin: $${actualMargin.toFixed(2)}, Qty: ${qty}) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | Hard SL: $${formatCryptoPrice(slPrice)} (-${slPct}%) | Trailing: ${longCfg.trailingTpEnabled !== false ? 'Aktif' : 'Nonaktif'}`,
+      symbol
+    );
+
+    telegram.notifyNewOrder(
+      initialPos,
+      this.config.tradingMode,
+      alert.surgePct,
+      alert.lookbackSeconds,
+      0,
+      tpPct,
+      slPct
+    );
+
+    this.broadcastStatus();
   }
 
   /**
@@ -1325,10 +1470,10 @@ export class WickSniperEngine {
       }
 
       // 3. Hitung Floating PnL
-      // Untuk posisi SHORT: PnL = (AvgEntry - CurrentPrice) * TotalQty
-      const pnl = (pos.avgEntryPrice - currentPrice) * pos.totalQty;
+      const isLong = pos.side === 'LONG';
+      const pnl = isLong ? (currentPrice - pos.avgEntryPrice) * pos.totalQty : (pos.avgEntryPrice - currentPrice) * pos.totalQty;
       pos.unrealizedPnl = Math.round(pnl * 100) / 100;
-      pos.pnlPct = Math.round(((pos.avgEntryPrice - currentPrice) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
+      pos.pnlPct = Math.round(((isLong ? (currentPrice - pos.avgEntryPrice) : (pos.avgEntryPrice - currentPrice)) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
 
       if (pos.pnlPct > pos.peakPnlPct) {
         pos.peakPnlPct = pos.pnlPct;
@@ -1337,7 +1482,81 @@ export class WickSniperEngine {
         pos.maxAdversePnlPct = pos.pnlPct;
       }
 
-      // 4. Evaluasi Kondisi Exit:
+      // Evaluasi Jalur Khusus Posisi LONG (Momentum / Squeeze)
+      if (isLong) {
+        pos.highestPrice = Math.max(pos.highestPrice || currentPrice, currentPrice);
+        const slAgeMs = Date.now() - pos.openedAt;
+
+        // A. Hard Stop Loss untuk LONG
+        if (currentPrice <= pos.hardSlPrice && slAgeMs >= 3000) {
+          logger.log(
+            'WARN',
+            `🛑 [LONG HARD SL TRIGGERED] ${pos.symbol}: Harga $${formatCryptoPrice(currentPrice)} <= Hard SL $${formatCryptoPrice(pos.hardSlPrice)} (Avg Entry: $${formatCryptoPrice(pos.avgEntryPrice)}, SL%: ${(((pos.hardSlPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2)}%)`,
+            pos.symbol
+          );
+          this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
+          continue;
+        }
+
+        // B. Evaluasi Take Profit & Trailing TP untuk LONG
+        const longCfg = this.config.momentumLong;
+        const trailingEnabled = longCfg?.trailingTpEnabled !== false;
+        const profitPct = ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
+
+        if (trailingEnabled) {
+          const activationPct = longCfg?.trailingActivationPct ?? 1.5;
+          const callbackPct = longCfg?.trailingCallbackPct ?? 0.8;
+
+          if (!pos.trailingTpActive && (profitPct >= activationPct || currentPrice >= pos.targetTpPrice)) {
+            pos.trailingTpActive = true;
+            pos.highestPrice = currentPrice;
+            logger.log(
+              'INFO',
+              `🚀 [LONG TRAILING AKTIF] ${pos.symbol}: Profit awal +${profitPct.toFixed(2)}% tercapai di $${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner memburu puncak...`,
+              pos.symbol
+            );
+          }
+
+          if (pos.trailingTpActive) {
+            pos.highestPrice = Math.max(pos.highestPrice || currentPrice, currentPrice);
+            const dropPct = ((pos.highestPrice - currentPrice) / pos.highestPrice) * 100;
+            // Gembok profit: Wajib minimal +0.3% di atas entry (menutupi fee)
+            const minSecurePrice = pos.avgEntryPrice * 1.003;
+
+            if (dropPct >= callbackPct && currentPrice >= minSecurePrice) {
+              logger.log(
+                'SUCCESS',
+                `🎯 [LONG TRAILING TP HIT] ${pos.symbol}: Pullback -${dropPct.toFixed(2)}% dari puncak $${formatCryptoPrice(pos.highestPrice)} ➜ Mengamankan profit di $${formatCryptoPrice(currentPrice)} (+${profitPct.toFixed(2)}%)!`,
+                pos.symbol
+              );
+              this.closePosition(pos, 'TRAILING_TP', currentPrice);
+              continue;
+            }
+          }
+        } else {
+          if (currentPrice >= pos.targetTpPrice && slAgeMs >= 3000) {
+            this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
+            continue;
+          }
+        }
+
+        // C. Batas Waktu Hold Maksimum untuk LONG
+        const maxHoldMin = longCfg?.maxHoldMinutes ?? 60;
+        if (Date.now() - pos.openedAt >= maxHoldMin * 60 * 1000) {
+          logger.log(
+            'INFO',
+            `⏰ [LONG TIME LIMIT] ${pos.symbol}: Batas waktu hold ${maxHoldMin}m tercapai. Menutup posisi di $${formatCryptoPrice(currentPrice)}.`,
+            pos.symbol
+          );
+          this.closePosition(pos, 'TIME_LIMIT_EXIT', currentPrice);
+          continue;
+        }
+
+        // Selesai evaluasi LONG, lewati evaluasi SHORT di bawah
+        continue;
+      }
+
+      // 4. Evaluasi Kondisi Exit untuk SHORT:
       // A. HARD STOP LOSS (Proteksi Runaway Pump)
       // Guard: Minimal 5 detik sejak posisi dibuka untuk menghindari false trigger akibat volatilitas awal
       const slAgeMs = Date.now() - pos.openedAt;
@@ -1544,13 +1763,13 @@ export class WickSniperEngine {
     // Hanya trigger jika unrealized loss sudah >= ambang batas perjalanan ke Hard SL
     // Mencegah early exit prematur saat posisi baru sedikit di atas entry & masih bisa recovery
     const lossPct = ((pos.currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
-    const minLossRatio = (exitCfg.earlyExitMinLossSlPct !== undefined ? exitCfg.earlyExitMinLossSlPct : 50) / 100;
+    const minLossRatio = (exitCfg.earlyExitMinLossSlPct !== undefined ? exitCfg.earlyExitMinLossSlPct : 60) / 100;
     const slThreshold = (exitCfg.hardStopLossPct || 4.5) * minLossRatio;
     if (lossPct < slThreshold) return false;
 
     const installedLayerCount = pos.layers.filter((layer) => layer.status !== 'CANCELLED').length;
     const filledLayerCount = pos.layers.filter((layer) => layer.status === 'FILLED').length;
-    const minLayersRatio = (exitCfg.earlyExitMinLayersPct !== undefined ? exitCfg.earlyExitMinLayersPct : 40) / 100;
+    const minLayersRatio = (exitCfg.earlyExitMinLayersPct !== undefined ? exitCfg.earlyExitMinLayersPct : 60) / 100;
     const minimumFilledLayers = Math.max(1, Math.ceil(installedLayerCount * minLayersRatio));
     if (installedLayerCount === 0 || filledLayerCount < minimumFilledLayers) return false;
 
@@ -2423,10 +2642,11 @@ export class WickSniperEngine {
     pos.status = 'CLOSING';
 
     try {
+      const isLong = pos.side === 'LONG';
       const durationSeconds = Math.round((Date.now() - pos.openedAt) / 1000);
-      const pnl = (pos.avgEntryPrice - closePrice) * pos.totalQty;
+      const pnl = isLong ? (closePrice - pos.avgEntryPrice) * pos.totalQty : (pos.avgEntryPrice - closePrice) * pos.totalQty;
       const finalRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0)) * 100) / 100;
-      const pnlPct = Math.round(((pos.avgEntryPrice - closePrice) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
+      const pnlPct = Math.round(((isLong ? (closePrice - pos.avgEntryPrice) : (pos.avgEntryPrice - closePrice)) / pos.avgEntryPrice) * pos.leverage * 1000) / 10;
 
       let actualExitPrice = closePrice;
       let actualRealizedPnl = finalRealizedPnl;
@@ -2921,13 +3141,15 @@ export class WickSniperEngine {
       );
 
       const cooldownMinutes =
-        trade.exitReason === 'EARLY_MOMENTUM_EXIT'
-          ? this.config.exit.earlyExitCooldownMinutes || 60
-          : trade.exitReason === 'HARD_STOP_LOSS'
-            ? this.config.exit.hardStopCooldownMinutes || 180
-            : trade.exitReason === 'BEP_DEFENSE'
-              ? this.config.exit.bepCooldownMinutes || 15
-              : this.config.scanner.cooldownMinutes || 10;
+        pos.side === 'LONG'
+          ? (this.config.momentumLong?.cooldownMinutes || 15)
+          : (trade.exitReason === 'EARLY_MOMENTUM_EXIT'
+              ? this.config.exit.earlyExitCooldownMinutes || 60
+              : trade.exitReason === 'HARD_STOP_LOSS'
+                ? this.config.exit.hardStopCooldownMinutes || 180
+                : trade.exitReason === 'BEP_DEFENSE'
+                  ? this.config.exit.bepCooldownMinutes || 15
+                  : this.config.scanner.cooldownMinutes || 10);
       this.scanner.setCooldown(pos.symbol, cooldownMinutes);
       logger.log(
         'INFO',
