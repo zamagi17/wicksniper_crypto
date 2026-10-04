@@ -1515,6 +1515,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Cooldown Koin Sepi (Gap)', snap.tradeGapCooldownMinutes, currScanner.tradeGapCooldownMinutes, ' Menit')}
       ${renderCompareRow('Batas Min RSI 1m (Anti-Oversold)', snap.minRsi1m, currScanner.minRsi1m, '', (v) => v ? `≥ ${v}` : 'Nonaktif')}
       ${renderCompareRow('Cooldown RSI Rendah', snap.minRsiCooldownMinutes, currScanner.minRsiCooldownMinutes, ' Menit')}
+      ${renderCompareRow('Minimal Rasio Volume 1m', snap.minVolRatio, currScanner.minVolRatio, 'x', (v) => v ? `≥ ${v}x` : 'Nonaktif')}
+      ${renderCompareRow('Cooldown Volume Tipis', snap.minVolRatioCooldownMinutes, currScanner.minVolRatioCooldownMinutes, ' Menit')}
       ${renderCompareRow('Maksimal Rasio Volume Breakout', snap.maxVolRatio, currScanner.maxVolRatio, 'x', (v) => v ? `≤ ${v}x` : 'Nonaktif')}
       ${renderCompareRow('Cooldown Breakout Whale', snap.maxVolRatioCooldownMinutes, currScanner.maxVolRatioCooldownMinutes, ' Menit')}
       ${renderCompareRow('Whitelist Koin', snap.whitelistEnabled, currScanner.whitelistEnabled)}
@@ -1955,6 +1957,8 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-trade-gap-cooldown', snap.tradeGapCooldownMinutes);
   setVal('cfg-min-rsi', snap.minRsi1m ?? '');
   setVal('cfg-min-rsi-cooldown', snap.minRsiCooldownMinutes ?? '');
+  setVal('cfg-min-vol-ratio', snap.minVolRatio ?? '');
+  setVal('cfg-min-vol-ratio-cooldown', snap.minVolRatioCooldownMinutes ?? '');
   setVal('cfg-max-vol-ratio', snap.maxVolRatio ?? '');
   setVal('cfg-max-vol-ratio-cooldown', snap.maxVolRatioCooldownMinutes ?? '');
 
@@ -2286,8 +2290,10 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-max-trade-gap-seconds', cfg.scanner?.maxTradeGapSeconds ?? 10);
   setVal('cfg-trade-gap-cooldown', cfg.scanner?.tradeGapCooldownMinutes ?? 5);
-  setVal('cfg-min-rsi', cfg.scanner?.minRsi1m ?? 30);
+  setVal('cfg-min-rsi', cfg.scanner?.minRsi1m ?? 50);
   setVal('cfg-min-rsi-cooldown', cfg.scanner?.minRsiCooldownMinutes ?? 10);
+  setVal('cfg-min-vol-ratio', cfg.scanner?.minVolRatio ?? 1.0);
+  setVal('cfg-min-vol-ratio-cooldown', cfg.scanner?.minVolRatioCooldownMinutes ?? 5);
   setVal('cfg-max-vol-ratio', cfg.scanner?.maxVolRatio ?? 20.0);
   setVal('cfg-max-vol-ratio-cooldown', cfg.scanner?.maxVolRatioCooldownMinutes ?? 10);
   const eemCheckbox = document.getElementById('cfg-early-exit-momentum-enabled');
@@ -2489,8 +2495,10 @@ function getSettingsFormData() {
       tradeGapFilterEnabled: !!document.getElementById('cfg-trade-gap-enabled')?.checked,
       maxTradeGapSeconds: parseFloat(getVal('cfg-max-trade-gap-seconds', '10')) || 10,
       tradeGapCooldownMinutes: parseInt(getVal('cfg-trade-gap-cooldown', '5'), 10) || 5,
-      minRsi1m: parseFloat(getVal('cfg-min-rsi', '30')) || 0,
+      minRsi1m: parseFloat(getVal('cfg-min-rsi', '50')) || 0,
       minRsiCooldownMinutes: parseInt(getVal('cfg-min-rsi-cooldown', '10'), 10) || 10,
+      minVolRatio: parseFloat(getVal('cfg-min-vol-ratio', '1.0')) || 0,
+      minVolRatioCooldownMinutes: parseInt(getVal('cfg-min-vol-ratio-cooldown', '5'), 10) || 5,
       maxVolRatio: parseFloat(getVal('cfg-max-vol-ratio', '20.0')) || 0,
       maxVolRatioCooldownMinutes: parseInt(getVal('cfg-max-vol-ratio-cooldown', '10'), 10) || 10,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,

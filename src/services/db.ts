@@ -87,6 +87,15 @@ export class DatabaseService {
           ),
           updated_at = CURRENT_TIMESTAMP
           WHERE id = 1 AND (config->'scanner'->>'maxVolRatio') IS NULL;
+
+          -- Migrasi aman: tambahkan default minVolRatio ke config database production jika belum ada
+          UPDATE wicksniper_config
+          SET config = jsonb_set(
+            jsonb_set(config, '{scanner,minVolRatio}', '1.0'::jsonb, true),
+            '{scanner,minVolRatioCooldownMinutes}', '5'::jsonb, true
+          ),
+          updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1 AND (config->'scanner'->>'minVolRatio') IS NULL;
         `);
 
         // 2. Tabel State Posisi & Saldo
