@@ -147,6 +147,8 @@ export class WickSniperEngine {
         maxSpreadPct: 0.25,
         minRsi1m: 30,
         minRsiCooldownMinutes: 10,
+        minVolRatio: 0,
+        minVolRatioCooldownMinutes: 5,
         maxVolRatio: 20,
         maxVolRatioCooldownMinutes: 10,
       },
@@ -752,10 +754,15 @@ export class WickSniperEngine {
         }
       }
 
-      // Filter RSI 1m Minimum (Dilarang SHORT jika RSI 1m < 30) & Maksimal Rasio Volume Breakout
+      // Filter RSI 1m Minimum (Dilarang SHORT jika RSI 1m < batas aman) & Rasio Volume Breakout (Min / Maks)
       const minRsi1m = this.config.scanner?.minRsi1m;
+      const minVolRatio = this.config.scanner?.minVolRatio;
       const maxVolRatio = this.config.scanner?.maxVolRatio;
-      if ((minRsi1m !== undefined && minRsi1m > 0) || (maxVolRatio !== undefined && maxVolRatio > 0)) {
+      if (
+        (minRsi1m !== undefined && minRsi1m > 0) ||
+        (minVolRatio !== undefined && minVolRatio > 0) ||
+        (maxVolRatio !== undefined && maxVolRatio > 0)
+      ) {
         try {
           const indicators = await this.fetchMarketIndicators(symbol);
 
@@ -774,7 +781,22 @@ export class WickSniperEngine {
             return;
           }
 
-          // Cek 2: Filter Maksimal Rasio Volume Breakout (Mencegah menghadang breakout volume masif)
+          // Cek 2: Filter Minimal Rasio Volume (Mencegah SHORT pada lonjakan volume sepi/kering/illiquid)
+          if (minVolRatio !== undefined && minVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio < minVolRatio) {
+            alert.status = 'SKIPPED';
+            alert.skipReason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) di bawah batas aman min (${minVolRatio}x normal)`;
+            const volCooldown = this.config.scanner?.minVolRatioCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 5;
+            this.scanner.setCooldown(symbol, volCooldown);
+            logger.log(
+              'WARN',
+              `🛡️ [MIN VOL SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena volume 1m (${indicators.volRatio.toFixed(1)}x rata-rata) < batas min (${minVolRatio}x). Menghindari pump volume tipis/illiquid (cooldown ${volCooldown}m).`,
+              symbol
+            );
+            db.saveSpike(alert).catch(() => {});
+            return;
+          }
+
+          // Cek 3: Filter Maksimal Rasio Volume Breakout (Mencegah menghadang breakout volume masif)
           if (maxVolRatio !== undefined && maxVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio > maxVolRatio) {
             alert.status = 'SKIPPED';
             alert.skipReason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) melebihi batas breakout maks (${maxVolRatio}x normal)`;
@@ -2606,6 +2628,8 @@ export class WickSniperEngine {
       tradeGapCooldownMinutes: this.config.scanner?.tradeGapCooldownMinutes,
       minRsi1m: this.config.scanner?.minRsi1m,
       minRsiCooldownMinutes: this.config.scanner?.minRsiCooldownMinutes,
+      minVolRatio: this.config.scanner?.minVolRatio,
+      minVolRatioCooldownMinutes: this.config.scanner?.minVolRatioCooldownMinutes,
       maxVolRatio: this.config.scanner?.maxVolRatio,
       maxVolRatioCooldownMinutes: this.config.scanner?.maxVolRatioCooldownMinutes,
       whitelistEnabled: this.config.scanner?.whitelistEnabled,

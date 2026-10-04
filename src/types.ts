@@ -36,6 +36,8 @@ export interface BotConfig {
     tradeGapCooldownMinutes?: number;
     minRsi1m?: number;
     minRsiCooldownMinutes?: number;
+    minVolRatio?: number;
+    minVolRatioCooldownMinutes?: number;
     maxVolRatio?: number;
     maxVolRatioCooldownMinutes?: number;
   };
