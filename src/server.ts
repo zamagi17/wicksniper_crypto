@@ -347,7 +347,16 @@ app.get('/api/spikes', async (req, res) => {
   const offset = (page - 1) * limit;
   const spikes = list.slice(offset, offset + limit);
 
-  return res.json({ success: true, spikes, total, page, totalPages });
+  const allRecent = engine.getRecentSpikes();
+  const simStats = {
+    totalSkipped: allRecent.filter((s) => s.status === 'SKIPPED').length,
+    savedSlCount: allRecent.filter((s) => s.status === 'SKIPPED' && s.simResult?.outcome === 'SAVED_SL').length,
+    missedTpCount: allRecent.filter((s) => s.status === 'SKIPPED' && s.simResult?.outcome === 'MISSED_TP').length,
+    trackingCount: allRecent.filter((s) => s.status === 'SKIPPED' && s.simResult?.outcome === 'TRACKING').length,
+    timeoutCount: allRecent.filter((s) => s.status === 'SKIPPED' && s.simResult?.outcome === 'TIMEOUT').length,
+  };
+
+  return res.json({ success: true, spikes, total, page, totalPages, simStats });
 });
 
 // Blacklist management endpoints (protected)

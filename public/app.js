@@ -1004,11 +1004,32 @@ async function fetchPaginatedSpikes(page = 1) {
       radarState.totalPages = data.totalPages || 1;
       radarState.total = data.total || 0;
       renderSpikesTable(data.spikes);
+      if (data.simStats) {
+        updateRadarSimSummaryUI(data.simStats);
+      }
       updateRadarPaginationUI();
     }
   } catch (e) {
     console.warn('Gagal memuat radar spikes:', e);
   }
+}
+
+function updateRadarSimSummaryUI(stats) {
+  const savedEl = document.getElementById('sim-saved-sl');
+  const missedEl = document.getElementById('sim-missed-tp');
+  const rateEl = document.getElementById('sim-defense-rate');
+  const activeEl = document.getElementById('sim-active-count');
+
+  const saved = Number(stats?.savedSlCount || 0);
+  const missed = Number(stats?.missedTpCount || 0);
+  const active = Number(stats?.trackingCount || 0);
+  const totalEvaluated = saved + missed;
+  const rate = totalEvaluated > 0 ? ((saved / totalEvaluated) * 100).toFixed(1) : '0';
+
+  if (savedEl) savedEl.innerText = `${saved} Koin`;
+  if (missedEl) missedEl.innerText = `${missed} Koin`;
+  if (rateEl) rateEl.innerText = `${rate}%`;
+  if (activeEl) activeEl.innerText = `${active} Koin`;
 }
 
 function updateRadarPaginationUI() {
@@ -1044,10 +1065,13 @@ function resetRadarFilter() {
   fetchPaginatedSpikes(1);
 }
 
+let currentLoadedSpikes = [];
+
 function renderSpikesTable(spikes) {
+  currentLoadedSpikes = spikes || [];
   const tbody = document.getElementById('spike-table-body');
   if (!spikes || spikes.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Belum ada lonjakan harga yang melewati ambang batas.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Belum ada lonjakan harga yang melewati ambang batas.</td></tr>`;
     return;
   }
 
@@ -1070,6 +1094,42 @@ function renderSpikesTable(spikes) {
         statusBadge = `<span class="badge-radar-status pending">TERDETEKSI ⏳</span>`;
       }
 
+      let simBadge = '<span class="text-muted" style="font-size: 11px;">-</span>';
+      if (s.status === 'EXECUTING') {
+        simBadge = '<span class="text-muted" style="font-size: 11px;">(Dieksekusi)</span>';
+      } else if (s.status === 'SKIPPED' && s.simResult) {
+        const sim = s.simResult;
+        const pnl = Number(sim.simulatedPnlPct || 0);
+        const pnlSign = pnl >= 0 ? '+' : '';
+        const pnlStr = `${pnlSign}${pnl.toFixed(2)}%`;
+
+        if (sim.outcome === 'SAVED_SL') {
+          simBadge = `
+            <button type="button" class="badge-sim-outcome saved" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Filter berhasil menyelamatkan modal dari Stop Loss!">
+              🛡️ Selamat SL (${pnlStr})
+            </button>
+          `;
+        } else if (sim.outcome === 'MISSED_TP') {
+          simBadge = `
+            <button type="button" class="badge-sim-outcome missed" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Koin berbalik arah dan menyentuh Target TP.">
+              💸 Terlewat TP (${pnlStr})
+            </button>
+          `;
+        } else if (sim.outcome === 'TIMEOUT') {
+          simBadge = `
+            <button type="button" class="badge-sim-outcome timeout" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan 30m selesai tanpa kena TP/SL.">
+              ⏱️ Timeout (${pnlStr})
+            </button>
+          `;
+        } else {
+          simBadge = `
+            <button type="button" class="badge-sim-outcome tracking" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan real-time sedang berjalan.">
+              ⏳ Pemantauan (${sim.durationMinutes || 0}m | ${pnlStr})
+            </button>
+          `;
+        }
+      }
+
       const startPrice = Number(s.startPrice || 0);
       const currPrice = Number(s.currentPrice || 0);
       const surgePct = Number(s.surgePct || 0);
@@ -1085,10 +1145,148 @@ function renderSpikesTable(spikes) {
           <td>$${formatCryptoPrice(currPrice)}</td>
           <td class="text-green"><b>+${surgePct.toFixed(2)}%</b></td>
           <td>${statusBadge}</td>
+          <td>${simBadge}</td>
         </tr>
       `;
     })
     .join('');
+}
+
+function openSpikeSimModal(spikeId) {
+  const s = currentLoadedSpikes.find((x) => String(x.id) === String(spikeId));
+  if (!s || !s.simResult) return;
+
+  const sim = s.simResult;
+  const modal = document.getElementById('spike-sim-modal');
+  const titleEl = document.getElementById('spike-sim-title');
+  const badgeEl = document.getElementById('spike-sim-badge');
+  const bodyEl = document.getElementById('spike-sim-body');
+  if (!modal || !bodyEl) return;
+
+  const pnl = Number(sim.simulatedPnlPct || 0);
+  const pnlSign = pnl >= 0 ? '+' : '';
+  const pnlStr = `${pnlSign}${pnl.toFixed(2)}%`;
+
+  let outcomeClass = 'tracking';
+  let outcomeTitle = '⏳ Simulasi Pemantauan Sedang Berjalan';
+  let bannerClass = 'tracking';
+  let bannerText = '';
+
+  if (sim.outcome === 'SAVED_SL') {
+    outcomeClass = 'saved';
+    outcomeTitle = '🛡️ Penyelamatan Modal Sukses (Selamat dari SL)';
+    bannerClass = 'saved';
+    bannerText = `<b>🛡️ Filter Berhasil Melindungi Modal!</b><br>
+    Setelah lonjakan spike ditolak, harga koin justru terus melonjak naik hingga menyentuh batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}). 
+    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian <b>${pnlStr}</b>.`;
+  } else if (sim.outcome === 'MISSED_TP') {
+    outcomeClass = 'missed';
+    outcomeTitle = '💸 Peluang Profit Terlewat (Kena TP)';
+    bannerClass = 'missed';
+    bannerText = `<b>💸 Peluang Profit Terlewat!</b><br>
+    Setelah lonjakan spike ditolak, harga koin berhasil memantul turun dan menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) tanpa tersentuh Stop Loss.
+    Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${pnlStr}</b>. Parameter filter mungkin dapat sedikit dilonggarkan jika koin ini sering lolos.`;
+  } else if (sim.outcome === 'TIMEOUT') {
+    outcomeClass = 'timeout';
+    outcomeTitle = '⏱️ Batas Waktu 30 Menit Tercapai';
+    bannerClass = 'timeout';
+    bannerText = `<b>⏱️ Pemantauan 30 Menit Selesai</b><br>
+    Selama 30 menit pasca-lonjakan, harga bergerak konsolidasi tanpa menyentuh TP maupun SL. Estimasi PnL mengambang di menit ke-30 adalah <b>${pnlStr}</b>.`;
+  } else {
+    bannerText = `<b>⏳ Simulasi Sedang Berlangsung</b><br>
+    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} menit</b>). PnL mengambang saat ini: <b>${pnlStr}</b>.`;
+  }
+
+  if (titleEl) titleEl.innerText = `🔬 Simulasi Koin Ditolak: ${s.symbol}`;
+  if (badgeEl) {
+    badgeEl.className = `badge-sim-outcome ${outcomeClass}`;
+    badgeEl.innerText = `${outcomeTitle} (${pnlStr})`;
+  }
+
+  const entry = Number(sim.hypotheticalEntryPrice || 0);
+  const tp = Number(sim.targetTpPrice || 0);
+  const sl = Number(sim.hardSlPrice || 0);
+  const high = Number(sim.highestPrice || 0);
+  const low = Number(sim.lowestPrice || 0);
+  const highDiff = Number(sim.highestDiffPct || 0);
+  const lowDiff = Number(sim.lowestDiffPct || 0);
+  const highSign = highDiff >= 0 ? '+' : '';
+  const lowSign = lowDiff >= 0 ? '+' : '';
+
+  const params = s.paramsSnapshot || {};
+  const tpParam = params.takeProfitPct ?? '-';
+  const slParam = params.hardStopLossPct ?? '-';
+
+  bodyEl.innerHTML = `
+    <div class="sim-insight-banner ${bannerClass}">
+      <div>${bannerText}</div>
+    </div>
+
+    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+      <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Alasan Koin Ditolak / Dilewati:</div>
+      <div style="font-size: 13px; color: #ffb84d; font-weight: 600;">${escapeHtml(s.skipReason || 'Filter Proteksi')}</div>
+      <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Lonjakan terdeteksi: <b>+${Number(s.surgePct || 0).toFixed(2)}%</b> dalam ${s.lookbackSeconds || 5}s pada ${formatDateTime(s.timestamp, true)}</div>
+    </div>
+
+    <div class="td-section-title">📊 Parameter & Level Simulasi Saat Kejadian</div>
+    <div class="td-post-exit-grid" style="margin-bottom: 16px;">
+      <div class="td-pe-stat">
+        <div class="pe-label">Harga Masuk Hipotetis (SHORT)</div>
+        <div class="pe-val" style="color: var(--color-cyan);">$${formatCryptoPrice(entry)}</div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Target Take Profit (${tpParam}%)</div>
+        <div class="pe-val" style="color: var(--color-green);">$${formatCryptoPrice(tp)}</div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Batas Hard Stop Loss (${slParam}%)</div>
+        <div class="pe-val" style="color: var(--color-red);">$${formatCryptoPrice(sl)}</div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Hasil Simulasi PnL</div>
+        <div class="pe-val" style="color: ${pnl >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight: 700;">
+          ${pnlStr}
+        </div>
+      </div>
+    </div>
+
+    <div class="td-section-title">⏱️ Ekstrem Pergerakan Harga Pasca-Penolakan</div>
+    <div class="td-post-exit-grid">
+      <div class="td-pe-stat">
+        <div class="pe-label">Puncak Tertinggi (MAE / Pompa)</div>
+        <div class="pe-val" style="color: ${highDiff > 0 ? 'var(--color-gold)' : 'var(--text-main)'};">
+          $${formatCryptoPrice(high)}
+          <small class="pe-diff" style="color: ${highDiff > 0 ? 'var(--color-red)' : 'var(--text-muted)'};">(${highSign}${highDiff.toFixed(2)}%)</small>
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Penurunan Terdalam (MFE / Reversal)</div>
+        <div class="pe-val" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-main)'};">
+          $${formatCryptoPrice(low)}
+          <small class="pe-diff" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-muted)'};">(${lowSign}${lowDiff.toFixed(2)}%)</small>
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Durasi Pengamatan</div>
+        <div class="pe-val" style="font-size: 13px; color: var(--color-cyan);">
+          ${sim.durationMinutes || 0} Menit
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Status Evaluasi</div>
+        <div class="pe-val" style="font-size: 12px; color: ${sim.isComplete ? 'var(--color-green)' : 'var(--color-gold)'};">
+          ${sim.isComplete ? '✅ Selesai' : '⏳ Berjalan'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('active');
+}
+
+function closeSpikeSimModal() {
+  const modal = document.getElementById('spike-sim-modal');
+  if (modal) modal.classList.remove('active');
 }
 
 function renderClosedTradesTable(trades) {

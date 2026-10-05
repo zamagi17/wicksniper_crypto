@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SpikeAlert } from '../types';
+import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SpikeAlert, SpikeSimResult } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { logger } from './logger';
@@ -96,6 +96,7 @@ export class WickSniperEngine {
   private lastAutoBlacklistRefreshAt: number = Date.now();
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
   private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
+  private activeSimSpikes: Map<string, SpikeAlert> = new Map();
 
   constructor(configPath: string) {
     this.configPath = configPath;
@@ -356,7 +357,13 @@ export class WickSniperEngine {
       const dbSpikes = await db.loadRecentSpikes(50);
       if (dbSpikes.length > 0) {
         this.scanner.setRecentSpikes(dbSpikes);
-        logger.log('INFO', `📡 [DATABASE] ${dbSpikes.length} riwayat spike dimuat dari PostgreSQL.`);
+        const now = Date.now();
+        for (const s of dbSpikes) {
+          if (s.status === 'SKIPPED' && s.simResult && !s.simResult.isComplete && now - s.timestamp < 35 * 60_000) {
+            this.activeSimSpikes.set(s.id, s);
+          }
+        }
+        logger.log('INFO', `📡 [DATABASE] ${dbSpikes.length} riwayat spike dimuat (${this.activeSimSpikes.size} simulasi aktif dilanjutkan).`);
       }
       this.totalSpikesCount = await db.getSpikesCount();
     }
@@ -418,6 +425,11 @@ export class WickSniperEngine {
         await this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
         tickCount++;
+        // Update simulasi koin yang ditolak (Shadow Trading) tiap 2 detik
+        if (tickCount % 2 === 0 && this.activeSimSpikes.size > 0) {
+          this.updateActiveSimSpikes();
+        }
+
         // Relaksasi interval sync posisi dan balance ke 5 detik (dari 3 detik) untuk menghemat kuota REST
         if (tickCount % 5 === 0 && this.config.tradingMode === 'LIVE') {
           await this.syncLivePositions();
@@ -428,9 +440,10 @@ export class WickSniperEngine {
           await this.syncTradesFromDb();
         }
 
-        // Pemeriksaan snapshot harga 30m pasca-exit tiap 30 detik
+        // Pemeriksaan snapshot harga 30m pasca-exit & simulasi spike tiap 30 detik
         if (tickCount % 30 === 0) {
           this.checkPendingPostExitSnapshots().catch(() => {});
+          this.checkPendingSpikeSimulations().catch(() => {});
         }
 
         // Heartbeat Telegram Berkala (Laporan Status Rutin)
@@ -497,6 +510,40 @@ export class WickSniperEngine {
   }
 
   /**
+   * Mencatat spike yang ditolak/dilewati filter dan menginisialisasi simulasi pelacakan pergerakan harga
+   */
+  private recordSkippedSpike(alert: SpikeAlert, reason: string): void {
+    alert.status = 'SKIPPED';
+    alert.skipReason = reason;
+    alert.paramsSnapshot = this.captureParamsSnapshot();
+
+    const tpPct = this.config.exit?.takeProfitPct ?? 1.2;
+    const slPct = this.config.exit?.hardStopLossPct ?? 3.5;
+    const entryPrice = alert.currentPrice || 0;
+
+    if (entryPrice > 0) {
+      alert.simResult = {
+        hypotheticalEntryPrice: entryPrice,
+        targetTpPrice: parseFloat((entryPrice * (1 - tpPct / 100)).toFixed(8)),
+        hardSlPrice: parseFloat((entryPrice * (1 + slPct / 100)).toFixed(8)),
+        side: 'SHORT',
+        highestPrice: entryPrice,
+        lowestPrice: entryPrice,
+        highestDiffPct: 0,
+        lowestDiffPct: 0,
+        outcome: 'TRACKING',
+        simulatedPnlPct: 0,
+        durationMinutes: 0,
+        isComplete: false,
+        updatedAt: Date.now(),
+      };
+      this.activeSimSpikes.set(alert.id, alert);
+    }
+
+    db.saveSpike(alert).catch(() => { });
+  }
+
+  /**
    * Menangani Spike Lonjakan Harga yang baru saja dideteksi Scanner
    */
   private async handleSpikeAlert(alert: SpikeAlert) {
@@ -508,10 +555,9 @@ export class WickSniperEngine {
 
     // Proteksi lapis ganda: Cek apakah koin masih dalam masa cooldown
     if (this.scanner.isCoolingDown(symbol)) {
-      alert.status = 'SKIPPED';
-      alert.skipReason = `Koin ${symbol} masih dalam masa jeda cooldown antar trade`;
+      const reason = `Koin ${symbol} masih dalam masa jeda cooldown antar trade`;
       logger.log('INFO', `⏳ [COOLDOWN SKIP] Lonjakan pada ${symbol} diabaikan karena masih dalam masa cooldown.`, symbol);
-      db.saveSpike(alert).catch(() => { });
+      this.recordSkippedSpike(alert, reason);
       return;
     }
 
@@ -524,8 +570,7 @@ export class WickSniperEngine {
         : Math.round(this.closedTrades.filter(t => t.timestamp >= todayStartTs && (this.config.tradingMode === 'PAPER' ? t.isPaper : !t.isPaper)).reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
 
       if (currentDailyPnl <= -Math.abs(maxDailyLoss)) {
-        alert.status = 'SKIPPED';
-        alert.skipReason = `Circuit Breaker: Rugi harian ($${currentDailyPnl.toFixed(2)}) mencapai batas maks (-$${maxDailyLoss})`;
+        const reason = `Circuit Breaker: Rugi harian ($${currentDailyPnl.toFixed(2)}) mencapai batas maks (-$${maxDailyLoss})`;
         logger.log(
           'WARN',
           `🛑 [CIRCUIT BREAKER] Penembakan spike ${symbol} dibatalkan! Rugi hari ini: $${currentDailyPnl.toFixed(2)} USDT <= -$${maxDailyLoss} USDT.`,
@@ -536,7 +581,7 @@ export class WickSniperEngine {
           `Akumulasi kerugian hari ini mencapai $${currentDailyPnl.toFixed(2)} USDT (Batas Maksimal: -$${maxDailyLoss} USDT).\n\nBot otomatis menghentikan penembakan koin baru sampai 00:00 WIB demi mengamankan sisa modal Anda.`,
           symbol
         );
-        db.saveSpike(alert).catch(() => {});
+        this.recordSkippedSpike(alert, reason);
         return;
       }
     }
@@ -545,8 +590,7 @@ export class WickSniperEngine {
     const minSafetyBalance = this.config.risk?.minSafetyBalanceUsdt ?? 0;
     const currentBalance = this.config.tradingMode === 'LIVE' ? this.liveAvailableBalance : this.virtualBalance;
     if (minSafetyBalance > 0 && currentBalance > 0 && currentBalance < minSafetyBalance) {
-      alert.status = 'SKIPPED';
-      alert.skipReason = `Saldo (${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} $${currentBalance.toFixed(2)}) di bawah batas aman ($${minSafetyBalance})`;
+      const reason = `Saldo (${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} $${currentBalance.toFixed(2)}) di bawah batas aman ($${minSafetyBalance})`;
       logger.log(
         'WARN',
         `🛡️ [MIN BALANCE SKIP] Saldo (${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} $${currentBalance.toFixed(2)} USDT) kurang dari batas aman ($${minSafetyBalance} USDT). Lonjakan ${symbol} dilewati.`,
@@ -557,7 +601,7 @@ export class WickSniperEngine {
         `Saldo ${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} saat ini $${currentBalance.toFixed(2)} USDT kurang dari batas aman ($${minSafetyBalance} USDT).\n\nPenembakan spike dibatalkan agar tidak membuka posisi tanpa jaring pengaman.`,
         symbol
       );
-      db.saveSpike(alert).catch(() => {});
+      this.recordSkippedSpike(alert, reason);
       return;
     }
 
@@ -566,18 +610,16 @@ export class WickSniperEngine {
     const maxCoins = this.config.grid.maxConcurrentCoins;
     const currentActiveAndDeploying = this.activePositions.size + this.deployingSymbols.size;
     if (currentActiveAndDeploying >= maxCoins) {
-      alert.status = 'SKIPPED';
-      alert.skipReason = `Maksimal posisi aktif (${maxCoins}) tercapai`;
+      const reason = `Maksimal posisi aktif (${maxCoins}) tercapai`;
       logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh (${currentActiveAndDeploying}/${maxCoins}).`);
-      db.saveSpike(alert).catch(() => { });
+      this.recordSkippedSpike(alert, reason);
       return;
     }
 
     // Cek apakah koin ini sudah aktif atau sedang dalam proses penembakan
     if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) {
-      alert.status = 'SKIPPED';
-      alert.skipReason = `Sudah ada posisi aktif atau order sedang diproses pada ${symbol}`;
-      db.saveSpike(alert).catch(() => { });
+      const reason = `Sudah ada posisi aktif atau order sedang diproses pada ${symbol}`;
+      this.recordSkippedSpike(alert, reason);
       return;
     }
 
@@ -592,19 +634,17 @@ export class WickSniperEngine {
           const livePositions = await binanceFutures.getAllOpenPositions();
           const effectiveLiveCount = Math.max(this.activePositions.size, livePositions.length) + (this.deployingSymbols.size - 1);
           if (effectiveLiveCount >= maxCoins) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `Maksimal posisi aktif di Binance (${maxCoins}) tercapai`;
+            const reason = `Maksimal posisi aktif di Binance (${maxCoins}) tercapai`;
             logger.log('WARN', `⚡ Spike pada ${symbol} dilewati: Kuota Binance aktual penuh (${effectiveLiveCount}/${maxCoins}).`);
-            db.saveSpike(alert).catch(() => { });
+            this.recordSkippedSpike(alert, reason);
             return;
           }
 
           const livePos = await binanceFutures.getOpenPosition(symbol);
           if (livePos && Math.abs(livePos.positionAmt) > 0) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `Posisi aktif sudah ada di Binance pada ${symbol} (Qty: ${Math.abs(livePos.positionAmt)})`;
+            const reason = `Posisi aktif sudah ada di Binance pada ${symbol} (Qty: ${Math.abs(livePos.positionAmt)})`;
             logger.log('WARN', `⚠️ [SKIP ORDER BARU] ${symbol} sudah punya posisi aktif di Binance.`);
-            db.saveSpike(alert).catch(() => { });
+            this.recordSkippedSpike(alert, reason);
             return;
           }
         } catch (e: any) {
@@ -647,8 +687,7 @@ export class WickSniperEngine {
                 const ratioStr = rawBody > 0 ? (lowerWick / rawBody).toFixed(1) + 'x' : 'Ekor Penuh';
                 const barLabel = i === candlesToCheck.length - 1 ? 'candle 1m berjalan (live)' : 'candle 1m sebelumnya';
 
-                alert.status = 'SKIPPED';
-                alert.skipReason = `V-Reversal / Bottom Sweep pada ${barLabel} (Palung $${formatCryptoPrice(candle.low)} ➜ Pantul +${bouncePct}% | Rentang: ${rangePct}%)`;
+                const reason = `V-Reversal / Bottom Sweep pada ${barLabel} (Palung $${formatCryptoPrice(candle.low)} ➜ Pantul +${bouncePct}% | Rentang: ${rangePct}%)`;
                 const sweepCooldownMins = this.config.scanner.cooldownMinutes || 10;
                 this.scanner.setCooldown(symbol, sweepCooldownMins);
                 logger.log(
@@ -656,7 +695,7 @@ export class WickSniperEngine {
                   `🛡️ [BOTTOM REJECTION SKIP] ${symbol}: Melewatkan SHORT! Terdeteksi V-Reversal / sweep pada ${barLabel} (Palung $${formatCryptoPrice(candle.low)} ➜ Pantulan +${bouncePct}% ke $${formatCryptoPrice(candle.close)} | Rasio ekor: ${ratioStr} | Rentang: ${rangePct}%). Diistirahatkan ${sweepCooldownMins}m agar tidak terseret roket pantulan.`,
                   symbol
                 );
-                db.saveSpike(alert).catch(() => { });
+                this.recordSkippedSpike(alert, reason);
                 return;
               }
             }
@@ -699,8 +738,7 @@ export class WickSniperEngine {
       // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita) untuk SHORT
       if (this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
         if (indicators && typeof indicators.volRatio === 'number' && indicators.volRatio > this.config.scanner.maxVolRatio) {
-          alert.status = 'SKIPPED';
-          alert.skipReason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
+          const reason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
           const volCooldownMins = this.config.scanner.maxVolRatioCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
           this.scanner.setCooldown(symbol, volCooldownMins);
           logger.log(
@@ -708,7 +746,7 @@ export class WickSniperEngine {
             `🛡️ [MAX VOL RATIO SKIP] ${symbol} dilewati: Rasio volume 1m (${indicators.volRatio}x) melebihi batas aman maks (${this.config.scanner.maxVolRatio}x). Terdeteksi lonjakan volume breakout abnormal/whale (cooldown ${volCooldownMins}m).`,
             symbol
           );
-          db.saveSpike(alert).catch(() => { });
+          this.recordSkippedSpike(alert, reason);
           return;
         }
       }
@@ -736,8 +774,7 @@ export class WickSniperEngine {
               const gapDesc = trades.length < 5
                 ? `Hanya ada ${trades.length} transaksi di riwayat tape (pasar sepi)`
                 : `Jeda transaksi ${maxGapSec.toFixed(1)}s (batas maks ${maxAllowedGapSec}s)`;
-              alert.status = 'SKIPPED';
-              alert.skipReason = `Koin sepi / jeda trade renggang: ${gapDesc}`;
+              const reason = `Koin sepi / jeda trade renggang: ${gapDesc}`;
               const gapCooldownMins = this.config.scanner?.tradeGapCooldownMinutes ?? Math.min(this.config.scanner?.cooldownMinutes || 5, 5);
               this.scanner.setCooldown(symbol, gapCooldownMins);
               logger.log(
@@ -745,7 +782,7 @@ export class WickSniperEngine {
                 `🛡️ [TRADE GAP FILTER] Lonjakan ${symbol} dilewati: ${gapDesc}. Menghindari risiko koin sepi & slippage (cooldown ${gapCooldownMins}m).`,
                 symbol
               );
-              db.saveSpike(alert).catch(() => { });
+              this.recordSkippedSpike(alert, reason);
               return;
             }
           }
@@ -768,8 +805,7 @@ export class WickSniperEngine {
 
           // Cek 1: Filter RSI 1m Minimum (Mencegah SHORT pada koin yang baru memantul dari oversold)
           if (minRsi1m !== undefined && minRsi1m > 0 && indicators.rsi1m !== undefined && indicators.rsi1m < minRsi1m) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `RSI 1m (${indicators.rsi1m.toFixed(1)}) di bawah batas aman (${minRsi1m}) untuk SHORT (rawan pantulan oversold)`;
+            const reason = `RSI 1m (${indicators.rsi1m.toFixed(1)}) di bawah batas aman (${minRsi1m}) untuk SHORT (rawan pantulan oversold)`;
             const rsiCooldown = this.config.scanner?.minRsiCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 10;
             this.scanner.setCooldown(symbol, rsiCooldown);
             logger.log(
@@ -777,14 +813,13 @@ export class WickSniperEngine {
               `🛡️ [MIN RSI SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena RSI 1m (${indicators.rsi1m.toFixed(1)}) < batas aman (${minRsi1m}). Menghindari SHORT saat oversold/rebound (cooldown ${rsiCooldown}m).`,
               symbol
             );
-            db.saveSpike(alert).catch(() => {});
+            this.recordSkippedSpike(alert, reason);
             return;
           }
 
           // Cek 2: Filter Minimal Rasio Volume (Mencegah SHORT pada lonjakan volume sepi/kering/illiquid)
           if (minVolRatio !== undefined && minVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio < minVolRatio) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) di bawah batas aman min (${minVolRatio}x normal)`;
+            const reason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) di bawah batas aman min (${minVolRatio}x normal)`;
             const volCooldown = this.config.scanner?.minVolRatioCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 5;
             this.scanner.setCooldown(symbol, volCooldown);
             logger.log(
@@ -792,14 +827,13 @@ export class WickSniperEngine {
               `🛡️ [MIN VOL SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena volume 1m (${indicators.volRatio.toFixed(1)}x rata-rata) < batas min (${minVolRatio}x). Menghindari pump volume tipis/illiquid (cooldown ${volCooldown}m).`,
               symbol
             );
-            db.saveSpike(alert).catch(() => {});
+            this.recordSkippedSpike(alert, reason);
             return;
           }
 
           // Cek 3: Filter Maksimal Rasio Volume Breakout (Mencegah menghadang breakout volume masif)
           if (maxVolRatio !== undefined && maxVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio > maxVolRatio) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) melebihi batas breakout maks (${maxVolRatio}x normal)`;
+            const reason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) melebihi batas breakout maks (${maxVolRatio}x normal)`;
             const volCooldown = this.config.scanner?.maxVolRatioCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 10;
             this.scanner.setCooldown(symbol, volCooldown);
             logger.log(
@@ -807,7 +841,7 @@ export class WickSniperEngine {
               `🛡️ [MAX VOL BREAKOUT SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena volume 1m (${indicators.volRatio.toFixed(1)}x rata-rata) melampaui batas (${maxVolRatio}x). Menghindari roket breakout volume masif (cooldown ${volCooldown}m).`,
               symbol
             );
-            db.saveSpike(alert).catch(() => {});
+            this.recordSkippedSpike(alert, reason);
             return;
           }
         } catch (e: any) {
@@ -874,8 +908,7 @@ export class WickSniperEngine {
         }
 
         if (!isConfirmed) {
-          alert.status = 'SKIPPED';
-          alert.skipReason = `Monster Pump / Runaway: Tidak ada konfirmasi ekor atas (-${minPullbackPct}%) dalam ${maxWaitSec}s`;
+          const reason = `Monster Pump / Runaway: Tidak ada konfirmasi ekor atas (-${minPullbackPct}%) dalam ${maxWaitSec}s`;
           const runawayCooldownMins = this.config.scanner.upperWickCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
           this.scanner.setCooldown(symbol, runawayCooldownMins);
           logger.log(
@@ -883,7 +916,7 @@ export class WickSniperEngine {
             `🛡️ [UPPER WICK FILTER] Lonjakan ${symbol} dilewati: Harga terus melaju tanpa pullback ${minPullbackPct}% dalam ${maxWaitSec}s. Saldo aman dari monster pump (cooldown ${runawayCooldownMins}m).`,
             symbol
           );
-          db.saveSpike(alert).catch(() => { });
+          this.recordSkippedSpike(alert, reason);
           return;
         }
       }
@@ -893,8 +926,7 @@ export class WickSniperEngine {
         try {
           const spreadInfo = await binanceFutures.getOrderbookSpread(symbol);
           if (spreadInfo && spreadInfo.spreadPct > this.config.scanner.maxSpreadPct) {
-            alert.status = 'SKIPPED';
-            alert.skipReason = `Spread Bid-Ask terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%)`;
+            const reason = `Spread Bid-Ask terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%)`;
             const spreadCooldownMins = Math.min(this.config.scanner.cooldownMinutes || 5, 5);
             this.scanner.setCooldown(symbol, spreadCooldownMins);
             logger.log(
@@ -902,7 +934,7 @@ export class WickSniperEngine {
               `🛡️ [SPREAD GUARD] ${symbol} dilewati: Spread pasar terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%). Orderbook tipis, aman dari jebakan slippage (cooldown ${spreadCooldownMins}m).`,
               symbol
             );
-            db.saveSpike(alert).catch(() => {});
+            this.recordSkippedSpike(alert, reason);
             return;
           }
         } catch {}
@@ -4087,6 +4119,191 @@ export class WickSniperEngine {
     for (const trade of pending.slice(0, 3)) {
       await this.fetchPostExitSnapshot(trade);
       await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+
+  /**
+   * Mengupdate simulasi pergerakan harga untuk koin-koin yang ditolak (Shadow Trading) secara real-time
+   */
+  private updateActiveSimSpikes(): void {
+    if (this.activeSimSpikes.size === 0) return;
+    const now = Date.now();
+    const maxHoldMs = (this.config.exit?.maxHoldMinutes || 30) * 60_000;
+
+    for (const [id, alert] of this.activeSimSpikes.entries()) {
+      if (!alert.simResult || alert.simResult.isComplete) {
+        this.activeSimSpikes.delete(id);
+        continue;
+      }
+
+      const livePrice = this.scanner.getCurrentPrice(alert.symbol);
+      if (!livePrice || livePrice <= 0) {
+        if (now - alert.timestamp > maxHoldMs + 5 * 60_000) {
+          this.activeSimSpikes.delete(id);
+        }
+        continue;
+      }
+
+      const sim = alert.simResult;
+      const elapsedMs = Math.max(0, now - alert.timestamp);
+      const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+      sim.durationMinutes = elapsedMinutes;
+      sim.updatedAt = now;
+
+      // Update harga tertinggi (MAE untuk SHORT) & terendah (MFE untuk SHORT)
+      if (livePrice > sim.highestPrice) {
+        sim.highestPrice = livePrice;
+      }
+      if (livePrice < sim.lowestPrice) {
+        sim.lowestPrice = livePrice;
+      }
+
+      if (sim.hypotheticalEntryPrice > 0) {
+        sim.highestDiffPct = parseFloat((((sim.highestPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        sim.lowestDiffPct = parseFloat((((sim.lowestPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+      }
+
+      // Evaluasi SHORT: Target TP tercapai jika harga TURUN <= targetTpPrice
+      if (livePrice <= sim.targetTpPrice) {
+        sim.outcome = 'MISSED_TP';
+        sim.simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - sim.targetTpPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        sim.isComplete = true;
+        this.activeSimSpikes.delete(id);
+        db.updateSpikeSimResult(id, sim).catch(() => {});
+        continue;
+      }
+
+      // Evaluasi SHORT: Hard SL tersentuh jika harga NAIK >= hardSlPrice
+      if (livePrice >= sim.hardSlPrice) {
+        sim.outcome = 'SAVED_SL';
+        sim.simulatedPnlPct = -parseFloat((((sim.hardSlPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        sim.isComplete = true;
+        this.activeSimSpikes.delete(id);
+        db.updateSpikeSimResult(id, sim).catch(() => {});
+        continue;
+      }
+
+      // Evaluasi Timeout jika durasi pengamatan melebihi batas waktu
+      if (elapsedMs >= maxHoldMs) {
+        sim.outcome = 'TIMEOUT';
+        sim.simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - livePrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        sim.isComplete = true;
+        this.activeSimSpikes.delete(id);
+        db.updateSpikeSimResult(id, sim).catch(() => {});
+        continue;
+      }
+
+      // Update PnL berjalan secara berkala
+      sim.simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - livePrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+      if (Math.floor(elapsedMs / 1000) % 10 === 0) {
+        db.updateSpikeSimResult(id, sim).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Memeriksa simulasi spike yang belum selesai setelah 30 menit (misal bot baru restart)
+   */
+  public async checkPendingSpikeSimulations(): Promise<void> {
+    const now = Date.now();
+    const spikesToCheck = this.scanner.getRecentSpikes().filter(
+      (s) => s.status === 'SKIPPED' && s.simResult && !s.simResult.isComplete && now - s.timestamp >= 30 * 60_000
+    );
+
+    if (spikesToCheck.length === 0) return;
+
+    for (const spike of spikesToCheck.slice(0, 3)) {
+      await this.evaluateSpikeSimulationWithKlines(spike);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+
+  /**
+   * Mengambil candle 1m Binance untuk menyelesaikan evaluasi simulasi spike yang belum tuntas
+   */
+  public async evaluateSpikeSimulationWithKlines(spike: SpikeAlert): Promise<SpikeSimResult | null> {
+    if (!spike.simResult || spike.simResult.isComplete) return spike.simResult || null;
+    const sim = spike.simResult;
+    if (sim.hypotheticalEntryPrice <= 0) return sim;
+
+    try {
+      const client = await binanceFutures.getHttpClient();
+      const res = await client.get('/fapi/v1/klines', {
+        params: {
+          symbol: spike.symbol,
+          interval: '1m',
+          startTime: spike.timestamp,
+          limit: 30,
+        },
+        timeout: 3500,
+      });
+
+      if (!Array.isArray(res.data) || res.data.length === 0) {
+        return sim;
+      }
+
+      let highest = sim.hypotheticalEntryPrice;
+      let lowest = sim.hypotheticalEntryPrice;
+      let outcome: SpikeSimResult['outcome'] = 'TRACKING';
+      let simulatedPnlPct = 0;
+      let hitMinute = res.data.length;
+
+      for (let i = 0; i < res.data.length; i++) {
+        const c = res.data[i];
+        const h = parseFloat(c[2]);
+        const l = parseFloat(c[3]);
+        if (!isNaN(h) && h > highest) highest = h;
+        if (!isNaN(l) && l > 0 && l < lowest) lowest = l;
+
+        const hitSl = !isNaN(h) && h >= sim.hardSlPrice;
+        const hitTp = !isNaN(l) && l <= sim.targetTpPrice;
+
+        if (hitSl && !hitTp) {
+          outcome = 'SAVED_SL';
+          simulatedPnlPct = -parseFloat((((sim.hardSlPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          hitMinute = i + 1;
+          break;
+        } else if (hitTp && !hitSl) {
+          outcome = 'MISSED_TP';
+          simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - sim.targetTpPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          hitMinute = i + 1;
+          break;
+        } else if (hitSl && hitTp) {
+          outcome = 'SAVED_SL';
+          simulatedPnlPct = -parseFloat((((sim.hardSlPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          hitMinute = i + 1;
+          break;
+        }
+      }
+
+      const now = Date.now();
+      const minutesSinceSpike = (now - spike.timestamp) / 60_000;
+      const isComplete = outcome !== 'TRACKING' || (minutesSinceSpike >= 30 && res.data.length >= 29);
+
+      if (outcome === 'TRACKING' && isComplete) {
+        outcome = 'TIMEOUT';
+        const lastClose = parseFloat(res.data[res.data.length - 1][4]);
+        simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - lastClose) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+      }
+
+      sim.highestPrice = parseFloat(highest.toFixed(8));
+      sim.lowestPrice = parseFloat(lowest.toFixed(8));
+      sim.highestDiffPct = parseFloat((((highest - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+      sim.lowestDiffPct = parseFloat((((lowest - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+      sim.outcome = outcome;
+      sim.simulatedPnlPct = simulatedPnlPct;
+      sim.durationMinutes = hitMinute;
+      sim.isComplete = isComplete;
+      sim.updatedAt = now;
+
+      if (isComplete) {
+        this.activeSimSpikes.delete(spike.id);
+      }
+      db.updateSpikeSimResult(spike.id, sim).catch(() => {});
+
+      return sim;
+    } catch (e: any) {
+      return sim;
     }
   }
 }

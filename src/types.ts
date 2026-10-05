@@ -129,6 +129,22 @@ export interface TickerSnapshot {
   time: number;
 }
 
+export interface SpikeSimResult {
+  hypotheticalEntryPrice: number;
+  targetTpPrice: number;
+  hardSlPrice: number;
+  side: 'SHORT' | 'LONG';
+  highestPrice: number;
+  lowestPrice: number;
+  highestDiffPct: number;
+  lowestDiffPct: number;
+  outcome: 'SAVED_SL' | 'MISSED_TP' | 'TIMEOUT' | 'TRACKING';
+  simulatedPnlPct: number;
+  durationMinutes: number;
+  isComplete: boolean;
+  updatedAt: number;
+}
+
 export interface SpikeAlert {
   id: string;
   symbol: string;
@@ -139,6 +155,8 @@ export interface SpikeAlert {
   timestamp: number;
   status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
   skipReason?: string;
+  paramsSnapshot?: Record<string, any>;
+  simResult?: SpikeSimResult;
 }
 
 export interface MarketSnapshot {

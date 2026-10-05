@@ -212,6 +212,30 @@
             <span class="tag-pulse" id="radar-pulse-tag">Memindai 0 Koin (0 tick/s)</span>
           </div>
 
+          <!-- SUMMARY SIMULASI FILTER RADAR -->
+          <div class="radar-sim-summary" id="radar-sim-summary">
+            <div class="sim-summary-card">
+              <span class="sim-card-label">🛡️ Penyelamatan Modal</span>
+              <span class="sim-card-val text-green" id="sim-saved-sl">0 Koin</span>
+              <small class="sim-card-sub" id="sim-saved-sl-sub">Selamat dari Stop Loss</small>
+            </div>
+            <div class="sim-summary-card">
+              <span class="sim-card-label">💸 Peluang Terlewat</span>
+              <span class="sim-card-val text-gold" id="sim-missed-tp">0 Koin</span>
+              <small class="sim-card-sub" id="sim-missed-tp-sub">Sebenarnya Kena TP</small>
+            </div>
+            <div class="sim-summary-card">
+              <span class="sim-card-label">🎯 Akurasi Pertahanan</span>
+              <span class="sim-card-val text-cyan" id="sim-defense-rate">0%</span>
+              <small class="sim-card-sub">Rasio Penyelamatan</small>
+            </div>
+            <div class="sim-summary-card">
+              <span class="sim-card-label">⏳ Sedang Berjalan</span>
+              <span class="sim-card-val text-muted" id="sim-active-count">0 Koin</span>
+              <small class="sim-card-sub">Pemantauan 30 Menit</small>
+            </div>
+          </div>
+
           <!-- TOOLBAR FILTER RADAR -->
           <div class="panel-toolbar">
             <div class="filter-group">
@@ -235,12 +259,13 @@
                   <th>Harga Awal</th>
                   <th>Puncak</th>
                   <th>Lonjakan (%)</th>
-                  <th>Status</th>
+                  <th>Status & Alasan</th>
+                  <th>Simulasi Pasca-Filter</th>
                 </tr>
               </thead>
               <tbody id="spike-table-body">
                 <tr>
-                  <td colspan="6" class="text-center text-muted">Belum ada lonjakan harga yang melewati ambang batas.</td>
+                  <td colspan="7" class="text-center text-muted">Belum ada lonjakan harga yang melewati ambang batas.</td>
                 </tr>
               </tbody>
             </table>
@@ -1595,6 +1620,27 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.4.8"></script>
+  <!-- DETAIL SIMULASI SPIKE POPUP MODAL -->
+  <div id="spike-sim-modal" class="modal-backdrop" onclick="if(event.target===this)closeSpikeSimModal()">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3 id="spike-sim-title">🔬 Hasil Simulasi Koin Ditolak (Shadow Trade)</h3>
+          <span id="spike-sim-badge" class="badge-mode">STATUS</span>
+        </div>
+        <button type="button" class="btn-close" onclick="closeSpikeSimModal()">&times;</button>
+      </div>
+
+      <div class="modal-body" id="spike-sim-body">
+        <!-- Konten dinamis diisi oleh openSpikeSimModal di app.js -->
+      </div>
+
+      <div class="modal-footer floating-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeSpikeSimModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=2.4.9"></script>
 </body>
 </html>

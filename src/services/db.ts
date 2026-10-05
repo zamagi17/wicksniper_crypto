@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert } from '../types';
+import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult } from '../types';
 
 dotenv.config();
 
@@ -155,6 +155,8 @@ export class DatabaseService {
           );
           CREATE INDEX IF NOT EXISTS idx_wicksniper_spikes_timestamp ON wicksniper_spikes (timestamp DESC);
           ALTER TABLE wicksniper_spikes ALTER COLUMN skip_reason TYPE TEXT;
+          ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS params_snapshot JSONB;
+          ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS sim_result JSONB;
         `);
 
         this.isConnected = true;
@@ -466,11 +468,13 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_spikes (
-           id, symbol, start_price, current_price, surge_pct, lookback_seconds, status, skip_reason, timestamp
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           id, symbol, start_price, current_price, surge_pct, lookback_seconds, status, skip_reason, timestamp, params_snapshot, sim_result
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (id) DO UPDATE SET
            status = EXCLUDED.status,
-           skip_reason = EXCLUDED.skip_reason;`,
+           skip_reason = EXCLUDED.skip_reason,
+           params_snapshot = COALESCE(EXCLUDED.params_snapshot, wicksniper_spikes.params_snapshot),
+           sim_result = COALESCE(EXCLUDED.sim_result, wicksniper_spikes.sim_result);`,
         [
           s.id,
           s.symbol,
@@ -481,10 +485,24 @@ export class DatabaseService {
           s.status,
           s.skipReason || null,
           s.timestamp,
+          s.paramsSnapshot ? JSON.stringify(s.paramsSnapshot) : null,
+          s.simResult ? JSON.stringify(s.simResult) : null,
         ]
       );
     } catch (e: any) {
       console.error('[Database] Gagal simpan spike ke DB:', e.message);
+    }
+  }
+
+  public async updateSpikeSimResult(id: string, simResult: SpikeSimResult): Promise<void> {
+    if (!this.isConnected || !this.pool) return;
+    try {
+      await this.pool.query(
+        `UPDATE wicksniper_spikes SET sim_result = $1 WHERE id = $2;`,
+        [JSON.stringify(simResult), id]
+      );
+    } catch (e: any) {
+      console.error('[Database] Gagal update sim_result spike:', e.message);
     }
   }
 
@@ -498,7 +516,9 @@ export class DatabaseService {
                 surge_pct AS "surgePct",
                 lookback_seconds AS "lookbackSeconds",
                 status, skip_reason AS "skipReason",
-                timestamp
+                timestamp,
+                params_snapshot AS "paramsSnapshot",
+                sim_result AS "simResult"
          FROM wicksniper_spikes
          ORDER BY timestamp DESC
          LIMIT $1;`,
@@ -514,6 +534,8 @@ export class DatabaseService {
         status: r.status as SpikeAlert['status'],
         skipReason: r.skipReason || undefined,
         timestamp: parseInt(r.timestamp, 10),
+        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || undefined,
+        simResult: typeof r.simResult === 'string' ? JSON.parse(r.simResult) : r.simResult || undefined,
       }));
     } catch (e: any) {
       console.error('[Database] Gagal load spikes dari DB:', e.message);
@@ -621,13 +643,19 @@ export class DatabaseService {
     limit?: number;
     symbol?: string;
     status?: string;
-  }): Promise<{ spikes: SpikeAlert[]; total: number; page: number; totalPages: number }> {
+  }): Promise<{
+    spikes: SpikeAlert[];
+    total: number;
+    page: number;
+    totalPages: number;
+    simStats: { totalSkipped: number; savedSlCount: number; missedTpCount: number; trackingCount: number; timeoutCount: number };
+  }> {
     const page = Math.max(1, parseInt(String(options.page || 1), 10));
     const limit = Math.min(100, Math.max(5, parseInt(String(options.limit || 15), 10)));
     const offset = (page - 1) * limit;
 
     if (!this.isConnected || !this.pool) {
-      return { spikes: [], total: 0, page, totalPages: 0 };
+      return { spikes: [], total: 0, page, totalPages: 0, simStats: { totalSkipped: 0, savedSlCount: 0, missedTpCount: 0, trackingCount: 0, timeoutCount: 0 } };
     }
 
     try {
@@ -662,7 +690,9 @@ export class DatabaseService {
                 surge_pct AS "surgePct",
                 lookback_seconds AS "lookbackSeconds",
                 status, skip_reason AS "skipReason",
-                timestamp
+                timestamp,
+                params_snapshot AS "paramsSnapshot",
+                sim_result AS "simResult"
          FROM wicksniper_spikes
          ${whereClause}
          ORDER BY timestamp DESC
@@ -680,12 +710,37 @@ export class DatabaseService {
         status: r.status as SpikeAlert['status'],
         skipReason: r.skipReason || undefined,
         timestamp: parseInt(r.timestamp, 10),
+        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || undefined,
+        simResult: typeof r.simResult === 'string' ? JSON.parse(r.simResult) : r.simResult || undefined,
       }));
 
-      return { spikes, total, page, totalPages };
+      let simStats = { totalSkipped: 0, savedSlCount: 0, missedTpCount: 0, trackingCount: 0, timeoutCount: 0 };
+      try {
+        const statsRes = await this.pool.query(
+          `SELECT 
+             COUNT(*) FILTER (WHERE status = 'SKIPPED')::int AS total_skipped,
+             COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'SAVED_SL')::int AS saved_sl,
+             COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'MISSED_TP')::int AS missed_tp,
+             COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'TRACKING')::int AS tracking,
+             COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'TIMEOUT')::int AS timeout
+           FROM wicksniper_spikes;`
+        );
+        if (statsRes.rows.length > 0) {
+          const row = statsRes.rows[0];
+          simStats = {
+            totalSkipped: row.total_skipped || 0,
+            savedSlCount: row.saved_sl || 0,
+            missedTpCount: row.missed_tp || 0,
+            trackingCount: row.tracking || 0,
+            timeoutCount: row.timeout || 0,
+          };
+        }
+      } catch {}
+
+      return { spikes, total, page, totalPages, simStats };
     } catch (e: any) {
       console.error('[Database] Gagal query spikes:', e.message);
-      return { spikes: [], total: 0, page, totalPages: 0 };
+      return { spikes: [], total: 0, page, totalPages: 0, simStats: { totalSkipped: 0, savedSlCount: 0, missedTpCount: 0, trackingCount: 0, timeoutCount: 0 } };
     }
   }
 
