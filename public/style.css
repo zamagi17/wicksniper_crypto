@@ -1221,6 +1221,12 @@ body {
   overflow-wrap: anywhere;
 }
 
+.radar-wrap {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .radar-snapshot-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

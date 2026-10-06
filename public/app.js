@@ -1184,6 +1184,30 @@ function openRadarSpikeDetail(spikeId) {
   const slPct = isLong
     ? params.momentumLongStopLossPct ?? params.hardStopLossPct
     : params.hardStopLossPct;
+  const configuredLayers = Number(params.totalLayers || 0);
+  const hasConfiguredLayers = Number.isFinite(configuredLayers) && configuredLayers > 0;
+  const minLayersForHardSl = Number(params.atrMinLayersToProtect || 0);
+  const layerProtectionSummary = isLong
+    ? 'Momentum Long memakai 1 entry, tanpa grid'
+    : !hasConfiguredLayers
+      ? 'Tidak tercatat di snapshot'
+      : params.atrDynamicSlTpEnabled && params.atrDeferHardStopBeforeLastLayer !== false
+        ? `${minLayersForHardSl > 0 ? Math.min(minLayersForHardSl, configuredLayers) : configuredLayers} dari ${configuredLayers} layer harus terisi sebelum hard SL ATR aktif`
+        : 'Tidak ada penundaan hard SL berdasarkan layer';
+  const layerSimulationSummary = isLong
+    ? '1 entry hipotetis; tidak ada averaging grid'
+    : '1 entry hipotetis; pengisian layer grid tidak disimulasikan';
+  const hardSlMovementSummary = isLong
+    ? 'SL memakai entry tunggal Momentum Long'
+    : params.hardStopLossPct !== undefined
+      ? `Basis SL ${params.atrDynamicSlTpEnabled ? 'ATR/dinamis' : 'persentase tetap'} dihitung ulang dari average entry setiap layer terisi; level dapat melebar saat average entry naik`
+      : 'Aturan pergerakan SL tidak tercatat di snapshot';
+  const trailingSlTiers = Array.isArray(params.trailingSlTiers) ? params.trailingSlTiers : [];
+  const trailingSlSummary = params.trailingSlEnabled === true
+    ? `${trailingSlTiers.map((tier) => `${Number(tier.filledLayerMin || 0)}+ fill: ${(Number(tier.percentOfBase || 0) * 100).toFixed(0)}% basis`).join(' · ') || 'Tier tidak tercatat'}; trailing hanya mengetatkan SL`
+    : params.trailingSlEnabled === false
+      ? 'Nonaktif'
+      : 'Tidak tercatat di snapshot';
   const parameterLabels = {
     strategy: 'Strategi',
     marginPerLayerUsdt: 'Margin per layer (USDT)',
@@ -1224,7 +1248,7 @@ function openRadarSpikeDetail(spikeId) {
   const renderStat = (label, value) => `
     <div class="td-pe-stat">
       <div class="pe-label">${escapeHtml(label)}</div>
-      <div class="pe-val">${escapeHtml(value === undefined || value === null || value === '' ? '-' : value)}</div>
+      <div class="pe-val radar-wrap">${escapeHtml(value === undefined || value === null || value === '' ? '-' : value)}</div>
     </div>`;
 
   const paramRows = Object.entries(params)
@@ -1256,7 +1280,7 @@ function openRadarSpikeDetail(spikeId) {
   body.innerHTML = `
     <div class="td-section-title">Peristiwa Spike</div>
     <div class="td-post-exit-grid">
-      ${renderStat('Waktu terdeteksi', formatDateTime(spike.timestamp, true))}
+      ${renderStat('Waktu terdeteksi', formatDateTime(spike.timestamp))}
       ${renderStat('Arah strategi', sideLabel)}
       ${renderStat('Harga awal', `$${formatCryptoPrice(Number(spike.startPrice || 0))}`)}
       ${renderStat('Harga saat terdeteksi', `$${formatCryptoPrice(Number(spike.currentPrice || 0))}`)}
@@ -1271,6 +1295,14 @@ function openRadarSpikeDetail(spikeId) {
       ${renderStat('Volume 1m (USDT)', market.vol1mUsdt === undefined ? '-' : Number(market.vol1mUsdt).toLocaleString('en-US'))}
       ${renderStat('Funding rate', market.fundingRatePct === undefined ? '-' : `${Number(market.fundingRatePct).toFixed(4)}%`)}
       ${renderStat('Open interest (USDT)', market.openInterestUsdt === undefined ? '-' : Number(market.openInterestUsdt).toLocaleString('en-US'))}
+    </div>
+    <div class="td-section-title">Konfigurasi Layer & Cakupan Simulasi</div>
+    <div class="td-post-exit-grid">
+      ${renderStat('Rencana layer strategi', isLong ? '1 layer Momentum Long' : hasConfiguredLayers ? `${configuredLayers} layer grid` : '-')}
+      ${renderStat('Syarat layer sebelum hard SL', layerProtectionSummary)}
+      ${renderStat('Pergerakan hard SL', hardSlMovementSummary)}
+      ${renderStat('Trailing SL per layer', trailingSlSummary)}
+      ${renderStat('Layer yang diuji simulasi', layerSimulationSummary)}
     </div>
     ${simDetails}
     <div class="td-section-title">Snapshot Parameter Aktif Saat Kejadian</div>

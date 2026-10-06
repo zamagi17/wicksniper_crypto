@@ -2782,6 +2782,8 @@ export class WickSniperEngine {
       bepBufferPct: this.config.exit?.bepBufferPct,
       bepCooldownMinutes: this.config.exit?.bepCooldownMinutes,
       trailingSlEnabled: this.config.exit?.trailingSlEnabled,
+      trailingSlMaxReturnRatio: this.config.exit?.trailingSlMaxReturnRatio,
+      trailingSlTiers: this.config.exit?.trailingSlTiers,
       earlyExitMomentumEnabled: this.config.exit?.earlyExitMomentumEnabled,
       earlyExitMinBullishCandles: this.config.exit?.earlyExitMinBullishCandles,
       earlyExitMinRisePct: this.config.exit?.earlyExitMinRisePct,
