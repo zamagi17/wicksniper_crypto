@@ -558,21 +558,26 @@ export class WickSniperEngine {
   /**
    * Mencatat spike yang ditolak/dilewati filter dan menginisialisasi simulasi pelacakan pergerakan harga
    */
-  private recordSkippedSpike(alert: SpikeAlert, reason: string): void {
+  private recordSkippedSpike(alert: SpikeAlert, reason: string, side: 'SHORT' | 'LONG' = 'SHORT'): void {
     alert.status = 'SKIPPED';
     alert.skipReason = reason;
     alert.paramsSnapshot = this.captureParamsSnapshot();
 
-    const tpPct = this.config.exit?.takeProfitPct ?? 1.2;
-    const slPct = this.config.exit?.hardStopLossPct ?? 3.5;
+    const isLong = side === 'LONG';
+    const tpPct = isLong
+      ? this.config.momentumLong?.takeProfitPct ?? 6
+      : this.config.exit?.takeProfitPct ?? 1.2;
+    const slPct = isLong
+      ? this.config.momentumLong?.stopLossPct ?? 2.5
+      : this.config.exit?.hardStopLossPct ?? 3.5;
     const entryPrice = alert.currentPrice || 0;
 
     if (entryPrice > 0) {
       alert.simResult = {
         hypotheticalEntryPrice: entryPrice,
-        targetTpPrice: parseFloat((entryPrice * (1 - tpPct / 100)).toFixed(8)),
-        hardSlPrice: parseFloat((entryPrice * (1 + slPct / 100)).toFixed(8)),
-        side: 'SHORT',
+        targetTpPrice: parseFloat((entryPrice * (isLong ? 1 + tpPct / 100 : 1 - tpPct / 100)).toFixed(8)),
+        hardSlPrice: parseFloat((entryPrice * (isLong ? 1 - slPct / 100 : 1 + slPct / 100)).toFixed(8)),
+        side,
         highestPrice: entryPrice,
         lowestPrice: entryPrice,
         highestDiffPct: 0,
@@ -792,8 +797,12 @@ export class WickSniperEngine {
 
         const isVolExplosive = indicators?.volRatio !== undefined && indicators.volRatio >= minVolRatio;
         const isFundingSqueeze = indicators?.fundingRatePct === undefined || indicators.fundingRatePct <= maxFunding;
+        const maxRsi1m = longCfg.maxRsi1m ?? 80;
+        const isRsiOverextended = longCfg.maxRsiFilterEnabled === true
+          && indicators?.rsi1m !== undefined
+          && indicators.rsi1m > maxRsi1m;
 
-        if (alert.surgePct >= minSurge && isVolExplosive && isFundingSqueeze) {
+        if (alert.surgePct >= minSurge && isVolExplosive && isFundingSqueeze && !isRsiOverextended) {
           logger.log(
             'SNIPER',
             `🚀 [MOMENTUM LONG TRIGGER] ${symbol} memenuhi kriteria Super-Trend/Squeeze: Lonjakan +${alert.surgePct}%, Volume 1m ${indicators.volRatio.toFixed(1)}x rata-rata, Funding: ${indicators.fundingRatePct !== undefined ? indicators.fundingRatePct.toFixed(3) + '%' : 'N/A'}. Mengalihkan ke eksekusi LONG!`,
@@ -801,6 +810,15 @@ export class WickSniperEngine {
           );
           alert.status = 'EXECUTING';
           await this.deployLongPosition(symbol, alert.currentPrice, alert, indicators);
+          return;
+        }
+
+        if (alert.surgePct >= minSurge && isVolExplosive && isFundingSqueeze && isRsiOverextended) {
+          const reason = `Momentum Long dilewati: RSI 1m (${indicators.rsi1m.toFixed(1)}) melebihi batas maksimum (${maxRsi1m})`;
+          const cooldownMinutes = longCfg.cooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
+          this.scanner.setCooldown(symbol, cooldownMinutes);
+          logger.log('INFO', `🛡️ [LONG MAX RSI SKIP] ${symbol}: ${reason} (cooldown ${cooldownMinutes}m).`, symbol);
+          this.recordSkippedSpike(alert, reason, 'LONG');
           return;
         }
       }
@@ -1090,6 +1108,8 @@ export class WickSniperEngine {
         fundingRatePct: indicators?.fundingRatePct,
         takeProfitPct: tpPct,
         stopLossPct: slPct,
+        maxRsiFilterEnabled: longCfg.maxRsiFilterEnabled ?? false,
+        maxRsi1m: longCfg.maxRsi1m ?? 80,
         trailingTpEnabled: longCfg.trailingTpEnabled ?? true,
         trailingActivationPct: longCfg.trailingActivationPct ?? 1.5,
         trailingCallbackPct: longCfg.trailingCallbackPct ?? 0.8,
@@ -2738,6 +2758,17 @@ export class WickSniperEngine {
       hardStopCooldownMinutes: this.config.exit?.hardStopCooldownMinutes,
 
       // Scanner & Filters
+      momentumLongEnabled: this.config.momentumLong?.enabled,
+      momentumLongMinSurgePct: this.config.momentumLong?.minSurgePct,
+      momentumLongMinVolRatio: this.config.momentumLong?.minVolRatio,
+      momentumLongMaxFundingRatePct: this.config.momentumLong?.maxFundingRatePct,
+      momentumLongMaxRsiFilterEnabled: this.config.momentumLong?.maxRsiFilterEnabled ?? false,
+      momentumLongMaxRsi1m: this.config.momentumLong?.maxRsi1m ?? 80,
+      momentumLongTakeProfitPct: this.config.momentumLong?.takeProfitPct,
+      momentumLongStopLossPct: this.config.momentumLong?.stopLossPct,
+      momentumLongTrailingTpEnabled: this.config.momentumLong?.trailingTpEnabled,
+      momentumLongTrailingActivationPct: this.config.momentumLong?.trailingActivationPct,
+      momentumLongTrailingCallbackPct: this.config.momentumLong?.trailingCallbackPct,
       spikeMinPercent: this.config.scanner?.spikeMinPercent,
       spikeLookbackSeconds: this.config.scanner?.spikeLookbackSeconds,
       volumeSpikeMultiplier: this.config.scanner?.volumeSpikeMultiplier,
@@ -3235,7 +3266,7 @@ export class WickSniperEngine {
       const trade: ClosedTrade = {
         id: Math.random().toString(36).substring(2, 9),
         symbol: pos.symbol,
-        side: 'SHORT',
+        side: pos.side,
         entryPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, pos.avgEntryPrice)),
         exitPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, actualExitPrice)),
         qty: totalTradeQty,
@@ -4522,22 +4553,27 @@ export class WickSniperEngine {
         if (!isNaN(h) && h > highest) highest = h;
         if (!isNaN(l) && l > 0 && l < lowest) lowest = l;
 
-        const hitSl = !isNaN(h) && h >= sim.hardSlPrice;
-        const hitTp = !isNaN(l) && l <= sim.targetTpPrice;
+        const isLong = sim.side === 'LONG';
+        const hitSl = isLong
+          ? !isNaN(l) && l <= sim.hardSlPrice
+          : !isNaN(h) && h >= sim.hardSlPrice;
+        const hitTp = isLong
+          ? !isNaN(h) && h >= sim.targetTpPrice
+          : !isNaN(l) && l <= sim.targetTpPrice;
 
         if (hitSl && !hitTp) {
           outcome = 'SAVED_SL';
-          simulatedPnlPct = -parseFloat((((sim.hardSlPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          simulatedPnlPct = parseFloat((((isLong ? sim.hardSlPrice - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - sim.hardSlPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
           hitMinute = i + 1;
           break;
         } else if (hitTp && !hitSl) {
           outcome = 'MISSED_TP';
-          simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - sim.targetTpPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          simulatedPnlPct = parseFloat((((isLong ? sim.targetTpPrice - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - sim.targetTpPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
           hitMinute = i + 1;
           break;
         } else if (hitSl && hitTp) {
           outcome = 'SAVED_SL';
-          simulatedPnlPct = -parseFloat((((sim.hardSlPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          simulatedPnlPct = parseFloat((((isLong ? sim.hardSlPrice - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - sim.hardSlPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
           hitMinute = i + 1;
           break;
         }
@@ -4550,7 +4586,7 @@ export class WickSniperEngine {
       if (outcome === 'TRACKING' && isComplete) {
         outcome = 'TIMEOUT';
         const lastClose = parseFloat(res.data[res.data.length - 1][4]);
-        simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - lastClose) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        simulatedPnlPct = parseFloat((((sim.side === 'LONG' ? lastClose - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - lastClose) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
       }
 
       sim.highestPrice = parseFloat(highest.toFixed(8));

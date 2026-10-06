@@ -2654,6 +2654,9 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-long-min-surge', cfg.momentumLong?.minSurgePct ?? 3.0);
   setVal('cfg-long-min-vol-ratio', cfg.momentumLong?.minVolRatio ?? 4.0);
+  const longMaxRsiEnabled = document.getElementById('cfg-long-max-rsi-enabled');
+  if (longMaxRsiEnabled) longMaxRsiEnabled.checked = cfg.momentumLong?.maxRsiFilterEnabled === true;
+  setVal('cfg-long-max-rsi', cfg.momentumLong?.maxRsi1m ?? 80);
   setVal('cfg-long-max-funding', cfg.momentumLong?.maxFundingRatePct ?? 0.05);
   setVal('cfg-long-margin', cfg.momentumLong?.marginUsdt ?? 3);
   setVal('cfg-long-leverage', cfg.momentumLong?.leverage ?? 5);
@@ -2829,6 +2832,8 @@ function getSettingsFormData() {
       enabled: !!document.getElementById('cfg-long-enabled')?.checked,
       minSurgePct: parseFloat(getVal('cfg-long-min-surge', '3.0')) || 3.0,
       minVolRatio: parseFloat(getVal('cfg-long-min-vol-ratio', '4.0')) || 4.0,
+      maxRsiFilterEnabled: !!document.getElementById('cfg-long-max-rsi-enabled')?.checked,
+      maxRsi1m: parseFloat(getVal('cfg-long-max-rsi', '80')) || 80,
       maxFundingRatePct: parseFloat(getVal('cfg-long-max-funding', '0.05')) ?? 0.05,
       marginUsdt: parseFloat(getVal('cfg-long-margin', '3')) || 3,
       leverage: parseInt(getVal('cfg-long-leverage', '5')) || 5,

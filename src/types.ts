@@ -122,6 +122,8 @@ export interface MomentumLongConfig {
   enabled: boolean;
   minSurgePct?: number;
   minVolRatio?: number;
+  maxRsiFilterEnabled?: boolean;
+  maxRsi1m?: number;
   maxFundingRatePct?: number;
   marginUsdt?: number;
   leverage?: number;
