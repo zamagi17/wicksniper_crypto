@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2.4.8">
+  <link rel="stylesheet" href="style.css?v=2.5.0">
 </head>
 <body>
   <!-- FULLSCREEN LOGIN OVERLAY -->
@@ -209,7 +209,10 @@
               <span class="icon">📡</span>
               <h2>Radar Spike Lonjakan Pasar Terkini</h2>
             </div>
-            <span class="tag-pulse" id="radar-pulse-tag">Memindai 0 Koin (0 tick/s)</span>
+            <div class="radar-head-actions">
+              <button type="button" id="radar-latest-detail-btn" class="btn-radar-latest" onclick="openLatestRadarSpikeDetail()" disabled>Detail Spike Terbaru</button>
+              <span class="tag-pulse" id="radar-pulse-tag">Memindai 0 Koin (0 tick/s)</span>
+            </div>
           </div>
 
           <!-- SUMMARY SIMULASI FILTER RADAR -->
@@ -1732,6 +1735,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.4.9"></script>
+  <script src="app.js?v=2.5.0"></script>
 </body>
 </html>

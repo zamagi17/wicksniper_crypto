@@ -1069,6 +1069,8 @@ let currentLoadedSpikes = [];
 
 function renderSpikesTable(spikes) {
   currentLoadedSpikes = spikes || [];
+  const latestDetailButton = document.getElementById('radar-latest-detail-btn');
+  if (latestDetailButton) latestDetailButton.disabled = currentLoadedSpikes.length === 0;
   const tbody = document.getElementById('spike-table-body');
   if (!spikes || spikes.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Belum ada lonjakan harga yang melewati ambang batas.</td></tr>`;
@@ -1276,6 +1278,12 @@ function openRadarSpikeDetail(spikeId) {
   `;
 
   modal.classList.add('open');
+}
+
+async function openLatestRadarSpikeDetail() {
+  await fetchPaginatedSpikes(1);
+  const latestSpike = currentLoadedSpikes[0];
+  if (latestSpike) openRadarSpikeDetail(latestSpike.id);
 }
 
 function closeRadarSpikeDetailModal() {
