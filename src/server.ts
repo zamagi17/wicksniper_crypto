@@ -24,6 +24,13 @@ const engine = new WickSniperEngine(CONFIG_PATH);
 // Sesi Token Login (Token -> Expiry Timestamp)
 const activeSessions = new Map<string, number>();
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // Sesi aktif selama 7 hari
+const loginAttempts = new Map<string, { count: number; windowStartedAt: number; blockedUntil: number }>();
+const LOGIN_ATTEMPT_LIMIT = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_BLOCK_MS = 15 * 60 * 1000;
+const HOST = process.env.HOST || '127.0.0.1';
+const REQUIRE_STRONG_REMOTE_PASSWORD = process.env.DASHBOARD_REMOTE_ACCESS === 'true'
+  || (!['127.0.0.1', 'localhost', '::1'].includes(HOST) && process.env.DASHBOARD_REMOTE_ACCESS !== 'false');
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -96,12 +103,31 @@ app.use(
 // AUTHENTICATION APIs
 // ==========================================
 app.post('/api/auth/login', (req, res) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  let attempt = loginAttempts.get(clientIp);
+  if (!attempt || now - attempt.windowStartedAt >= LOGIN_WINDOW_MS) {
+    attempt = { count: 0, windowStartedAt: now, blockedUntil: 0 };
+    loginAttempts.set(clientIp, attempt);
+  }
+  if (attempt.blockedUntil > now) {
+    return res.status(429).json({ success: false, message: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' });
+  }
+
+  const configuredPassword = engine.getConfig().security?.password || 'admin123';
+  if (REQUIRE_STRONG_REMOTE_PASSWORD && (configuredPassword === 'admin123' || configuredPassword.length < 12)) {
+    return res.status(403).json({ success: false, message: 'Akses remote memerlukan password dashboard minimal 12 karakter dan bukan password default.' });
+  }
+
   const { password } = req.body || {};
   if (!password || !engine.verifyPassword(password)) {
+    attempt.count++;
+    if (attempt.count >= LOGIN_ATTEMPT_LIMIT) attempt.blockedUntil = now + LOGIN_BLOCK_MS;
     logger.log('WARN', '⚠️ Percobaan login dashboard dengan password salah.');
     return res.status(401).json({ success: false, message: 'Password salah! Periksa kembali password Anda.' });
   }
 
+  loginAttempts.delete(clientIp);
   const token = generateToken();
   activeSessions.set(token, Date.now() + SESSION_DURATION_MS);
   logger.log('SUCCESS', '🔓 Login dashboard berhasil. Sesi otentikasi aktif.');
@@ -420,7 +446,7 @@ logger.onLog((log) => {
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : (engine.getConfig().server?.port || 3005);
 
-server.listen(PORT, async () => {
+server.listen(PORT, HOST, async () => {
   console.log(`\n======================================================`);
   console.log(`🎯 WICK SNIPER BOT - HIGH-FREQUENCY REVERSAL ENGINE`);
   console.log(`📡 Web Dashboard: http://localhost:${PORT}`);

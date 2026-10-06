@@ -764,14 +764,30 @@ export class WickSniperEngine {
         logger.log('INFO', `[INDICATOR CHECK] Lewati cek indikator cepat ${symbol}: ${e.message}`);
       }
 
-      if (this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0) {
+      const longCfg = this.config.momentumLong;
+      const longMinVolRatio = longCfg?.minVolRatio ?? 4.0;
+      const longMaxFunding = longCfg?.maxFundingRatePct ?? 0.05;
+      const longMinSurge = longCfg?.minSurgePct ?? (this.config.scanner.spikeMinPercent || 3.0);
+      const isMomentumLongCandidate = !!longCfg?.enabled
+        && alert.surgePct >= longMinSurge
+        && indicators?.volRatio !== undefined
+        && indicators.volRatio >= longMinVolRatio
+        && (indicators.fundingRatePct === undefined || indicators.fundingRatePct <= longMaxFunding);
+      const maxRsi1m = longCfg?.maxRsi1m ?? 80;
+      const isRsiOverextended = isMomentumLongCandidate
+        && longCfg?.maxRsiFilterEnabled === true
+        && indicators?.rsi1m !== undefined
+        && indicators.rsi1m > maxRsi1m;
+      const simulationSide: 'SHORT' | 'LONG' = isMomentumLongCandidate ? 'LONG' : 'SHORT';
+
+      if (this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0 && !isMomentumLongCandidate) {
         const emaTrend = await this.evaluateEmaTrend(symbol, alert.currentPrice);
         if (!emaTrend.allowed) {
           const reason = `EMA Trend filter aktif: ${emaTrend.reason}`;
           const cooldownMins = this.config.scanner.cooldownMinutes || 10;
           this.scanner.setCooldown(symbol, cooldownMins);
           logger.log('WARN', `🛡️ [EMA TREND SKIP] ${symbol}: ${emaTrend.reason}. Lonjakan dibatalkan agar tidak SHORT saat tren masih bullish (cooldown ${cooldownMins}m).`, symbol);
-          this.recordSkippedSpike(alert, reason);
+          this.recordSkippedSpike(alert, reason, simulationSide);
           return;
         }
       }
@@ -783,48 +799,13 @@ export class WickSniperEngine {
           const cooldownMins = this.config.scanner.cooldownMinutes || 10;
           this.scanner.setCooldown(symbol, cooldownMins);
           logger.log('WARN', `🛡️ [TRADE QUALITY SKIP] ${symbol}: Score ${quality.score}/100 di bawah threshold ${this.config.scanner.tradeQualityThreshold ?? 60}. ${quality.reasons.join(' | ') || 'Sinyal terlalu lemah.'} (cooldown ${cooldownMins}m)`, symbol);
-          this.recordSkippedSpike(alert, reason);
-          return;
-        }
-      }
-
-      // 1. Evaluasi Peluang MOMENTUM LONG (Menangkap Super-Trend / Short Squeeze Breakout seperti SANDUSDT)
-      const longCfg = this.config.momentumLong;
-      if (longCfg?.enabled) {
-        const minVolRatio = longCfg.minVolRatio ?? 4.0;
-        const maxFunding = longCfg.maxFundingRatePct ?? 0.05;
-        const minSurge = longCfg.minSurgePct ?? (this.config.scanner.spikeMinPercent || 3.0);
-
-        const isVolExplosive = indicators?.volRatio !== undefined && indicators.volRatio >= minVolRatio;
-        const isFundingSqueeze = indicators?.fundingRatePct === undefined || indicators.fundingRatePct <= maxFunding;
-        const maxRsi1m = longCfg.maxRsi1m ?? 80;
-        const isRsiOverextended = longCfg.maxRsiFilterEnabled === true
-          && indicators?.rsi1m !== undefined
-          && indicators.rsi1m > maxRsi1m;
-
-        if (alert.surgePct >= minSurge && isVolExplosive && isFundingSqueeze && !isRsiOverextended) {
-          logger.log(
-            'SNIPER',
-            `🚀 [MOMENTUM LONG TRIGGER] ${symbol} memenuhi kriteria Super-Trend/Squeeze: Lonjakan +${alert.surgePct}%, Volume 1m ${indicators.volRatio.toFixed(1)}x rata-rata, Funding: ${indicators.fundingRatePct !== undefined ? indicators.fundingRatePct.toFixed(3) + '%' : 'N/A'}. Mengalihkan ke eksekusi LONG!`,
-            symbol
-          );
-          alert.status = 'EXECUTING';
-          await this.deployLongPosition(symbol, alert.currentPrice, alert, indicators);
-          return;
-        }
-
-        if (alert.surgePct >= minSurge && isVolExplosive && isFundingSqueeze && isRsiOverextended) {
-          const reason = `Momentum Long dilewati: RSI 1m (${indicators.rsi1m.toFixed(1)}) melebihi batas maksimum (${maxRsi1m})`;
-          const cooldownMinutes = longCfg.cooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
-          this.scanner.setCooldown(symbol, cooldownMinutes);
-          logger.log('INFO', `🛡️ [LONG MAX RSI SKIP] ${symbol}: ${reason} (cooldown ${cooldownMinutes}m).`, symbol);
-          this.recordSkippedSpike(alert, reason, 'LONG');
+          this.recordSkippedSpike(alert, reason, simulationSide);
           return;
         }
       }
 
       // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita) untuk SHORT
-      if (this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
+      if (!isMomentumLongCandidate && this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
         if (indicators && typeof indicators.volRatio === 'number' && indicators.volRatio > this.config.scanner.maxVolRatio) {
           const reason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
           const volCooldownMins = this.config.scanner.maxVolRatioCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
@@ -834,7 +815,7 @@ export class WickSniperEngine {
             `🛡️ [MAX VOL RATIO SKIP] ${symbol} dilewati: Rasio volume 1m (${indicators.volRatio}x) melebihi batas aman maks (${this.config.scanner.maxVolRatio}x). Terdeteksi lonjakan volume breakout abnormal/whale (cooldown ${volCooldownMins}m).`,
             symbol
           );
-          this.recordSkippedSpike(alert, reason);
+          this.recordSkippedSpike(alert, reason, simulationSide);
           return;
         }
       }
@@ -870,7 +851,7 @@ export class WickSniperEngine {
                 `🛡️ [TRADE GAP FILTER] Lonjakan ${symbol} dilewati: ${gapDesc}. Menghindari risiko koin sepi & slippage (cooldown ${gapCooldownMins}m).`,
                 symbol
               );
-              this.recordSkippedSpike(alert, reason);
+              this.recordSkippedSpike(alert, reason, simulationSide);
               return;
             }
           }
@@ -883,11 +864,11 @@ export class WickSniperEngine {
       const minRsi1m = this.config.scanner?.minRsi1m;
       const minVolRatio = this.config.scanner?.minVolRatio;
       const maxVolRatio = this.config.scanner?.maxVolRatio;
-      if (
+      if (!isMomentumLongCandidate && (
         (minRsi1m !== undefined && minRsi1m > 0) ||
         (minVolRatio !== undefined && minVolRatio > 0) ||
         (maxVolRatio !== undefined && maxVolRatio > 0)
-      ) {
+      )) {
         try {
           const indicators = await this.fetchMarketIndicators(symbol);
 
@@ -901,7 +882,7 @@ export class WickSniperEngine {
               `🛡️ [MIN RSI SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena RSI 1m (${indicators.rsi1m.toFixed(1)}) < batas aman (${minRsi1m}). Menghindari SHORT saat oversold/rebound (cooldown ${rsiCooldown}m).`,
               symbol
             );
-            this.recordSkippedSpike(alert, reason);
+            this.recordSkippedSpike(alert, reason, simulationSide);
             return;
           }
 
@@ -915,7 +896,7 @@ export class WickSniperEngine {
               `🛡️ [MIN VOL SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena volume 1m (${indicators.volRatio.toFixed(1)}x rata-rata) < batas min (${minVolRatio}x). Menghindari pump volume tipis/illiquid (cooldown ${volCooldown}m).`,
               symbol
             );
-            this.recordSkippedSpike(alert, reason);
+            this.recordSkippedSpike(alert, reason, simulationSide);
             return;
           }
 
@@ -929,7 +910,7 @@ export class WickSniperEngine {
               `🛡️ [MAX VOL BREAKOUT SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena volume 1m (${indicators.volRatio.toFixed(1)}x rata-rata) melampaui batas (${maxVolRatio}x). Menghindari roket breakout volume masif (cooldown ${volCooldown}m).`,
               symbol
             );
-            this.recordSkippedSpike(alert, reason);
+            this.recordSkippedSpike(alert, reason, simulationSide);
             return;
           }
         } catch (e: any) {
@@ -971,7 +952,7 @@ export class WickSniperEngine {
               confirmedEntryPrice = livePrice;
               logger.log(
                 'SNIPER',
-                `🎯 [UPPER WICK CONFIRMED ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Ekor atas valid (-${actualPullbackPct}%)! Puncak $${formatCryptoPrice(peakPrice)} ➜ Reversal di $${formatCryptoPrice(livePrice)}. Menembakkan SHORT...`,
+                `🎯 [UPPER WICK CONFIRMED ${currentElapsedSec}/${maxWaitSec}s] ${symbol}: Pullback valid (-${actualPullbackPct}%) dari puncak $${formatCryptoPrice(peakPrice)} ke $${formatCryptoPrice(livePrice)}.`,
                 symbol
               );
               break;
@@ -996,15 +977,15 @@ export class WickSniperEngine {
         }
 
         if (!isConfirmed) {
-          const reason = `Monster Pump / Runaway: Tidak ada konfirmasi ekor atas (-${minPullbackPct}%) dalam ${maxWaitSec}s`;
+          const reason = `Monster Pump / Runaway: Tidak ada konfirmasi pullback (-${minPullbackPct}%) dalam ${maxWaitSec}s`;
           const runawayCooldownMins = this.config.scanner.upperWickCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
           this.scanner.setCooldown(symbol, runawayCooldownMins);
           logger.log(
             'WARN',
-            `🛡️ [UPPER WICK FILTER] Lonjakan ${symbol} dilewati: Harga terus melaju tanpa pullback ${minPullbackPct}% dalam ${maxWaitSec}s. Saldo aman dari monster pump (cooldown ${runawayCooldownMins}m).`,
+            `🛡️ [UPPER WICK FILTER] Lonjakan ${symbol} dilewati: Harga terus melaju tanpa pullback ${minPullbackPct}% dalam ${maxWaitSec}s (cooldown ${runawayCooldownMins}m).`,
             symbol
           );
-          this.recordSkippedSpike(alert, reason);
+          this.recordSkippedSpike(alert, reason, simulationSide);
           return;
         }
       }
@@ -1022,10 +1003,39 @@ export class WickSniperEngine {
               `🛡️ [SPREAD GUARD] ${symbol} dilewati: Spread pasar terlalu lebar (${spreadInfo.spreadPct.toFixed(2)}% > maks ${this.config.scanner.maxSpreadPct}%). Orderbook tipis, aman dari jebakan slippage (cooldown ${spreadCooldownMins}m).`,
               symbol
             );
-            this.recordSkippedSpike(alert, reason);
+            this.recordSkippedSpike(alert, reason, simulationSide);
             return;
           }
         } catch {}
+      }
+
+      if (isMomentumLongCandidate) {
+        if (isRsiOverextended) {
+          const reason = `Momentum Long dilewati: RSI 1m (${indicators.rsi1m.toFixed(1)}) melebihi batas maksimum (${maxRsi1m})`;
+          const cooldownMinutes = longCfg?.cooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
+          this.scanner.setCooldown(symbol, cooldownMinutes);
+          logger.log('INFO', `🛡️ [LONG MAX RSI SKIP] ${symbol}: ${reason} (cooldown ${cooldownMinutes}m).`, symbol);
+          this.recordSkippedSpike(alert, reason, 'LONG');
+          return;
+        }
+
+        if (this.config.tradingMode === 'LIVE') {
+          const reason = 'Momentum Long belum mendukung eksekusi LIVE; sinyal dicatat tanpa membuka posisi Binance';
+          const cooldownMinutes = longCfg?.cooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
+          this.scanner.setCooldown(symbol, cooldownMinutes);
+          logger.log('WARN', `🛡️ [LIVE LONG DISABLED] ${symbol}: ${reason}.`, symbol);
+          this.recordSkippedSpike(alert, reason, 'LONG');
+          return;
+        }
+
+        logger.log(
+          'SNIPER',
+          `🚀 [MOMENTUM LONG TRIGGER] ${symbol} memenuhi kriteria Super-Trend/Squeeze: Lonjakan +${alert.surgePct}%, Volume 1m ${indicators.volRatio.toFixed(1)}x rata-rata, Funding: ${indicators.fundingRatePct !== undefined ? indicators.fundingRatePct.toFixed(3) + '%' : 'N/A'}. Mengalihkan ke eksekusi LONG!`,
+          symbol
+        );
+        alert.status = 'EXECUTING';
+        await this.deployLongPosition(symbol, confirmedEntryPrice, alert, indicators);
+        return;
       }
 
       alert.status = 'EXECUTING';
@@ -1134,7 +1144,6 @@ export class WickSniperEngine {
     };
 
     this.activePositions.set(symbol, initialPos);
-    this.spikesDetectedToday++;
 
     await db.saveSpike(alert).catch(() => {});
     await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
@@ -2843,8 +2852,10 @@ export class WickSniperEngine {
       let actualPnlPct = pnlPct;
       let actualFee = 0;
       let closeResOrderId: string | undefined = undefined;
+      const isLiveTrade = this.config.tradingMode === 'LIVE' && pos.strategyType !== 'MOMENTUM_LONG';
+      const isPaperTrade = !isLiveTrade;
 
-      if (this.config.tradingMode === 'LIVE') {
+      if (isLiveTrade) {
         // 1. Batalkan semua antrean order (TP & pending grid layers) terlebih dahulu
         const cancelStart = Date.now();
         await binanceFutures.cancelAllOrders(pos.symbol).catch(() => { });
@@ -2887,7 +2898,8 @@ export class WickSniperEngine {
         // DILARANG melempar Market Order rugi! Batalkan penutupan market, kembalikan ke status SNIPING & pasang ulang Limit TP Maker.
         const currentMktPrice = pos.currentPrice || closePrice;
         const entryRef = (realPos?.entryPrice && realPos.entryPrice > 0) ? realPos.entryPrice : pos.avgEntryPrice;
-        if (reason === 'TRAILING_TP' && !isPositionAlreadyClosed && binanceAmt > 0 && currentMktPrice >= entryRef) {
+        const trailingWouldCloseAtLoss = isLong ? currentMktPrice <= entryRef : currentMktPrice >= entryRef;
+        if (reason === 'TRAILING_TP' && !isPositionAlreadyClosed && binanceAmt > 0 && trailingWouldCloseAtLoss) {
           logger.log(
             'WARN',
             `🛡️ [GEMBOK TRAILING TP] ${pos.symbol}: Eksekusi Trailing TP dibatalkan karena harga pasar ($${currentMktPrice.toFixed(6)}) sudah >= Modal ($${entryRef.toFixed(6)}). Menolak tutup rugi, Limit TP Maker dipasang kembali!`,
@@ -2916,8 +2928,11 @@ export class WickSniperEngine {
           }
         }
 
-        const isRealLong = realPos ? (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0)) : false;
+        const isRealLong = realPos
+          ? (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0))
+          : isLong;
         const actualClosingSide: 'BUY' | 'SELL' = isRealLong ? 'SELL' : 'BUY';
+        const actualOpeningSide: 'BUY' | 'SELL' = isRealLong ? 'BUY' : 'SELL';
 
         this.auditTradeLifecycle(pos.symbol, 'FULL_CLOSE_REQUESTED', {
           side: actualClosingSide,
@@ -2966,15 +2981,15 @@ export class WickSniperEngine {
         let confirmedClose = false;
         try {
           const minTime = pos.openedAt - 120000;
-          // Trade BUY penutup bisa belum muncul di userTrades setelah 800ms (terutama TP super cepat) -> retry singkat
+          // Trade penutup bisa belum muncul di userTrades setelah 800ms -> retry singkat
           let recentTrades: any[] = [];
           for (let attempt = 0; attempt < 4; attempt++) {
             recentTrades = await binanceFutures.getUserTrades(pos.symbol, 100, minTime);
-            const hasBuyTrade = recentTrades.some((tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime);
-            if (hasBuyTrade) break;
+            const hasClosingTrade = recentTrades.some((tr: any) => tr.side === actualClosingSide && tr.time && tr.time >= minTime);
+            if (hasClosingTrade) break;
             if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 700));
           }
-          const freshBuyTrades = recentTrades.filter((tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime);
+          const freshClosingTrades = recentTrades.filter((tr: any) => tr.side === actualClosingSide && tr.time && tr.time >= minTime);
 
           if (pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId) {
             const tpMatches = recentTrades.filter(
@@ -2995,7 +3010,7 @@ export class WickSniperEngine {
             }
           }
 
-          if (!confirmedClose && freshBuyTrades.length > 0) {
+          if (!confirmedClose && freshClosingTrades.length > 0) {
             confirmedClose = true;
           }
 
@@ -3050,7 +3065,7 @@ export class WickSniperEngine {
               `Order close untuk ${pos.symbol} belum terkonfirmasi di Binance. Local state tetap aktif agar tidak menjadi orphan. Bot akan mencoba rekonsiliasi otomatis.`,
               pos.symbol
             );
-            this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_NOT_CONFIRMED', {
+            this.auditOrderEvent(pos.symbol, 'CLOSE_NOT_CONFIRMED', {
               reason,
               closePrice,
               status: 'PENDING',
@@ -3059,14 +3074,14 @@ export class WickSniperEngine {
             return;
           }
 
-          this.auditOrderEvent(pos.symbol, 'CLOSE_SHORT_CONFIRMED', {
+          this.auditOrderEvent(pos.symbol, 'CLOSE_CONFIRMED', {
             reason,
             closePrice,
             actualExitPrice,
             status: 'CONFIRMED',
           });
           this.auditTradeLifecycle(pos.symbol, 'FULL_CLOSE_CONFIRMED', {
-            side: 'BUY',
+            side: actualClosingSide,
             reason,
             actualExitPrice,
             realizedPnl: actualRealizedPnl,
@@ -3076,9 +3091,9 @@ export class WickSniperEngine {
           if (recentTrades.length > 0) {
             let closingTrades: any[] = [];
             if (pos.partialTpDone) {
-              // Jika pernah Partial TP, seluruh trade BUY sejak posisi dibuka adalah bagian dari closing posisi ini!
+              // Jika pernah Partial TP, seluruh fill pada arah penutupan sejak posisi dibuka dihitung.
               closingTrades = recentTrades.filter(
-                (tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime
+                (tr: any) => tr.side === actualClosingSide && tr.time && tr.time >= minTime
               );
             } else if (pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId) {
               closingTrades = recentTrades.filter(
@@ -3093,7 +3108,7 @@ export class WickSniperEngine {
             }
             if (closingTrades.length === 0) {
               closingTrades = recentTrades.filter(
-                (tr: any) => tr.side === 'BUY' && tr.time && tr.time >= minTime
+                (tr: any) => tr.side === actualClosingSide && tr.time && tr.time >= minTime
               );
             }
 
@@ -3116,7 +3131,7 @@ export class WickSniperEngine {
               // Ambil harga BNB jika ada komisi yang dibayar dengan BNB untuk konversi akurat ke USDT
               let bnbPrice = 0;
               const hasBnbFee = closingTrades.some((tr: any) => tr.commissionAsset === 'BNB') ||
-                recentTrades.some((tr: any) => tr.side === 'SELL' && tr.time && tr.time >= minTime && tr.commissionAsset === 'BNB');
+                recentTrades.some((tr: any) => tr.side === actualOpeningSide && tr.time && tr.time >= minTime && tr.commissionAsset === 'BNB');
               if (hasBnbFee) {
                 bnbPrice = await binanceFutures.getBnbPrice();
               }
@@ -3133,7 +3148,7 @@ export class WickSniperEngine {
               }
 
               const openingTrades = recentTrades.filter(
-                (tr: any) => tr.side === 'SELL' && tr.time && tr.time >= minTime
+                (tr: any) => tr.side === actualOpeningSide && tr.time && tr.time >= minTime
               );
               for (const otr of openingTrades) {
                 const rawComm = parseFloat(otr.commission || '0');
@@ -3184,7 +3199,7 @@ export class WickSniperEngine {
                 pos.symbol
               );
             } else if (fillExitPrice > 0) {
-              const grossPnl = (pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
+              const grossPnl = (isRealLong ? fillExitPrice - pos.avgEntryPrice : pos.avgEntryPrice - fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty);
               const estFee = (pos.avgEntryPrice + fillExitPrice) * (execQty > 0 ? execQty : pos.totalQty) * 0.00045;
               actualFee = Math.round(estFee * 1000) / 1000;
               actualRealizedPnl = Math.round((grossPnl - actualFee + (pos.partialRealizedPnl || 0)) * 100) / 100;
@@ -3277,7 +3292,7 @@ export class WickSniperEngine {
         pnlPct: actualPnlPct,
         durationSeconds,
         exitReason: reason,
-        isPaper: this.config.tradingMode === 'PAPER',
+        isPaper: isPaperTrade,
         closedAt: (() => {
           const d = new Date();
           const p = (n: number) => String(n).padStart(2, '0');
@@ -3327,7 +3342,7 @@ export class WickSniperEngine {
 
       telegram.notifyTradeClosed(
         trade,
-        this.config.tradingMode === 'PAPER' ? this.virtualBalance : undefined
+        isPaperTrade ? this.virtualBalance : undefined
       );
 
       const cooldownMinutes =
@@ -4033,8 +4048,8 @@ export class WickSniperEngine {
 
   public async changePassword(newPassword: string): Promise<boolean> {
     const cleaned = String(newPassword || '').trim();
-    if (cleaned.length < 4) {
-      throw new Error('Password baru minimal 4 karakter');
+    if (cleaned.length < 12) {
+      throw new Error('Password baru minimal 12 karakter');
     }
     await this.saveConfig({
       security: {

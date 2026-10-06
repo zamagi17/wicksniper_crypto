@@ -1,10 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const p = path.resolve(__dirname, '../data_cache/blacklist.json');
-const backup = path.resolve(__dirname, '../data_cache/blacklist.backup.json');
+const p = path.resolve(process.cwd(), 'data_cache/blacklist.json');
+const backup = path.resolve(process.cwd(), 'data_cache/blacklist.backup.json');
 
 function read() {
   if (!fs.existsSync(p)) return [];

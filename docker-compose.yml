@@ -9,6 +9,8 @@ services:
     restart: always
     environment:
       PORT: ${PORT:-3005}
+      HOST: ${HOST:-0.0.0.0}
+      DASHBOARD_REMOTE_ACCESS: ${DASHBOARD_REMOTE_ACCESS:-false}
       TZ: ${TZ:-Asia/Jakarta}
       # Menggunakan database PostgreSQL zamagi_postgres di Oracle VPS
       DB_HOST: ${DB_HOST:-zamagi_postgres}

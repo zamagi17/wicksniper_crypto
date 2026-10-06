@@ -269,8 +269,8 @@ async function handlePasswordChange() {
     showStatus('⚠️ Harap masukkan password saat ini.', false);
     return;
   }
-  if (!newPassword || newPassword.length < 4) {
-    showStatus('⚠️ Password baru minimal 4 karakter.', false);
+  if (!newPassword || newPassword.length < 12) {
+    showStatus('⚠️ Password baru minimal 12 karakter.', false);
     return;
   }
   if (newPassword !== confirmPassword) {
