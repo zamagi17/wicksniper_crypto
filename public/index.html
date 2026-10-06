@@ -1716,6 +1716,22 @@
     </div>
   </div>
 
+  <div id="radar-spike-detail-modal" class="modal-backdrop" onclick="if(event.target===this)closeRadarSpikeDetailModal()">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3 id="radar-spike-detail-title">Detail Radar Spike</h3>
+          <span id="radar-spike-detail-badge" class="badge-mode">STATUS</span>
+        </div>
+        <button type="button" class="btn-close" onclick="closeRadarSpikeDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="radar-spike-detail-body"></div>
+      <div class="modal-footer floating-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeRadarSpikeDetailModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js?v=2.4.9"></script>
 </body>
 </html>

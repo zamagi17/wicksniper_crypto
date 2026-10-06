@@ -1139,6 +1139,7 @@ function renderSpikesTable(spikes) {
           <td>${timeStr}</td>
           <td>
             <b>${escapeHtml(s.symbol)}</b>
+            <button type="button" class="btn-radar-detail" onclick="openRadarSpikeDetail('${escapeHtml(s.id)}')" aria-label="Detail spike ${escapeHtml(s.symbol)}">Detail</button>
             <span class="mobile-spike-sub">$${formatCryptoPrice(startPrice)} ➜ $${formatCryptoPrice(currPrice)}</span>
           </td>
           <td>$${formatCryptoPrice(startPrice)}</td>
@@ -1152,11 +1153,143 @@ function renderSpikesTable(spikes) {
     .join('');
 }
 
+function openRadarSpikeDetail(spikeId) {
+  const spike = currentLoadedSpikes.find((item) => String(item.id) === String(spikeId));
+  const modal = document.getElementById('radar-spike-detail-modal');
+  const body = document.getElementById('radar-spike-detail-body');
+  if (!spike || !modal || !body) return;
+
+  const params = spike.paramsSnapshot || {};
+  const market = params.marketSnapshot || {};
+  const sim = spike.simResult;
+  const isLong = sim?.side === 'LONG' || params.strategy === 'MOMENTUM_LONG';
+  const sideLabel = isLong ? 'LONG' : 'SHORT';
+  const statusLabels = {
+    EXECUTING: 'Dieksekusi',
+    SKIPPED: 'Dilewati filter',
+    PENDING: 'Terdeteksi',
+    COOLING_DOWN: 'Cooldown',
+  };
+  const outcomeLabels = {
+    SAVED_SL: 'Selamat dari stop loss',
+    MISSED_TP: 'Target take profit tersentuh',
+    TIMEOUT: 'Selesai tanpa TP/SL',
+    TRACKING: 'Pemantauan berlangsung',
+  };
+  const tpPct = isLong
+    ? params.momentumLongTakeProfitPct ?? params.takeProfitPct
+    : params.takeProfitPct;
+  const slPct = isLong
+    ? params.momentumLongStopLossPct ?? params.hardStopLossPct
+    : params.hardStopLossPct;
+  const parameterLabels = {
+    strategy: 'Strategi',
+    marginPerLayerUsdt: 'Margin per layer (USDT)',
+    totalLayers: 'Total layer',
+    layerSpacingPct: 'Jarak layer (%)',
+    takeProfitPct: 'Take profit jaring SHORT (%)',
+    hardStopLossPct: 'Hard SL jaring SHORT (%)',
+    momentumLongTakeProfitPct: 'TP Momentum Long (%)',
+    momentumLongStopLossPct: 'SL Momentum Long (%)',
+    momentumLongMarginUsdt: 'Margin Momentum Long (USDT)',
+    momentumLongLeverage: 'Leverage Momentum Long',
+    momentumLongMaxRsiFilterEnabled: 'Filter RSI maksimum LONG',
+    momentumLongMaxRsi1m: 'Batas RSI maksimum LONG',
+    tradingMode: 'Mode trading',
+    leverage: 'Leverage',
+    maxSpreadPct: 'Spread maksimum (%)',
+    minRsi1m: 'RSI minimum SHORT',
+    maxVolRatio: 'Rasio volume maksimum',
+    emaTrendFilterEnabled: 'Filter tren EMA',
+    tradeQualityScoringEnabled: 'Skor kualitas trade',
+  };
+  const formatParamLabel = (key) => parameterLabels[key]
+    || key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase())
+      .replace(/\bUsdt\b/g, 'USDT')
+      .replace(/\bRsi\b/g, 'RSI')
+      .replace(/\bEma\b/g, 'EMA')
+      .replace(/\bAtr\b/g, 'ATR')
+      .replace(/\bSl\b/g, 'SL')
+      .replace(/\bTp\b/g, 'TP')
+      .replace(/\bBep\b/g, 'BEP')
+      .replace(/\bPct\b/g, '%');
+  const formatParamValue = (value) => {
+    if (typeof value === 'boolean') return value ? 'Aktif' : 'Nonaktif';
+    if (Array.isArray(value)) return value.length ? value.join(', ') : '-';
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  };
+  const renderStat = (label, value) => `
+    <div class="td-pe-stat">
+      <div class="pe-label">${escapeHtml(label)}</div>
+      <div class="pe-val">${escapeHtml(value === undefined || value === null || value === '' ? '-' : value)}</div>
+    </div>`;
+
+  const paramRows = Object.entries(params)
+    .filter(([key, value]) => key !== 'marketSnapshot' && value !== undefined && value !== null)
+    .map(([key, value]) => `
+      <div class="radar-snapshot-item">
+        <span>${escapeHtml(formatParamLabel(key))}</span>
+        <b>${escapeHtml(formatParamValue(value))}</b>
+      </div>`)
+    .join('');
+  const simDetails = sim
+    ? `<div class="td-section-title">Simulasi Pasca-Filter</div>
+       <div class="td-post-exit-grid">
+         ${renderStat('Arah simulasi', sim.side || sideLabel)}
+         ${renderStat('Harga masuk hipotetis', `$${formatCryptoPrice(Number(sim.hypotheticalEntryPrice || 0))}`)}
+         ${renderStat(`Target TP (${tpPct ?? '-'}%)`, `$${formatCryptoPrice(Number(sim.targetTpPrice || 0))}`)}
+         ${renderStat(`Hard SL (${slPct ?? '-'}%)`, `$${formatCryptoPrice(Number(sim.hardSlPrice || 0))}`)}
+         ${renderStat('Hasil', outcomeLabels[sim.outcome] || sim.outcome || '-')}
+         ${renderStat('Estimasi PnL', `${Number(sim.simulatedPnlPct || 0) >= 0 ? '+' : ''}${Number(sim.simulatedPnlPct || 0).toFixed(2)}%`)}
+         ${renderStat('Durasi simulasi', `${Number(sim.durationMinutes || 0)} menit`)}
+       </div>`
+    : '<div class="td-section-title">Belum ada hasil simulasi pasca-filter.</div>';
+
+  const title = document.getElementById('radar-spike-detail-title');
+  const badge = document.getElementById('radar-spike-detail-badge');
+  if (title) title.innerText = `Detail Radar Spike: ${spike.symbol}`;
+  if (badge) badge.innerText = `${sideLabel} · ${statusLabels[spike.status] || spike.status}`;
+
+  body.innerHTML = `
+    <div class="td-section-title">Peristiwa Spike</div>
+    <div class="td-post-exit-grid">
+      ${renderStat('Waktu terdeteksi', formatDateTime(spike.timestamp, true))}
+      ${renderStat('Arah strategi', sideLabel)}
+      ${renderStat('Harga awal', `$${formatCryptoPrice(Number(spike.startPrice || 0))}`)}
+      ${renderStat('Harga saat terdeteksi', `$${formatCryptoPrice(Number(spike.currentPrice || 0))}`)}
+      ${renderStat('Lonjakan', `+${Number(spike.surgePct || 0).toFixed(2)}%`)}
+      ${renderStat('Lookback', `${Number(spike.lookbackSeconds || 0)} detik`)}
+    </div>
+    ${spike.skipReason ? `<div class="radar-detail-reason"><b>Alasan dilewati</b><span>${escapeHtml(spike.skipReason)}</span></div>` : ''}
+    <div class="td-section-title">Indikator Saat Kejadian</div>
+    <div class="td-post-exit-grid">
+      ${renderStat('RSI 1m', market.rsi1m === undefined ? '-' : Number(market.rsi1m).toFixed(1))}
+      ${renderStat('Rasio volume 1m', market.volRatio === undefined ? '-' : `${Number(market.volRatio).toFixed(1)}x`)}
+      ${renderStat('Volume 1m (USDT)', market.vol1mUsdt === undefined ? '-' : Number(market.vol1mUsdt).toLocaleString('en-US'))}
+      ${renderStat('Funding rate', market.fundingRatePct === undefined ? '-' : `${Number(market.fundingRatePct).toFixed(4)}%`)}
+      ${renderStat('Open interest (USDT)', market.openInterestUsdt === undefined ? '-' : Number(market.openInterestUsdt).toLocaleString('en-US'))}
+    </div>
+    ${simDetails}
+    <div class="td-section-title">Snapshot Parameter Aktif Saat Kejadian</div>
+    <div class="radar-snapshot-grid">${paramRows || '<div class="text-muted">Snapshot parameter tidak tersedia.</div>'}</div>
+  `;
+
+  modal.classList.add('open');
+}
+
+function closeRadarSpikeDetailModal() {
+  document.getElementById('radar-spike-detail-modal')?.classList.remove('open');
+}
+
 function openSpikeSimModal(spikeId) {
   const s = currentLoadedSpikes.find((x) => String(x.id) === String(spikeId));
   if (!s || !s.simResult) return;
 
   const sim = s.simResult;
+  const params = s.paramsSnapshot || {};
+  const isLong = sim.side === 'LONG' || params.strategy === 'MOMENTUM_LONG';
+  const sideLabel = isLong ? 'LONG' : 'SHORT';
   const modal = document.getElementById('spike-sim-modal');
   const titleEl = document.getElementById('spike-sim-title');
   const badgeEl = document.getElementById('spike-sim-badge');
@@ -1177,14 +1310,14 @@ function openSpikeSimModal(spikeId) {
     outcomeTitle = '🛡️ Penyelamatan Modal Sukses (Selamat dari SL)';
     bannerClass = 'saved';
     bannerText = `<b>🛡️ Filter Berhasil Melindungi Modal!</b><br>
-    Setelah lonjakan spike ditolak, harga koin justru terus melonjak naik hingga menyentuh batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}). 
+    Setelah lonjakan spike ditolak, harga ${isLong ? 'turun' : 'naik'} hingga menyentuh batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}).
     Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian <b>${pnlStr}</b>.`;
   } else if (sim.outcome === 'MISSED_TP') {
     outcomeClass = 'missed';
     outcomeTitle = '💸 Peluang Profit Terlewat (Kena TP)';
     bannerClass = 'missed';
     bannerText = `<b>💸 Peluang Profit Terlewat!</b><br>
-    Setelah lonjakan spike ditolak, harga koin berhasil memantul turun dan menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) tanpa tersentuh Stop Loss.
+    Setelah lonjakan spike ditolak, harga koin bergerak ${isLong ? 'naik' : 'turun'} dan menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) tanpa tersentuh Stop Loss.
     Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${pnlStr}</b>. Parameter filter mungkin dapat sedikit dilonggarkan jika koin ini sering lolos.`;
   } else if (sim.outcome === 'TIMEOUT') {
     outcomeClass = 'timeout';
@@ -1213,9 +1346,12 @@ function openSpikeSimModal(spikeId) {
   const highSign = highDiff >= 0 ? '+' : '';
   const lowSign = lowDiff >= 0 ? '+' : '';
 
-  const params = s.paramsSnapshot || {};
-  const tpParam = params.takeProfitPct ?? '-';
-  const slParam = params.hardStopLossPct ?? '-';
+  const tpParam = isLong
+    ? params.momentumLongTakeProfitPct ?? params.takeProfitPct ?? '-'
+    : params.takeProfitPct ?? '-';
+  const slParam = isLong
+    ? params.momentumLongStopLossPct ?? params.hardStopLossPct ?? '-'
+    : params.hardStopLossPct ?? '-';
 
   bodyEl.innerHTML = `
     <div class="sim-insight-banner ${bannerClass}">
@@ -1231,7 +1367,7 @@ function openSpikeSimModal(spikeId) {
     <div class="td-section-title">📊 Parameter & Level Simulasi Saat Kejadian</div>
     <div class="td-post-exit-grid" style="margin-bottom: 16px;">
       <div class="td-pe-stat">
-        <div class="pe-label">Harga Masuk Hipotetis (SHORT)</div>
+        <div class="pe-label">Harga Masuk Hipotetis (${sideLabel})</div>
         <div class="pe-val" style="color: var(--color-cyan);">$${formatCryptoPrice(entry)}</div>
       </div>
       <div class="td-pe-stat">
@@ -1281,12 +1417,12 @@ function openSpikeSimModal(spikeId) {
     </div>
   `;
 
-  modal.classList.add('active');
+  modal.classList.add('open');
 }
 
 function closeSpikeSimModal() {
   const modal = document.getElementById('spike-sim-modal');
-  if (modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('open');
 }
 
 function renderClosedTradesTable(trades) {

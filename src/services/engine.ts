@@ -561,9 +561,11 @@ export class WickSniperEngine {
   private recordSkippedSpike(alert: SpikeAlert, reason: string, side: 'SHORT' | 'LONG' = 'SHORT'): void {
     alert.status = 'SKIPPED';
     alert.skipReason = reason;
-    alert.paramsSnapshot = this.captureParamsSnapshot();
-
     const isLong = side === 'LONG';
+    alert.paramsSnapshot = {
+      ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+      strategy: isLong ? 'MOMENTUM_LONG' : 'WICK_SNIPER',
+    };
     const tpPct = isLong
       ? this.config.momentumLong?.takeProfitPct ?? 6
       : this.config.exit?.takeProfitPct ?? 1.2;
@@ -601,6 +603,7 @@ export class WickSniperEngine {
     if (!this.isRunning) return;
     this.spikesDetectedToday++;
     this.totalSpikesCount++;
+    alert.paramsSnapshot ??= this.captureParamsSnapshot();
 
     const symbol = alert.symbol;
 
@@ -763,6 +766,19 @@ export class WickSniperEngine {
       } catch (e: any) {
         logger.log('INFO', `[INDICATOR CHECK] Lewati cek indikator cepat ${symbol}: ${e.message}`);
       }
+
+      alert.paramsSnapshot = {
+        ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+        marketSnapshot: {
+          rsi1m: indicators?.rsi1m,
+          volRatio: indicators?.volRatio,
+          vol1mUsdt: indicators?.vol1mUsdt,
+          avgVol1mUsdt: indicators?.avgVol1mUsdt,
+          fundingRatePct: indicators?.fundingRatePct,
+          openInterestUsdt: indicators?.openInterestUsdt,
+          capturedAt: Date.now(),
+        },
+      };
 
       const longCfg = this.config.momentumLong;
       const longMinVolRatio = longCfg?.minVolRatio ?? 4.0;
@@ -1039,6 +1055,10 @@ export class WickSniperEngine {
       }
 
       alert.status = 'EXECUTING';
+      alert.paramsSnapshot = {
+        ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+        strategy: 'WICK_SNIPER',
+      };
       logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
       db.saveSpike(alert).catch(() => { });
 
@@ -1145,6 +1165,10 @@ export class WickSniperEngine {
 
     this.activePositions.set(symbol, initialPos);
 
+    alert.paramsSnapshot = {
+      ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+      strategy: 'MOMENTUM_LONG',
+    };
     await db.saveSpike(alert).catch(() => {});
     await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
@@ -2773,11 +2797,15 @@ export class WickSniperEngine {
       momentumLongMaxFundingRatePct: this.config.momentumLong?.maxFundingRatePct,
       momentumLongMaxRsiFilterEnabled: this.config.momentumLong?.maxRsiFilterEnabled ?? false,
       momentumLongMaxRsi1m: this.config.momentumLong?.maxRsi1m ?? 80,
+      momentumLongMarginUsdt: this.config.momentumLong?.marginUsdt,
+      momentumLongLeverage: this.config.momentumLong?.leverage,
       momentumLongTakeProfitPct: this.config.momentumLong?.takeProfitPct,
       momentumLongStopLossPct: this.config.momentumLong?.stopLossPct,
       momentumLongTrailingTpEnabled: this.config.momentumLong?.trailingTpEnabled,
       momentumLongTrailingActivationPct: this.config.momentumLong?.trailingActivationPct,
       momentumLongTrailingCallbackPct: this.config.momentumLong?.trailingCallbackPct,
+      momentumLongMaxHoldMinutes: this.config.momentumLong?.maxHoldMinutes,
+      momentumLongCooldownMinutes: this.config.momentumLong?.cooldownMinutes,
       spikeMinPercent: this.config.scanner?.spikeMinPercent,
       spikeLookbackSeconds: this.config.scanner?.spikeLookbackSeconds,
       volumeSpikeMultiplier: this.config.scanner?.volumeSpikeMultiplier,
