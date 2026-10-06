@@ -57,6 +57,41 @@ export function calculateRsi(closes: number[], period: number = 14): number | un
   return Math.round(rsi * 10) / 10;
 }
 
+export function calculateEma(closes: number[], period: number): number | undefined {
+  if (!closes || closes.length === 0 || period <= 0 || closes.length < period) return undefined;
+  const multiplier = 2 / (period + 1);
+  let ema = closes[0];
+  for (let i = 1; i < closes.length; i++) {
+    ema = (closes[i] - ema) * multiplier + ema;
+  }
+  return ema;
+}
+
+export function calculateAtr(candles: Candle[], period: number = 14): number | undefined {
+  if (!Array.isArray(candles) || candles.length <= period) return undefined;
+
+  const trValues: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const prev = candles[i - 1];
+    const curr = candles[i];
+    const tr = Math.max(
+      curr.high - curr.low,
+      Math.abs(curr.high - prev.close),
+      Math.abs(curr.low - prev.close)
+    );
+    trValues.push(tr);
+  }
+
+  if (trValues.length < period) return undefined;
+
+  let atr = trValues.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+  for (let i = period; i < trValues.length; i++) {
+    atr = (atr * (period - 1) + trValues[i]) / period;
+  }
+
+  return atr;
+}
+
 export class WickSniperEngine {
   private config: BotConfig;
   private configPath: string;
@@ -152,6 +187,11 @@ export class WickSniperEngine {
         minVolRatioCooldownMinutes: 5,
         maxVolRatio: 20,
         maxVolRatioCooldownMinutes: 10,
+        emaTrendFilterEnabled: false,
+        emaTrendFastPeriod: 9,
+        emaTrendSlowPeriod: 21,
+        tradeQualityScoringEnabled: false,
+        tradeQualityThreshold: 60,
       },
       grid: {
         maxConcurrentCoins: 2,
@@ -167,6 +207,12 @@ export class WickSniperEngine {
         trailingTpEnabled: false,
         trailingCallbackPct: 0.4,
         hardStopLossPct: 4.5,
+        atrDynamicSlTpEnabled: false,
+        atrPeriod: 14,
+        atrSlMultiplier: 1.5,
+        atrTpMultiplier: 2.5,
+        atrDeferHardStopBeforeLastLayer: true,
+        atrMinLayersToProtect: 0,
         trailingSlEnabled: false,
         trailingSlMaxReturnRatio: 2.5,
         trailingSlTiers: [
@@ -713,6 +759,30 @@ export class WickSniperEngine {
         logger.log('INFO', `[INDICATOR CHECK] Lewati cek indikator cepat ${symbol}: ${e.message}`);
       }
 
+      if (this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0) {
+        const emaTrend = await this.evaluateEmaTrend(symbol, alert.currentPrice);
+        if (!emaTrend.allowed) {
+          const reason = `EMA Trend filter aktif: ${emaTrend.reason}`;
+          const cooldownMins = this.config.scanner.cooldownMinutes || 10;
+          this.scanner.setCooldown(symbol, cooldownMins);
+          logger.log('WARN', `🛡️ [EMA TREND SKIP] ${symbol}: ${emaTrend.reason}. Lonjakan dibatalkan agar tidak SHORT saat tren masih bullish (cooldown ${cooldownMins}m).`, symbol);
+          this.recordSkippedSpike(alert, reason);
+          return;
+        }
+      }
+
+      if (this.config.scanner.tradeQualityScoringEnabled) {
+        const quality = await this.calculateTradeQualityScore(symbol, alert, indicators);
+        if (!quality.pass) {
+          const reason = `Trade Quality Score ${quality.score}/100 di bawah threshold ${this.config.scanner.tradeQualityThreshold ?? 60}`;
+          const cooldownMins = this.config.scanner.cooldownMinutes || 10;
+          this.scanner.setCooldown(symbol, cooldownMins);
+          logger.log('WARN', `🛡️ [TRADE QUALITY SKIP] ${symbol}: Score ${quality.score}/100 di bawah threshold ${this.config.scanner.tradeQualityThreshold ?? 60}. ${quality.reasons.join(' | ') || 'Sinyal terlalu lemah.'} (cooldown ${cooldownMins}m)`, symbol);
+          this.recordSkippedSpike(alert, reason);
+          return;
+        }
+      }
+
       // 1. Evaluasi Peluang MOMENTUM LONG (Menangkap Super-Trend / Short Squeeze Breakout seperti SANDUSDT)
       const longCfg = this.config.momentumLong;
       if (longCfg?.enabled) {
@@ -1170,6 +1240,10 @@ export class WickSniperEngine {
       paramsSnapshot: this.captureParamsSnapshot(),
     };
 
+    if (this.config.exit.atrDynamicSlTpEnabled) {
+      await this.applyAtrTargetsToPosition(initialPos, currentPrice);
+    }
+
     if (this.config.tradingMode === 'LIVE') {
       // Defensive double-check: jangan pernah menaruh order baru jika Binance sudah aktif di symbol yang sama
       try {
@@ -1325,6 +1399,9 @@ export class WickSniperEngine {
         const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2;
         initialPos.targetTp2Price = realEntryPrice * (1 - tp2Pct / 100);
         initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+        if (this.config.exit.atrDynamicSlTpEnabled) {
+          await this.applyAtrTargetsToPosition(initialPos, realEntryPrice);
+        }
         const ratio = exitCfg.partialTpRatio || 0.7;
         const tpLogInfo = exitCfg.partialTpEnabled
           ? `Dual TP: TP1 (${Math.round(ratio * 100)}% @ $${initialPos.targetTpPrice.toFixed(6)}) | TP2 (${100 - Math.round(ratio * 100)}% @ $${initialPos.targetTp2Price.toFixed(6)})`
@@ -1952,6 +2029,10 @@ export class WickSniperEngine {
         pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
       }
 
+      if (this.config.exit.atrDynamicSlTpEnabled) {
+        void this.applyAtrTargetsToPosition(pos);
+      }
+
       const recalculateTpLog = (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive)
         ? `TP1: $${formatCryptoPrice(pos.targetTpPrice)} | TP2: $${formatCryptoPrice(pos.targetTp2Price || 0)}`
         : `TP: $${formatCryptoPrice(pos.targetTpPrice)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`;
@@ -2341,6 +2422,7 @@ export class WickSniperEngine {
       }
 
       const exitCfg = this.config.exit;
+      const atrMode = !!this.config.exit.atrDynamicSlTpEnabled;
 
       // KASUS A: Partial TP Aktif dan Tahap 1 belum selesai -> Pasang DUAL LIMIT ORDER (TP1 50% & TP2 50%)
       if (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive) {
@@ -2349,11 +2431,15 @@ export class WickSniperEngine {
         const tp1Qty = parseFloat(binanceFutures.formatQty(pos.symbol, plannedTp1Qty));
         const tp2Qty = parseFloat(binanceFutures.formatQty(pos.symbol, pos.totalQty - tp1Qty));
 
-        const tp1Price = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+        const tp1Price = atrMode && pos.targetTpPrice
+          ? pos.targetTpPrice
+          : pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
         const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0
           ? exitCfg.takeProfit2Pct
           : exitCfg.takeProfitPct * 2;
-        const tp2Price = pos.avgEntryPrice * (1 - tp2Pct / 100);
+        const tp2Price = atrMode && pos.targetTp2Price
+          ? pos.targetTp2Price
+          : pos.avgEntryPrice * (1 - tp2Pct / 100);
         pos.targetTpPrice = tp1Price;
         pos.targetTp2Price = tp2Price;
 
@@ -2458,7 +2544,9 @@ export class WickSniperEngine {
         const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0
           ? exitCfg.takeProfit2Pct
           : exitCfg.takeProfitPct * 2;
-        const tp2Price = pos.targetTp2Price || pos.avgEntryPrice * (1 - tp2Pct / 100);
+        const tp2Price = atrMode && pos.targetTp2Price
+          ? pos.targetTp2Price
+          : pos.targetTp2Price || pos.avgEntryPrice * (1 - tp2Pct / 100);
         pos.targetTpPrice = tp2Price;
         const tpRes = await binanceFutures.placeLimitOrder(
           pos.symbol,
@@ -2494,12 +2582,14 @@ export class WickSniperEngine {
         );
         return;
       }
+      const tpOrderPrice = atrMode && pos.targetTpPrice ? pos.targetTpPrice : pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+      pos.targetTpPrice = tpOrderPrice;
       const tpStartTime = Date.now();
       const tpRes = await binanceFutures.placeLimitOrder(
         pos.symbol,
         'BUY',
         pos.totalQty,
-        pos.targetTpPrice,
+        tpOrderPrice,
         true
       );
       const tpLatencyMs = Date.now() - tpStartTime;
@@ -3286,6 +3376,166 @@ export class WickSniperEngine {
     return currentPrice < cached.open;
   }
 
+  private shouldDeferHardStopForGrid(pos: ActivePosition): boolean {
+    const exitCfg = this.config.exit;
+    if (!exitCfg.atrDynamicSlTpEnabled || exitCfg.atrDeferHardStopBeforeLastLayer === false) {
+      return false;
+    }
+
+    const totalLayers = Math.max(1, pos.layers?.length || 1);
+    const requiredLayers = exitCfg.atrMinLayersToProtect && exitCfg.atrMinLayersToProtect > 0
+      ? Math.min(exitCfg.atrMinLayersToProtect, totalLayers)
+      : totalLayers;
+
+    const filledLayers = pos.layers.filter((layer) => layer.status === 'FILLED').length;
+    return filledLayers < requiredLayers;
+  }
+
+  private async fetchAtrForSymbol(symbol: string, period: number = 14): Promise<number | undefined> {
+    try {
+      const client = await binanceFutures.getHttpClient();
+      const res = await client.get('/fapi/v1/klines', {
+        params: { symbol, interval: '1m', limit: Math.max(200, period + 50) },
+        timeout: 2000,
+      });
+
+      if (!Array.isArray(res?.data) || res.data.length < period + 1) {
+        return undefined;
+      }
+
+      const candles: Candle[] = res.data.map((k: any) => ({
+        openTime: Number(k[0]),
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+        closeTime: Number(k[6]),
+        tradesCount: Number(k[8] || 0),
+      }));
+
+      return calculateAtr(candles, period);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async applyAtrTargetsToPosition(pos: ActivePosition, entryPriceOverride?: number): Promise<void> {
+    if (!this.config.exit.atrDynamicSlTpEnabled) return;
+
+    const entryPrice = entryPriceOverride ?? pos.avgEntryPrice;
+    if (!entryPrice || entryPrice <= 0) return;
+
+    const atr = await this.fetchAtrForSymbol(pos.symbol, this.config.exit.atrPeriod ?? 14);
+    if (!atr || !(atr > 0)) return;
+
+    const atrPct = (atr / entryPrice) * 100;
+    const tpPct = Math.max(this.config.exit.takeProfitPct, atrPct * (this.config.exit.atrTpMultiplier ?? 2.5));
+    const slPct = Math.max(this.config.exit.hardStopLossPct, atrPct * (this.config.exit.atrSlMultiplier ?? 1.5));
+
+    pos.targetTpPrice = entryPrice * (1 - tpPct / 100);
+    const tp2Pct = this.config.exit.takeProfit2Pct && this.config.exit.takeProfit2Pct > 0
+      ? this.config.exit.takeProfit2Pct
+      : tpPct * 2;
+    pos.targetTp2Price = entryPrice * (1 - tp2Pct / 100);
+    pos.hardSlPrice = entryPrice * (1 + slPct / 100);
+
+    if (this.shouldDeferHardStopForGrid(pos)) {
+      pos.hardSlPrice = Number.POSITIVE_INFINITY;
+      logger.log('INFO', `🛡️ [ATR HARD SL DEFERRED] ${pos.symbol}: Posisi belum mencapai layer proteksi minimum, hard SL ditunda sampai layer terakhir penuh.`, pos.symbol);
+    }
+  }
+
+  private async evaluateEmaTrend(symbol: string, currentPrice: number): Promise<{ allowed: boolean; reason?: string }> {
+    try {
+      const client = await binanceFutures.getHttpClient();
+      const res = await client.get('/fapi/v1/klines', {
+        params: { symbol, interval: '1m', limit: 200 },
+        timeout: 2000,
+      });
+
+      if (!Array.isArray(res?.data) || res.data.length < 2) {
+        return { allowed: true };
+      }
+
+      const closes = res.data.map((k: any) => parseFloat(k[4]));
+      const fastPeriod = this.config.scanner.emaTrendFastPeriod ?? 9;
+      const slowPeriod = this.config.scanner.emaTrendSlowPeriod ?? 21;
+      const emaFast = calculateEma(closes, fastPeriod);
+      const emaSlow = calculateEma(closes, slowPeriod);
+
+      if (emaFast === undefined || emaSlow === undefined) {
+        return { allowed: true };
+      }
+
+      const bullishTrend = currentPrice >= emaFast && emaFast >= emaSlow;
+      if (bullishTrend) {
+        return { allowed: false, reason: `Trend 1m masih bullish (harga ${currentPrice.toFixed(4)} >= EMA${fastPeriod} ${emaFast.toFixed(4)} >= EMA${slowPeriod} ${emaSlow.toFixed(4)})` };
+      }
+
+      return { allowed: true };
+    } catch {
+      return { allowed: true };
+    }
+  }
+
+  private async calculateTradeQualityScore(symbol: string, alert: SpikeAlert, indicators: any): Promise<{ score: number; pass: boolean; reasons: string[] }> {
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (indicators?.rsi1m !== undefined) {
+      if (indicators.rsi1m < 30 || indicators.rsi1m > 70) {
+        score += 20;
+        reasons.push(`RSI ${indicators.rsi1m.toFixed(1)} di zona ekstrem`);
+      } else {
+        score += 8;
+        reasons.push(`RSI ${indicators.rsi1m.toFixed(1)} masih masuk zona valid`);
+      }
+    }
+
+    if (indicators?.volRatio !== undefined) {
+      if (indicators.volRatio >= (this.config.scanner.minVolRatio || 1.5)) {
+        score += 20;
+        reasons.push(`Volume ${indicators.volRatio.toFixed(1)}x`);
+      } else {
+        score -= 10;
+        reasons.push(`Volume ${indicators.volRatio.toFixed(1)}x terlalu tipis`);
+      }
+    }
+
+    if (indicators?.fundingRatePct !== undefined) {
+      if (Math.abs(indicators.fundingRatePct) <= 0.05) {
+        score += 15;
+        reasons.push(`Funding ${indicators.fundingRatePct.toFixed(3)}% stabil`);
+      } else {
+        score += 5;
+        reasons.push(`Funding ${indicators.fundingRatePct.toFixed(3)}% perlu hati-hati`);
+      }
+    }
+
+    try {
+      const spread = await binanceFutures.getOrderbookSpread(symbol);
+      if (spread && spread.spreadPct <= (this.config.scanner.maxSpreadPct ?? 0.25)) {
+        score += 15;
+        reasons.push(`Spread ${spread.spreadPct.toFixed(2)}% aman`);
+      } else {
+        score -= 10;
+        reasons.push('Spread terlalu lebar');
+      }
+    } catch {
+      score += 5;
+      reasons.push('Spread tidak tersedia, tetap lanjutkan dengan hati-hati');
+    }
+
+    if (alert.surgePct >= (this.config.scanner.spikeMinPercent || 2)) {
+      score += 15;
+      reasons.push(`Surge +${alert.surgePct.toFixed(2)}%`);
+    }
+
+    const threshold = this.config.scanner.tradeQualityThreshold ?? 60;
+    return { score, pass: score >= threshold, reasons };
+  }
+
   /**
    * Mengambil indikator pasar real-time (RSI 14 periode 1m, volume 1m USDT, rasio volume, dan funding rate).
    * Dilengkapi cache singkat (8 detik) agar tidak membebani kuota API.
@@ -3711,6 +3961,10 @@ export class WickSniperEngine {
             status: 'SNIPING',
             paramsSnapshot: this.captureParamsSnapshot(),
           };
+
+          if (this.config.exit.atrDynamicSlTpEnabled) {
+            void this.applyAtrTargetsToPosition(adoptedPos, entryPrice);
+          }
 
           this.activePositions.set(livePos.symbol, adoptedPos);
           // Langsung pasangkan Limit Take Profit di Binance agar ada open order

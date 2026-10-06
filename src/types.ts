@@ -40,6 +40,11 @@ export interface BotConfig {
     minVolRatioCooldownMinutes?: number;
     maxVolRatio?: number;
     maxVolRatioCooldownMinutes?: number;
+    emaTrendFilterEnabled?: boolean;
+    emaTrendFastPeriod?: number;
+    emaTrendSlowPeriod?: number;
+    tradeQualityScoringEnabled?: boolean;
+    tradeQualityThreshold?: number;
   };
   grid: {
     maxConcurrentCoins: number;
@@ -55,6 +60,12 @@ export interface BotConfig {
     trailingTpEnabled: boolean;
     trailingCallbackPct: number;
     hardStopLossPct: number;
+    atrDynamicSlTpEnabled?: boolean;
+    atrPeriod?: number;
+    atrSlMultiplier?: number;
+    atrTpMultiplier?: number;
+    atrDeferHardStopBeforeLastLayer?: boolean;
+    atrMinLayersToProtect?: number;
     trailingSlEnabled?: boolean;
     trailingSlMaxReturnRatio?: number;
     trailingSlTiers?: Array<{ filledLayerMin: number; percentOfBase: number }>;

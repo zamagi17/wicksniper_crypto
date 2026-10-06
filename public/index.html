@@ -551,11 +551,44 @@
           </div>
         </div>
 
+        <div class="form-row" style="background: rgba(117, 108, 255, 0.04); border: 1px dashed rgba(117, 108, 255, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #9f96ff;">
+              <input type="checkbox" id="cfg-ema-trend-enabled" style="width: 16px; height: 16px; accent-color: #9f96ff;">
+              📈 Aktifkan EMA Trend Filter
+            </label>
+            <small class="form-hint">Membatasi entry hanya saat trend jangka pendek tetap konsisten di bawah/di atas EMA slow, mencegah masuk saat market acak atau sideways.</small>
+          </div>
+          <div class="form-group">
+            <label>EMA Cepat</label>
+            <input type="number" id="cfg-ema-fast-period" min="3" max="50" step="1" class="form-control" placeholder="9">
+          </div>
+          <div class="form-group">
+            <label>EMA Lambat</label>
+            <input type="number" id="cfg-ema-slow-period" min="8" max="100" step="1" class="form-control" placeholder="21">
+          </div>
+        </div>
+
+        <div class="form-row" style="background: rgba(46, 213, 115, 0.04); border: 1px dashed rgba(46, 213, 115, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--color-green);">
+              <input type="checkbox" id="cfg-quality-score-enabled" style="width: 16px; height: 16px; accent-color: var(--color-green);">
+              ✅ Aktifkan Trade Quality Scoring
+            </label>
+            <small class="form-hint">Hanya lanjutkan entry bila skor kualitas trade memenuhi ambang minimum. Default nonaktif agar tidak mengubah perilaku lama.</small>
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 180px;">
+            <label>Ambang Skor Kualitas</label>
+            <input type="number" id="cfg-quality-threshold" min="0" max="100" step="1" class="form-control" placeholder="60">
+            <small class="form-hint">Semakin tinggi, semakin ketat filter quality. Standar: 60.</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Hard Stop Loss (%)</label>
             <input type="number" id="cfg-sl-pct" step="0.1" class="form-control" placeholder="4.5">
-            <small class="form-hint">Cut loss mutlak jika koin terus melesat tanpa koreksi.</small>
+            <small class="form-hint">Cut loss mutlak jika koin terus melesak tanpa koreksi.</small>
           </div>
 
           <div class="form-group">
@@ -585,6 +618,39 @@
               <input type="number" id="cfg-extend-hold-max-extensions" min="1" max="30" step="1" class="form-control" placeholder="6">
               <small class="form-hint">Default: 6x (maksimal tambahan +3 menit untuk mencegah infinite hold).</small>
             </div>
+          </div>
+        </div>
+
+        <div class="form-row" style="background: rgba(255, 140, 0, 0.04); border: 1px dashed rgba(255, 140, 0, 0.28); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #ffb347;">
+              <input type="checkbox" id="cfg-atr-dynamic-enabled" style="width: 16px; height: 16px; accent-color: #ffb347;">
+              📐 Aktifkan ATR Dynamic SL / TP
+            </label>
+            <small class="form-hint">Saat aktif, target TP & SL mengikuti ATR agar strategi lebih adaptif terhadap volatilitas. Default nonaktif agar konfigurasi lama tetap utuh.</small>
+          </div>
+          <div class="form-group">
+            <label>Periode ATR</label>
+            <input type="number" id="cfg-atr-period" min="5" max="200" step="1" class="form-control" placeholder="14">
+          </div>
+          <div class="form-group">
+            <label>ATR SL Multiplier</label>
+            <input type="number" id="cfg-atr-sl-multiplier" min="0.5" max="10" step="0.1" class="form-control" placeholder="1.5">
+          </div>
+          <div class="form-group">
+            <label>ATR TP Multiplier</label>
+            <input type="number" id="cfg-atr-tp-multiplier" min="0.5" max="10" step="0.1" class="form-control" placeholder="2.5">
+          </div>
+          <div class="form-group">
+            <label>Min Layer Protect (0 = Off)</label>
+            <input type="number" id="cfg-atr-min-layers" min="0" max="25" step="1" class="form-control" placeholder="0">
+          </div>
+          <div class="form-group" style="grid-column: span 2; margin-top: 2px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ffb347;">
+              <input type="checkbox" id="cfg-atr-defer-hard-stop" checked style="width: 16px; height: 16px; accent-color: #ffb347;">
+              🛡️ Tunda Hard Stop sampai layer terakhir aman
+            </label>
+            <small class="form-hint">Menahan hard SL agar tidak menutup posisi terlalu cepat sebelum layer terakhir atau ambang proteksi ATR terpenuhi. Ini penting saat strategi layered grid sedang berjalan.</small>
           </div>
         </div>
 

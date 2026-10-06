@@ -2132,6 +2132,28 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-max-24h-vol', snap.max24hVolumeUsdt ?? 300000000);
   setVal('cfg-max-spread', snap.maxSpreadPct);
 
+  if (snap.emaTrendFilterEnabled !== undefined) {
+    setChecked('cfg-ema-trend-enabled', snap.emaTrendFilterEnabled);
+  }
+  setVal('cfg-ema-fast-period', snap.emaTrendFastPeriod ?? 9);
+  setVal('cfg-ema-slow-period', snap.emaTrendSlowPeriod ?? 21);
+
+  if (snap.tradeQualityScoringEnabled !== undefined) {
+    setChecked('cfg-quality-score-enabled', snap.tradeQualityScoringEnabled);
+  }
+  setVal('cfg-quality-threshold', snap.tradeQualityThreshold ?? 60);
+
+  if (snap.atrDynamicSlTpEnabled !== undefined) {
+    setChecked('cfg-atr-dynamic-enabled', snap.atrDynamicSlTpEnabled);
+  }
+  setVal('cfg-atr-period', snap.atrPeriod ?? 14);
+  setVal('cfg-atr-sl-multiplier', snap.atrSlMultiplier ?? 1.5);
+  setVal('cfg-atr-tp-multiplier', snap.atrTpMultiplier ?? 2.5);
+  if (snap.atrDeferHardStopBeforeLastLayer !== undefined) {
+    setChecked('cfg-atr-defer-hard-stop', snap.atrDeferHardStopBeforeLastLayer !== false);
+  }
+  setVal('cfg-atr-min-layers', snap.atrMinLayersToProtect ?? 0);
+
   if (snap.skipBottomRejectionEnabled !== undefined) {
     setChecked('cfg-bottom-rejection-enabled', snap.skipBottomRejectionEnabled);
     if (typeof toggleBottomRejectionInput === 'function') toggleBottomRejectionInput();
@@ -2454,9 +2476,36 @@ function populateSettingsForm(cfg) {
   const abCheckbox = document.getElementById('cfg-auto-blacklist');
   if (abCheckbox) abCheckbox.checked = !!cfg.scanner?.autoBlacklist;
   setVal('cfg-max-24h-change', cfg.scanner?.max24hChangePct ?? 40);
+
+  const emaTrendCheckbox = document.getElementById('cfg-ema-trend-enabled');
+  if (emaTrendCheckbox) {
+    emaTrendCheckbox.checked = !!cfg.scanner?.emaTrendFilterEnabled;
+  }
+  setVal('cfg-ema-fast-period', cfg.scanner?.emaTrendFastPeriod ?? 9);
+  setVal('cfg-ema-slow-period', cfg.scanner?.emaTrendSlowPeriod ?? 21);
+
+  const qualityCheckbox = document.getElementById('cfg-quality-score-enabled');
+  if (qualityCheckbox) {
+    qualityCheckbox.checked = !!cfg.scanner?.tradeQualityScoringEnabled;
+  }
+  setVal('cfg-quality-threshold', cfg.scanner?.tradeQualityThreshold ?? 60);
+
   setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
+
+  const atrCheckbox = document.getElementById('cfg-atr-dynamic-enabled');
+  if (atrCheckbox) {
+    atrCheckbox.checked = !!cfg.exit?.atrDynamicSlTpEnabled;
+  }
+  setVal('cfg-atr-period', cfg.exit?.atrPeriod ?? 14);
+  setVal('cfg-atr-sl-multiplier', cfg.exit?.atrSlMultiplier ?? 1.5);
+  setVal('cfg-atr-tp-multiplier', cfg.exit?.atrTpMultiplier ?? 2.5);
+  const atrDeferCheckbox = document.getElementById('cfg-atr-defer-hard-stop');
+  if (atrDeferCheckbox) {
+    atrDeferCheckbox.checked = cfg.exit?.atrDeferHardStopBeforeLastLayer !== false;
+  }
+  setVal('cfg-atr-min-layers', cfg.exit?.atrMinLayersToProtect ?? 0);
 
   // Perpanjangan Waktu Hold saat Candle 1m Merah
   const erhCheckbox = document.getElementById('cfg-extend-hold-red-enabled');
@@ -2681,8 +2730,13 @@ function getSettingsFormData() {
       min24hVolumeUsdt: parseFloat(getVal('cfg-min-24h-vol', '1500000')) || 0,
       max24hVolumeUsdt: parseFloat(getVal('cfg-max-24h-vol', '300000000')) || 0,
       maxSpreadPct: parseFloat(getVal('cfg-max-spread', '0.25')) || 0,
-    autoBlacklist: !!document.getElementById('cfg-auto-blacklist')?.checked,
+      autoBlacklist: !!document.getElementById('cfg-auto-blacklist')?.checked,
       max24hChangePct: parseFloat(getVal('cfg-max-24h-change', '40')) || 0,
+      emaTrendFilterEnabled: !!document.getElementById('cfg-ema-trend-enabled')?.checked,
+      emaTrendFastPeriod: parseInt(getVal('cfg-ema-fast-period', '9'), 10) || 9,
+      emaTrendSlowPeriod: parseInt(getVal('cfg-ema-slow-period', '21'), 10) || 21,
+      tradeQualityScoringEnabled: !!document.getElementById('cfg-quality-score-enabled')?.checked,
+      tradeQualityThreshold: parseFloat(getVal('cfg-quality-threshold', '60')) || 60,
       skipBottomRejectionEnabled: !!document.getElementById('cfg-bottom-rejection-enabled')?.checked,
       bottomRejectionMinRangePct: parseFloat(getVal('cfg-bottom-rejection-range', '1.5')) || 1.5,
       bottomRejectionWickRatio: parseFloat(getVal('cfg-bottom-rejection-ratio', '2.0')) || 2.0,
@@ -2714,6 +2768,12 @@ function getSettingsFormData() {
       takeProfitPct: parseFloat(getVal('cfg-tp-pct', '1.2')) || 1.2,
       hardStopLossPct: parseFloat(getVal('cfg-sl-pct', '4.5')) || 4.5,
       maxHoldMinutes: parseInt(getVal('cfg-max-hold', '60')) || 60,
+      atrDynamicSlTpEnabled: !!document.getElementById('cfg-atr-dynamic-enabled')?.checked,
+      atrPeriod: parseInt(getVal('cfg-atr-period', '14'), 10) || 14,
+      atrSlMultiplier: parseFloat(getVal('cfg-atr-sl-multiplier', '1.5')) || 1.5,
+      atrTpMultiplier: parseFloat(getVal('cfg-atr-tp-multiplier', '2.5')) || 2.5,
+      atrDeferHardStopBeforeLastLayer: !!document.getElementById('cfg-atr-defer-hard-stop')?.checked,
+      atrMinLayersToProtect: parseInt(getVal('cfg-atr-min-layers', '0'), 10) || 0,
       earlyExitMomentumEnabled: !!document.getElementById('cfg-early-exit-momentum-enabled')?.checked,
       earlyExitMinLayersPct: parseFloat(getVal('cfg-early-exit-min-layers-pct', '60')) || 60,
       earlyExitMinLossSlPct: parseFloat(getVal('cfg-early-exit-min-loss-sl-pct', '60')) || 60,
@@ -3664,6 +3724,17 @@ async function executeBacktest() {
     partialTpEnabled: !!document.getElementById('bt-partial-tp-enabled')?.checked,
     partialTpRatio: getNum('bt-partial-tp-ratio', 70) / 100,
     takeProfit2Pct: getNum('bt-tp2-pct', 2.4),
+    emaTrendFilterEnabled: !!currentConfig?.scanner?.emaTrendFilterEnabled,
+    emaTrendFastPeriod: currentConfig?.scanner?.emaTrendFastPeriod ?? 9,
+    emaTrendSlowPeriod: currentConfig?.scanner?.emaTrendSlowPeriod ?? 21,
+    tradeQualityScoringEnabled: !!currentConfig?.scanner?.tradeQualityScoringEnabled,
+    tradeQualityThreshold: currentConfig?.scanner?.tradeQualityThreshold ?? 60,
+    atrDynamicSlTpEnabled: !!currentConfig?.exit?.atrDynamicSlTpEnabled,
+    atrPeriod: currentConfig?.exit?.atrPeriod ?? 14,
+    atrSlMultiplier: currentConfig?.exit?.atrSlMultiplier ?? 1.5,
+    atrTpMultiplier: currentConfig?.exit?.atrTpMultiplier ?? 2.5,
+    atrDeferHardStopBeforeLastLayer: currentConfig?.exit?.atrDeferHardStopBeforeLastLayer !== false,
+    atrMinLayersToProtect: currentConfig?.exit?.atrMinLayersToProtect ?? 0,
     bepBufferPct: currentConfig?.exit?.bepBufferPct ?? 0.08,
     trailingTpEnabled: !!document.getElementById('bt-trailing-tp-enabled')?.checked,
     trailingCallbackPct: getNum('bt-trailing-tp-callback', 0.4),
