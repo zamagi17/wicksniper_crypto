@@ -8,6 +8,7 @@ import { db } from './db';
 import { telegram } from './telegram';
 import { Candle } from './dataFetcher';
 import { isBottomRejectionCandle } from './backtester';
+import { autoTuner } from './autoTuner';
 
 function formatCryptoPrice(val: number): string {
   if (!val || isNaN(val)) return '0.00';
@@ -129,6 +130,7 @@ export class WickSniperEngine {
   private lastHeartbeatAt: number = Date.now();
   private lastRadarPulseAt: number = Date.now();
   private lastAutoBlacklistRefreshAt: number = Date.now();
+  private lastAutoTuneAnalysisAt: number = Date.now();
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
   private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
@@ -254,6 +256,15 @@ export class WickSniperEngine {
         notifyOnLayerFill: false,
         notifyOnClose: true,
       },
+      autoTuner: {
+        enabled: false,
+        mode: 'SEMI_AUTO',
+        minSampleSize: 15,
+        evalPeriodDays: 7,
+        autoApplyIntervalHours: 24,
+        circuitBreakerLosses: 3,
+        stepSizePct: 10,
+      },
       security: {
         password: 'admin123',
       },
@@ -275,6 +286,9 @@ export class WickSniperEngine {
       momentumLong: newConfig.momentumLong !== undefined
         ? { ...(this.config.momentumLong || { enabled: false }), ...(newConfig.momentumLong || {}) }
         : this.config.momentumLong,
+      autoTuner: newConfig.autoTuner !== undefined
+        ? { ...(this.config.autoTuner || { enabled: false, mode: 'SEMI_AUTO' }), ...(newConfig.autoTuner || {}) }
+        : this.config.autoTuner,
       security: { ...this.config.security, ...(newConfig.security || {}) },
     };
     this.scanner.updateConfig(this.config.scanner);
@@ -503,6 +517,17 @@ export class WickSniperEngine {
         if (this.config.scanner.autoBlacklist && Date.now() - this.lastAutoBlacklistRefreshAt >= 3600 * 1000) {
           this.lastAutoBlacklistRefreshAt = Date.now();
           this.scanner.refreshAutoBlacklist().catch(() => {});
+        }
+
+        // Auto-Tuner Scheduled Optimization (Jadwal Berkala)
+        const tunerIntervalHours = this.config.autoTuner?.autoApplyIntervalHours ?? 24;
+        if (
+          this.config.autoTuner?.enabled &&
+          tunerIntervalHours > 0 &&
+          Date.now() - this.lastAutoTuneAnalysisAt >= tunerIntervalHours * 3600 * 1000
+        ) {
+          this.lastAutoTuneAnalysisAt = Date.now();
+          this.runAutoTuneAnalysis().catch(() => {});
         }
 
         // Denyut Nadi Radar Berkala (Setiap 15 Menit saat Siaga)
@@ -3375,6 +3400,10 @@ export class WickSniperEngine {
         isPaperTrade ? this.virtualBalance : undefined
       );
 
+      if (this.config.autoTuner?.enabled) {
+        this.handleAutoTunerPostTrade().catch(() => {});
+      }
+
       const cooldownMinutes =
         pos.side === 'LONG'
           ? (this.config.momentumLong?.cooldownMinutes || 15)
@@ -4652,6 +4681,163 @@ export class WickSniperEngine {
       return sim;
     } catch (e: any) {
       return sim;
+    }
+  }
+
+  // ==============================================================
+  // AUTO-TUNER INTEGRATION METHODS
+  // ==============================================================
+  public getAutoTunerStatus() {
+    const status = autoTuner.getStatus();
+    const cb = autoTuner.checkCircuitBreaker(
+      this.closedTrades,
+      this.config.autoTuner?.circuitBreakerLosses || 3
+    );
+    return {
+      ...status,
+      config: this.config.autoTuner,
+      circuitBreaker: cb,
+    };
+  }
+
+  public async runAutoTuneAnalysis(): Promise<{ success: boolean; message: string; proposal?: any }> {
+    let trades = this.closedTrades;
+    if (db.isConnected) {
+      const dbTrades = await db.queryTrades({ limit: 100 }).catch(() => null);
+      if (dbTrades && dbTrades.trades.length > 0) {
+        trades = dbTrades.trades;
+      }
+    }
+
+    const res = await autoTuner.analyzeTrades(trades, this.config);
+    if (res.success && res.proposal) {
+      // Jika mode FULL_AUTO dan fitur aktif serta ada perubahan, langsung terapkan otomatis
+      if (this.config.autoTuner?.enabled && this.config.autoTuner?.mode === 'FULL_AUTO') {
+        const hasChange = Object.values(res.proposal.deltas).some((d: any) => Math.abs(Number(d)) > 0.0001);
+        if (hasChange) {
+          await this.applyTuningProposal(res.proposal.id);
+        }
+      }
+    }
+    this.broadcastStatus();
+    return res;
+  }
+
+  public async applyTuningProposal(proposalId?: string): Promise<{ success: boolean; message: string }> {
+    let proposal = autoTuner.getActiveProposal();
+    if (!proposal && proposalId) {
+      const logs = await db.loadTuningLogs(10);
+      const found = logs.find((l) => l.id === proposalId && l.status === 'PROPOSED');
+      if (found) proposal = found.proposal;
+    }
+
+    if (!proposal || (proposalId && proposal.id !== proposalId)) {
+      return { success: false, message: 'Tidak ada proposal tuning aktif yang cocok untuk diterapkan.' };
+    }
+
+    const prevSnapshot = {
+      scanner: { ...this.config.scanner },
+      exit: { ...this.config.exit },
+      grid: { ...this.config.grid },
+    };
+
+    const p = proposal.proposedParams;
+    const patch: Partial<BotConfig> = {
+      scanner: {
+        ...this.config.scanner,
+        ...(p.spikeMinPercent !== undefined ? { spikeMinPercent: p.spikeMinPercent } : {}),
+        ...(p.minRsi1m !== undefined ? { minRsi1m: p.minRsi1m } : {}),
+        ...(p.maxVolRatio !== undefined ? { maxVolRatio: p.maxVolRatio } : {}),
+      },
+      exit: {
+        ...this.config.exit,
+        ...(p.takeProfitPct !== undefined ? { takeProfitPct: p.takeProfitPct } : {}),
+        ...(p.trailingCallbackPct !== undefined ? { trailingCallbackPct: p.trailingCallbackPct } : {}),
+        ...(p.maxHoldMinutes !== undefined ? { maxHoldMinutes: p.maxHoldMinutes } : {}),
+      },
+      grid: {
+        ...this.config.grid,
+        ...(p.layerSpacingPct !== undefined ? { layerSpacingPct: p.layerSpacingPct } : {}),
+      },
+    };
+
+    await this.saveConfig(patch);
+    await autoTuner.markProposalApplied(proposal, prevSnapshot);
+
+    const rationaleText = proposal.rationale.map((r) => `• ${r}`).join('\n');
+    logger.log('SUCCESS', `⚡ [AUTO-TUNER] Parameter bot berhasil disesuaikan secara otomatis!\n${rationaleText}`);
+
+    if (telegram.isConfigured()) {
+      const msg =
+        `🤖 <b>AUTO-TUNER: Parameter Berhasil Diperbarui</b>\n\n` +
+        `📊 <i>Berdasarkan analisis ${proposal.metrics.totalTradesAnalyzed} trade (Win Rate: ${proposal.metrics.winRateBefore}%):</i>\n\n` +
+        rationaleText +
+        `\n\n⚙️ <i>Konfigurasi baru telah aktif secara otomatis tanpa restart.</i>`;
+      telegram.sendMessage(msg).catch(() => {});
+    }
+
+    this.broadcastStatus();
+    return { success: true, message: 'Parameter proposal Auto-Tuner berhasil diterapkan!' };
+  }
+
+  public async rollbackLastTuning(): Promise<{ success: boolean; message: string }> {
+    let lastRecord = autoTuner.getLastTuningRecord();
+    if (!lastRecord || lastRecord.status !== 'APPLIED' || !lastRecord.previousConfigSnapshot) {
+      const logs = await db.loadTuningLogs(5);
+      const found = logs.find((l) => l.status === 'APPLIED' && l.previousConfigSnapshot);
+      if (found) lastRecord = found;
+    }
+
+    if (!lastRecord || lastRecord.status !== 'APPLIED' || !lastRecord.previousConfigSnapshot) {
+      return { success: false, message: 'Tidak ada riwayat penyesuaian parameter yang dapat di-rollback.' };
+    }
+
+    const prev = lastRecord.previousConfigSnapshot;
+    const patch: Partial<BotConfig> = {
+      ...(prev.scanner ? { scanner: { ...this.config.scanner, ...prev.scanner } } : {}),
+      ...(prev.exit ? { exit: { ...this.config.exit, ...prev.exit } } : {}),
+      ...(prev.grid ? { grid: { ...this.config.grid, ...prev.grid } } : {}),
+    };
+
+    await this.saveConfig(patch);
+    await autoTuner.markRollback(lastRecord.id);
+
+    logger.log('WARN', `⏪ [AUTO-TUNER ROLLBACK] Parameter bot berhasil dikembalikan ke baseline sebelum tuning.`);
+
+    if (telegram.isConfigured()) {
+      const msg =
+        `🚨 <b>AUTO-TUNER: Rollback Dieksekusi</b>\n\n` +
+        `Parameter bot telah dikembalikan ke konfigurasi baseline sebelumnya untuk mengamankan modal trading.`;
+      telegram.sendMessage(msg).catch(() => {});
+    }
+
+    this.broadcastStatus();
+    return { success: true, message: 'Konfigurasi berhasil dikembalikan ke kondisi sebelumnya.' };
+  }
+
+  private async handleAutoTunerPostTrade(): Promise<void> {
+    const threshold = this.config.autoTuner?.circuitBreakerLosses || 3;
+    const cb = autoTuner.checkCircuitBreaker(this.closedTrades, threshold);
+
+    if (cb.triggered) {
+      logger.log(
+        'WARN',
+        `🚨 [CIRCUIT BREAKER] Auto-Tuner mendeteksi ${cb.consecutiveLosses} kekalahan beruntun setelah tuning parameter!`
+      );
+
+      if (telegram.isConfigured()) {
+        const msg =
+          `⚠️ <b>CIRCUIT BREAKER TERPICU</b>\n\n` +
+          `Mendeteksi ${cb.consecutiveLosses} kekalahan beruntun setelah penyesuaian parameter Auto-Tuner.\n` +
+          (this.config.autoTuner?.mode === 'FULL_AUTO'
+            ? `<i>Sistem segera melakukan auto-rollback otomatis ke parameter baseline aman...</i>`
+            : `<i>Disarankan untuk menekan tombol Rollback di dashboard atau memeriksa kondisi volatilitas pasar.</i>`);
+        telegram.sendMessage(msg).catch(() => {});
+      }
+
+      if (this.config.autoTuner?.mode === 'FULL_AUTO') {
+        await this.rollbackLastTuning();
+      }
     }
   }
 }

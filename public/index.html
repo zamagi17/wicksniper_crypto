@@ -98,6 +98,7 @@
         <span id="btn-engine-text">Jalankan Bot</span>
       </button>
 
+      <button class="btn btn-secondary nav-btn-desktop" onclick="openAutoTunerModal()">🧠 Auto-Tuner</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openBacktestModal()">🧪 Backtest Lab</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openSettingsModal()">⚙️ Pengaturan</button>
       <button class="btn btn-secondary nav-btn-desktop" id="btn-lock-terminal" onclick="logoutSession()" title="Kunci Dashboard"><span class="icon">🔒</span> Kunci</button>
@@ -394,6 +395,15 @@
             <div class="dm-info">
               <b>Pengaturan Parameter</b>
               <small>Ubah TP/SL, Kuota, Grid & API Binance</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+
+          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); openAutoTunerModal();">
+            <div class="dm-icon bg-cyan">🧠</div>
+            <div class="dm-info">
+              <b>Auto-Tuner AI</b>
+              <small>Optimasi parameter cerdas riwayat trade</small>
             </div>
             <span class="dm-arrow">›</span>
           </button>
@@ -1301,6 +1311,54 @@
             </div>
           </div>
         </div>
+
+        <!-- PENGATURAN AUTO-TUNER -->
+        <div class="form-row" style="background: rgba(179, 136, 255, 0.05); border: 1px solid rgba(179, 136, 255, 0.3); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div>
+              <b style="color: var(--color-purple); font-size: 14px;">🧠 AUTO-TUNER OPTIMIZER</b>
+              <p style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                Menganalisis riwayat transaksi secara berkala untuk merekomendasikan/menerapkan parameter paling menguntungkan dengan batasan aman (quant guardrails).
+              </p>
+            </div>
+            <button type="button" class="btn btn-secondary" onclick="closeSettingsModal(); openAutoTunerModal();" style="border-color: var(--color-purple); color: var(--color-purple); white-space: nowrap;">
+              🚀 Buka Dasbor Tuner
+            </button>
+          </div>
+
+          <div class="form-group" style="grid-column: span 2;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="cfg-autotune-enabled" style="width: 16px; height: 16px;">
+              <span style="font-weight: 600;">Aktifkan Otomatisasi Auto-Tuner</span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>Mode Eksekusi Auto-Tuner</label>
+            <select id="cfg-autotune-mode" class="form-control">
+              <option value="SEMI_AUTO">💡 Semi-Auto (Hasilkan Rekomendasi di Dashboard, Butuh Persetujuan)</option>
+              <option value="FULL_AUTO">⚡ Full-Auto (Otonom Terapkan Perubahan + Alert Telegram)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Sample Minimum Trade</label>
+            <input type="number" id="cfg-autotune-sample" min="5" max="100" class="form-control" placeholder="15">
+            <small class="form-hint">Jumlah minimal trade sebelum evaluasi clustering parameter diperbolehkan.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Interval Evaluasi Berkala (Jam)</label>
+            <input type="number" id="cfg-autotune-interval" min="1" max="168" class="form-control" placeholder="24">
+            <small class="form-hint">Evaluasi dan penyesuaian parameter otomatis setiap X jam.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Batas Circuit Breaker (Loss Beruntun)</label>
+            <input type="number" id="cfg-autotune-cb-losses" min="1" max="10" class="form-control" placeholder="3">
+            <small class="form-hint">Rollback otomatis ke baseline aman jika terjadi X kekalahan beruntun setelah tuning.</small>
+          </div>
+        </div>
       </div>
 
       <div class="modal-footer floating-footer">
@@ -1731,6 +1789,124 @@
       <div class="modal-body" id="radar-spike-detail-body"></div>
       <div class="modal-footer floating-footer">
         <button type="button" class="btn btn-secondary" onclick="closeRadarSpikeDetailModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTO-TUNER MODAL -->
+  <div id="autotune-modal" class="modal-backdrop" onclick="if(event.target===this)closeAutoTunerModal()">
+    <div class="modal-card modal-lg" style="max-width: 920px;">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3 style="display: flex; align-items: center; gap: 8px;">
+            <span>🧠</span> Wick Sniper Auto-Tuner
+            <span id="at-mode-badge" class="badge-mode">SEMI-AUTO</span>
+          </h3>
+          <button type="button" class="btn-refresh-cfg" onclick="refreshAutoTunerUI(true)" title="Muat ulang status auto-tuner">🔄 Refresh</button>
+        </div>
+        <button type="button" class="btn-close" onclick="closeAutoTunerModal()">&times;</button>
+      </div>
+
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Top Metrics Cards -->
+        <div class="at-metrics-grid">
+          <div class="at-metric-card">
+            <span class="at-metric-label">Status Circuit Breaker</span>
+            <span class="at-metric-val text-green" id="at-cb-status">🟢 AMAN</span>
+            <small id="at-cb-hint" class="text-muted">0 loss beruntun setelah tuning</small>
+          </div>
+          <div class="at-metric-card">
+            <span class="at-metric-label">Sample Riwayat Evaluasi</span>
+            <span class="at-metric-val" id="at-sample-count">-- Trade</span>
+            <small id="at-winrate-stat" class="text-muted">Win Rate: --% | Profit Factor: --</small>
+          </div>
+          <div class="at-metric-card">
+            <span class="at-metric-label">Analisis Terakhir</span>
+            <span class="at-metric-val" id="at-last-analyzed-time">Belum Ada</span>
+            <small id="at-last-applied-hint" class="text-muted">Status: Siaga</small>
+          </div>
+        </div>
+
+        <!-- Action Control Bar -->
+        <div class="at-action-bar">
+          <button type="button" class="btn btn-primary" id="btn-at-analyze" onclick="triggerAutoTunerAnalysis()">
+            <span id="at-analyze-icon">🔍</span>
+            <span id="at-analyze-text">Analisis Trade Sekarang</span>
+          </button>
+          <button type="button" class="btn btn-success" id="btn-at-apply" onclick="applyAutoTunerProposal()" disabled>
+            ⚡ Terapkan Rekomendasi
+          </button>
+          <button type="button" class="btn btn-danger" id="btn-at-rollback" onclick="rollbackAutoTuner()" disabled>
+            ⏪ Rollback ke Baseline
+          </button>
+        </div>
+
+        <!-- Active Proposal Card -->
+        <div id="at-proposal-container" class="at-proposal-box">
+          <div class="at-box-header">
+            <h4>📋 Proposal Rekomendasi Parameter</h4>
+            <span id="at-proposal-status" class="badge-status">SIAGA</span>
+          </div>
+
+          <div id="at-empty-notice" class="at-empty-state">
+            <div style="font-size: 32px; margin-bottom: 8px;">🧠</div>
+            <p>Tekan tombol <b>"Analisis Trade Sekarang"</b> untuk mengevaluasi riwayat transaksi dan menghasilkan penyesuaian parameter optimal.</p>
+          </div>
+
+          <div id="at-proposal-content" style="display: none;">
+            <div class="at-table-responsive">
+              <table class="data-table at-table">
+                <thead>
+                  <tr>
+                    <th>Parameter Target</th>
+                    <th>Nilai Saat Ini</th>
+                    <th>Rekomendasi Baru</th>
+                    <th>Perubahan (Delta)</th>
+                    <th>Batas Aman (Guardrail)</th>
+                  </tr>
+                </thead>
+                <tbody id="at-params-tbody">
+                  <!-- Diisi dinamis -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Rationale / Alasan Kuantitatif -->
+            <div class="at-rationale-box">
+              <b style="color: var(--color-cyan); font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                💡 Rasionalisasi & Dasar Keputusan Kuantitatif:
+              </b>
+              <ul id="at-rationale-list" class="at-rationale-list">
+                <!-- Diisi dinamis -->
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- History of Tuning -->
+        <div class="at-history-box">
+          <h4 style="margin-bottom: 8px; font-size: 13px; color: var(--text-muted);">📜 Riwayat Tuning Parameter</h4>
+          <div class="at-table-responsive" style="max-height: 180px; overflow-y: auto;">
+            <table class="data-table at-history-table">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Status</th>
+                  <th>Trades Dianalisis</th>
+                  <th>Win Rate Baseline</th>
+                  <th>Perubahan Parameter</th>
+                </tr>
+              </thead>
+              <tbody id="at-history-tbody">
+                <tr><td colspan="5" class="text-center text-muted" style="padding: 12px;">Memuat riwayat...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer floating-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeAutoTunerModal()">Tutup</button>
       </div>
     </div>
   </div>

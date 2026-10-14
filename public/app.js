@@ -2846,6 +2846,16 @@ function populateSettingsForm(cfg) {
   setVal('cfg-long-sl', cfg.momentumLong?.stopLossPct ?? 2.5);
   setVal('cfg-long-max-hold', cfg.momentumLong?.maxHoldMinutes ?? 60);
   setVal('cfg-long-cooldown', cfg.momentumLong?.cooldownMinutes ?? 15);
+
+  // Auto-Tuner
+  const atCheckbox = document.getElementById('cfg-autotune-enabled');
+  if (atCheckbox) {
+    atCheckbox.checked = !!cfg.autoTuner?.enabled;
+  }
+  setVal('cfg-autotune-mode', cfg.autoTuner?.mode || 'SEMI_AUTO');
+  setVal('cfg-autotune-sample', cfg.autoTuner?.minSampleSize || 15);
+  setVal('cfg-autotune-interval', cfg.autoTuner?.autoApplyIntervalHours || 24);
+  setVal('cfg-autotune-cb-losses', cfg.autoTuner?.circuitBreakerLosses || 3);
 }
 
 window.toggleLongSettingsGroup = function() {
@@ -3020,6 +3030,14 @@ function getSettingsFormData() {
       stopLossPct: parseFloat(getVal('cfg-long-sl', '2.5')) || 2.5,
       maxHoldMinutes: parseInt(getVal('cfg-long-max-hold', '60')) || 60,
       cooldownMinutes: parseInt(getVal('cfg-long-cooldown', '15')) || 15,
+    },
+    autoTuner: {
+      enabled: !!document.getElementById('cfg-autotune-enabled')?.checked,
+      mode: getVal('cfg-autotune-mode', 'SEMI_AUTO'),
+      minSampleSize: parseInt(getVal('cfg-autotune-sample', '15'), 10) || 15,
+      autoApplyIntervalHours: parseInt(getVal('cfg-autotune-interval', '24'), 10) || 24,
+      circuitBreakerLosses: parseInt(getVal('cfg-autotune-cb-losses', '3'), 10) || 3,
+      stepSizePct: 10,
     },
   };
 }
@@ -4179,6 +4197,297 @@ try {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeMobileDrawer();
+    closeAutoTunerModal();
   }
 });
+
+// ==============================================================
+// AUTO-TUNER CONTROLLER (CLIENT-SIDE)
+// ==============================================================
+let currentAutoTunerStatus = null;
+
+async function openAutoTunerModal() {
+  const modal = document.getElementById('autotune-modal');
+  if (modal) {
+    modal.classList.add('open');
+    await refreshAutoTunerUI();
+  }
+}
+
+function closeAutoTunerModal() {
+  const modal = document.getElementById('autotune-modal');
+  if (modal) modal.classList.remove('open');
+}
+
+async function refreshAutoTunerUI(showToast = false) {
+  try {
+    const res = await authFetch('/api/autotune/status?_t=' + Date.now()).then((r) => r.json());
+    if (res && res.success && res.status) {
+      currentAutoTunerStatus = res.status;
+      renderAutoTunerModal(res.status, res.history || []);
+      if (showToast) {
+        alert('✅ Status Auto-Tuner berhasil dimuat ulang!');
+      }
+    }
+  } catch (err) {
+    console.error('Gagal mengambil status Auto-Tuner:', err);
+  }
+}
+
+function renderAutoTunerModal(status, history) {
+  const cfg = status.config || {};
+  const modeBadge = document.getElementById('at-mode-badge');
+  if (modeBadge) {
+    const isFull = cfg.mode === 'FULL_AUTO';
+    modeBadge.textContent = cfg.enabled ? (isFull ? '⚡ FULL-AUTO' : '💡 SEMI-AUTO') : 'OFF (NONAKTIF)';
+    modeBadge.className = 'badge-mode ' + (cfg.enabled ? (isFull ? 'live' : 'paper') : 'offline');
+  }
+
+  // Circuit Breaker Status
+  const cbStatus = document.getElementById('at-cb-status');
+  const cbHint = document.getElementById('at-cb-hint');
+  if (cbStatus && cbHint) {
+    if (status.circuitBreaker?.triggered) {
+      cbStatus.textContent = '🚨 TERPICU (Loss Beruntun)';
+      cbStatus.className = 'at-metric-val text-red';
+      cbHint.textContent = `${status.circuitBreaker.consecutiveLosses} loss berturut-turut! Disarankan rollback.`;
+    } else {
+      cbStatus.textContent = '🟢 AMAN';
+      cbStatus.className = 'at-metric-val text-green';
+      cbHint.textContent = `${status.circuitBreaker?.consecutiveLosses || 0} loss beruntun setelah tuning`;
+    }
+  }
+
+  // Last Analyzed & Rollback availability
+  const lastTimeEl = document.getElementById('at-last-analyzed-time');
+  const lastHintEl = document.getElementById('at-last-applied-hint');
+  const btnRollback = document.getElementById('btn-at-rollback');
+
+  if (lastTimeEl) {
+    lastTimeEl.textContent = status.lastAnalysisAt
+      ? new Date(status.lastAnalysisAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : 'Belum Ada';
+  }
+
+  if (lastHintEl) {
+    if (status.lastTuningRecord?.status === 'APPLIED') {
+      const d = new Date(status.lastTuningRecord.appliedAt || status.lastTuningRecord.createdAt);
+      lastHintEl.textContent = `Tuning aktif sejak ${d.toLocaleDateString('id-ID')} ${d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`;
+      if (btnRollback) btnRollback.disabled = false;
+    } else {
+      lastHintEl.textContent = 'Tidak ada tuning aktif yang bisa di-rollback';
+      if (btnRollback) btnRollback.disabled = true;
+    }
+  }
+
+  // Active Proposal Rendering
+  const proposal = status.activeProposal;
+  const proposalContent = document.getElementById('at-proposal-content');
+  const emptyNotice = document.getElementById('at-empty-notice');
+  const proposalStatusBadge = document.getElementById('at-proposal-status');
+  const btnApply = document.getElementById('btn-at-apply');
+  const sampleCountEl = document.getElementById('at-sample-count');
+  const winRateStatEl = document.getElementById('at-winrate-stat');
+
+  if (proposal) {
+    if (sampleCountEl) sampleCountEl.textContent = `${proposal.metrics.totalTradesAnalyzed} Trade`;
+    if (winRateStatEl) {
+      winRateStatEl.textContent = `Win Rate: ${proposal.metrics.winRateBefore}% | Profit Factor: ${proposal.metrics.profitFactorBefore}`;
+    }
+
+    if (proposalStatusBadge) {
+      proposalStatusBadge.textContent = proposal.status === 'PROPOSED' ? 'REKOMENDASI SIAP' : proposal.status;
+      proposalStatusBadge.className = 'badge-status ' + (proposal.status === 'PROPOSED' ? 'badge-win' : 'badge-loss');
+    }
+
+    if (emptyNotice) emptyNotice.style.display = 'none';
+    if (proposalContent) proposalContent.style.display = 'block';
+
+    if (btnApply) {
+      btnApply.disabled = proposal.status !== 'PROPOSED';
+    }
+
+    // Render Parameters Table
+    const tbody = document.getElementById('at-params-tbody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      const guardrails = status.guardrails || {};
+      for (const [key, curVal] of Object.entries(proposal.currentParams || {})) {
+        const propVal = proposal.proposedParams?.[key] ?? curVal;
+        const delta = proposal.deltas?.[key] || 0;
+        const rail = guardrails[key] || { min: '-', max: '-', unit: '', label: key };
+
+        let deltaBadge = `<span class="at-delta-badge neutral">0.00</span>`;
+        if (delta > 0.0001) {
+          deltaBadge = `<span class="at-delta-badge pos">+${delta}${rail.unit} ▲</span>`;
+        } else if (delta < -0.0001) {
+          deltaBadge = `<span class="at-delta-badge neg">${delta}${rail.unit} ▼</span>`;
+        }
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><b>${rail.label || key}</b></td>
+          <td style="font-family: var(--font-mono);">${curVal}${rail.unit}</td>
+          <td style="font-family: var(--font-mono); font-weight: 700; color: ${delta !== 0 ? 'var(--color-cyan)' : 'inherit'};">${propVal}${rail.unit}</td>
+          <td>${deltaBadge}</td>
+          <td style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${rail.min}${rail.unit} ~ ${rail.max}${rail.unit}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    // Render Rationale List
+    const rationaleList = document.getElementById('at-rationale-list');
+    if (rationaleList) {
+      rationaleList.innerHTML = '';
+      if (proposal.rationale && proposal.rationale.length > 0) {
+        proposal.rationale.forEach((r) => {
+          const li = document.createElement('li');
+          li.textContent = r;
+          rationaleList.appendChild(li);
+        });
+      } else {
+        const li = document.createElement('li');
+        li.textContent = 'Semua parameter saat ini telah seimbang dengan kondisi pasar.';
+        rationaleList.appendChild(li);
+      }
+    }
+  } else {
+    if (emptyNotice) emptyNotice.style.display = 'block';
+    if (proposalContent) proposalContent.style.display = 'none';
+    if (btnApply) btnApply.disabled = true;
+    if (proposalStatusBadge) {
+      proposalStatusBadge.textContent = 'SIAGA';
+      proposalStatusBadge.className = 'badge-status';
+    }
+  }
+
+  // Render History Table
+  const histTbody = document.getElementById('at-history-tbody');
+  if (histTbody) {
+    histTbody.innerHTML = '';
+    if (!history || history.length === 0) {
+      histTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted" style="padding: 12px;">Belum ada riwayat penyesuaian parameter.</td></tr>';
+    } else {
+      history.forEach((h) => {
+        const dateStr = new Date(h.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        const tr = document.createElement('tr');
+        const p = h.proposal;
+        const deltasStr = p?.deltas
+          ? Object.entries(p.deltas)
+              .filter(([_, d]) => Math.abs(Number(d)) > 0.0001)
+              .map(([k, d]) => `${k}: ${d > 0 ? '+' : ''}${d}`)
+              .join(', ') || 'Tanpa perubahan'
+          : '-';
+
+        let statusClass = 'text-muted';
+        if (h.status === 'APPLIED') statusClass = 'text-green font-bold';
+        else if (h.status === 'ROLLED_BACK') statusClass = 'text-red font-bold';
+
+        tr.innerHTML = `
+          <td>${dateStr}</td>
+          <td><span class="${statusClass}">${h.status}</span></td>
+          <td>${p?.metrics?.totalTradesAnalyzed || '-'}</td>
+          <td>${p?.metrics?.winRateBefore ? p.metrics.winRateBefore + '%' : '-'}</td>
+          <td style="font-family: var(--font-mono); font-size: 10px;">${deltasStr}</td>
+        `;
+        histTbody.appendChild(tr);
+      });
+    }
+  }
+}
+
+async function triggerAutoTunerAnalysis() {
+  const btn = document.getElementById('btn-at-analyze');
+  const icon = document.getElementById('at-analyze-icon');
+  const text = document.getElementById('at-analyze-text');
+  if (btn) btn.disabled = true;
+  if (icon) icon.textContent = '⏳';
+  if (text) text.textContent = 'Menganalisis...';
+
+  try {
+    const res = await authFetch('/api/autotune/analyze', { method: 'POST' }).then((r) => r.json().catch(() => ({})));
+    if (res && res.success) {
+      if (res.status) {
+        currentAutoTunerStatus = res.status;
+        renderAutoTunerModal(res.status, []);
+      }
+      await refreshAutoTunerUI();
+      alert('✅ ' + (res.message || 'Analisis Auto-Tuner selesai!'));
+    } else {
+      alert('⚠️ ' + (res.message || 'Analisis gagal dijalankan.'));
+    }
+  } catch (err) {
+    alert('❌ Terjadi kesalahan saat analisis: ' + err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (icon) icon.textContent = '🔍';
+    if (text) text.textContent = 'Analisis Trade Sekarang';
+  }
+}
+
+async function applyAutoTunerProposal() {
+  if (!confirm('Apakah Anda yakin ingin menerapkan rekomendasi parameter ini ke bot aktif?')) {
+    return;
+  }
+
+  const btn = document.getElementById('btn-at-apply');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await authFetch('/api/autotune/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposalId: currentAutoTunerStatus?.activeProposal?.id }),
+    }).then((r) => r.json().catch(() => ({})));
+
+    if (res && res.success) {
+      alert('⚡ ' + (res.message || 'Parameter Auto-Tuner berhasil diterapkan!'));
+      await refreshAutoTunerUI();
+      if (typeof reloadConfigFromServer === 'function') {
+        reloadConfigFromServer().catch(() => {});
+      }
+    } else {
+      alert('⚠️ ' + (res.message || 'Gagal menerapkan parameter.'));
+      if (btn) btn.disabled = false;
+    }
+  } catch (err) {
+    alert('❌ Gagal menerapkan rekomendasi: ' + err.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function rollbackAutoTuner() {
+  if (!confirm('PERINGATAN: Konfigurasi akan dikembalikan ke parameter baseline sebelum tuning terakhir. Lanjutkan rollback?')) {
+    return;
+  }
+
+  const btn = document.getElementById('btn-at-rollback');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await authFetch('/api/autotune/rollback', { method: 'POST' }).then((r) => r.json().catch(() => ({})));
+    if (res && res.success) {
+      alert('⏪ ' + (res.message || 'Konfigurasi berhasil dikembalikan ke baseline!'));
+      await refreshAutoTunerUI();
+      if (typeof reloadConfigFromServer === 'function') {
+        reloadConfigFromServer().catch(() => {});
+      }
+    } else {
+      alert('⚠️ ' + (res.message || 'Gagal mengeksekusi rollback.'));
+      if (btn) btn.disabled = false;
+    }
+  } catch (err) {
+    alert('❌ Gagal rollback: ' + err.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+window.openAutoTunerModal = openAutoTunerModal;
+window.closeAutoTunerModal = closeAutoTunerModal;
+window.refreshAutoTunerUI = refreshAutoTunerUI;
+window.triggerAutoTunerAnalysis = triggerAutoTunerAnalysis;
+window.applyAutoTunerProposal = applyAutoTunerProposal;
+window.rollbackAutoTuner = rollbackAutoTuner;
+
 

@@ -286,6 +286,52 @@ app.post('/api/backtest/clear-cache', requireAuth, (req, res) => {
   }
 });
 
+// ==========================================
+// AUTO-TUNER REST APIs (PROTECTED)
+// ==========================================
+app.get('/api/autotune/status', requireAuth, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const status = engine.getAutoTunerStatus();
+    const history = await db.loadTuningLogs(10);
+    return res.json({ success: true, status, history });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/autotune/analyze', requireAuth, async (req, res) => {
+  try {
+    const result = await engine.runAutoTuneAnalysis();
+    const status = engine.getAutoTunerStatus();
+    return res.json({ ...result, status });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/autotune/apply', requireAuth, async (req, res) => {
+  try {
+    const { proposalId } = req.body || {};
+    const result = await engine.applyTuningProposal(proposalId);
+    const status = engine.getAutoTunerStatus();
+    return res.json({ ...result, status });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/autotune/rollback', requireAuth, async (req, res) => {
+  try {
+    const result = await engine.rollbackLastTuning();
+    const status = engine.getAutoTunerStatus();
+    return res.json({ ...result, status });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 app.get('/api/logs', (req, res) => {
   res.json(logger.getLogs());
 });

@@ -110,6 +110,7 @@ export interface BotConfig {
     heartbeatIntervalHours?: number;
   };
   momentumLong?: MomentumLongConfig;
+  autoTuner?: AutoTunerConfig;
   security?: {
     password?: string;
   };
@@ -337,3 +338,53 @@ export interface LogEntry {
   message: string;
   symbol?: string;
 }
+
+export interface AutoTunerConfig {
+  enabled: boolean;
+  mode: 'SEMI_AUTO' | 'FULL_AUTO';
+  minSampleSize?: number; // default: 15
+  evalPeriodDays?: number; // default: 7
+  autoApplyIntervalHours?: number; // default: 24
+  circuitBreakerLosses?: number; // default: 3
+  stepSizePct?: number; // default: 10 (max 10% perubahan per parameter)
+  targetParams?: {
+    spikeMinPercent?: boolean;
+    takeProfitPct?: boolean;
+    layerSpacingPct?: boolean;
+    trailingCallbackPct?: boolean;
+    minRsi1m?: boolean;
+    maxVolRatio?: boolean;
+    maxHoldMinutes?: boolean;
+  };
+}
+
+export interface TuningProposal {
+  id: string;
+  createdAt: number;
+  status: 'PROPOSED' | 'APPLIED' | 'REJECTED' | 'ROLLED_BACK';
+  currentParams: Record<string, number>;
+  proposedParams: Record<string, number>;
+  deltas: Record<string, number>;
+  rationale: string[];
+  metrics: {
+    totalTradesAnalyzed: number;
+    winRateBefore: number;
+    avgPnlPctBefore: number;
+    profitFactorBefore: number;
+    winnersCount: number;
+    losersCount: number;
+    hardStopExitsCount: number;
+    timeLimitExitsCount: number;
+  };
+  appliedAt?: number;
+}
+
+export interface TuningHistoryRecord {
+  id: string;
+  proposal: TuningProposal;
+  previousConfigSnapshot: Record<string, any>;
+  status: 'PROPOSED' | 'APPLIED' | 'REJECTED' | 'ROLLED_BACK';
+  appliedAt?: number;
+  createdAt: number;
+}
+

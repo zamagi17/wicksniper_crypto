@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult } from '../types';
+import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord } from '../types';
 
 dotenv.config();
 
@@ -11,6 +11,7 @@ export class DatabaseService {
   private stateWriteQueue: any = null;
   private stateWriteTimer: NodeJS.Timeout | null = null;
   private readonly STATE_WRITE_INTERVAL = 5000; // Flush every 5s
+  private tuningLogsMemory: TuningHistoryRecord[] = [];
 
   constructor() {
     this.initPool();
@@ -157,6 +158,19 @@ export class DatabaseService {
           ALTER TABLE wicksniper_spikes ALTER COLUMN skip_reason TYPE TEXT;
           ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS params_snapshot JSONB;
           ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS sim_result JSONB;
+        `);
+
+        // 5. Tabel Riwayat Auto-Tuning Parameter
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS wicksniper_tuning_logs (
+            id VARCHAR(64) PRIMARY KEY,
+            proposal JSONB NOT NULL,
+            previous_config JSONB,
+            status VARCHAR(32) NOT NULL DEFAULT 'PROPOSED',
+            applied_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_tuning_logs_created ON wicksniper_tuning_logs (created_at DESC);
         `);
 
         this.isConnected = true;
@@ -751,6 +765,97 @@ export class DatabaseService {
       return res.rows[0]?.total || 0;
     } catch (e: any) {
       return 0;
+    }
+  }
+
+  public async saveTuningLog(record: TuningHistoryRecord): Promise<void> {
+    const existingIdx = this.tuningLogsMemory.findIndex((l) => l.id === record.id);
+    if (existingIdx !== -1) {
+      this.tuningLogsMemory[existingIdx] = record;
+    } else {
+      this.tuningLogsMemory.unshift(record);
+      if (this.tuningLogsMemory.length > 50) this.tuningLogsMemory.pop();
+    }
+
+    if (!this.isConnected || !this.pool) return;
+    try {
+      await this.pool.query(
+        `INSERT INTO wicksniper_tuning_logs (id, proposal, previous_config, status, applied_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, to_timestamp($6 / 1000.0))
+         ON CONFLICT (id) DO UPDATE SET
+           proposal = EXCLUDED.proposal,
+           previous_config = EXCLUDED.previous_config,
+           status = EXCLUDED.status,
+           applied_at = COALESCE(EXCLUDED.applied_at, wicksniper_tuning_logs.applied_at);`,
+        [
+          record.id,
+          JSON.stringify(record.proposal),
+          JSON.stringify(record.previousConfigSnapshot),
+          record.status,
+          record.appliedAt ? new Date(record.appliedAt).toISOString() : null,
+          record.createdAt || Date.now(),
+        ]
+      );
+    } catch (e: any) {
+      console.error('[Database] Gagal simpan tuning log:', e.message);
+    }
+  }
+
+  public async loadTuningLogs(limit: number = 20): Promise<TuningHistoryRecord[]> {
+    if (!this.isConnected || !this.pool) {
+      return this.tuningLogsMemory.slice(0, limit);
+    }
+    try {
+      const res = await this.pool.query(
+        `SELECT id, proposal, previous_config AS "previousConfig", status,
+                EXTRACT(EPOCH FROM applied_at) * 1000 AS "appliedAt",
+                EXTRACT(EPOCH FROM created_at) * 1000 AS "createdAt"
+         FROM wicksniper_tuning_logs
+         ORDER BY created_at DESC
+         LIMIT $1;`,
+        [limit]
+      );
+      if (res.rows.length === 0) return this.tuningLogsMemory.slice(0, limit);
+      return res.rows.map((r: any) => ({
+        id: r.id,
+        proposal: typeof r.proposal === 'string' ? JSON.parse(r.proposal) : r.proposal,
+        previousConfigSnapshot: typeof r.previousConfig === 'string' ? JSON.parse(r.previousConfig) : (r.previousConfig || {}),
+        status: r.status,
+        appliedAt: r.appliedAt ? parseInt(r.appliedAt, 10) : undefined,
+        createdAt: parseInt(r.createdAt, 10),
+      }));
+    } catch (e: any) {
+      console.error('[Database] Gagal load tuning logs:', e.message);
+      return this.tuningLogsMemory.slice(0, limit);
+    }
+  }
+
+  public async updateTuningStatus(id: string, status: string, appliedAt?: number): Promise<void> {
+    const memItem = this.tuningLogsMemory.find((l) => l.id === id);
+    if (memItem) {
+      memItem.status = status as any;
+      if (appliedAt !== undefined) memItem.appliedAt = appliedAt;
+    }
+
+    if (!this.isConnected || !this.pool) return;
+    try {
+      if (appliedAt !== undefined) {
+        await this.pool.query(
+          `UPDATE wicksniper_tuning_logs
+           SET status = $1, applied_at = $2
+           WHERE id = $3;`,
+          [status, new Date(appliedAt).toISOString(), id]
+        );
+      } else {
+        await this.pool.query(
+          `UPDATE wicksniper_tuning_logs
+           SET status = $1
+           WHERE id = $2;`,
+          [status, id]
+        );
+      }
+    } catch (e: any) {
+      console.error('[Database] Gagal update tuning status:', e.message);
     }
   }
 
