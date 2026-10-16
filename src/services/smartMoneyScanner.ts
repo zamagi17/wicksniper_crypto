@@ -183,6 +183,25 @@ export class SmartMoneyScanner {
         }
 
         if (detectedSide) {
+          // Filter RSI 15m: Mencegah Short di dasar jurang (oversold) & Long di pucuk (overbought)
+          if (this.config.rsiFilterEnabled !== false) {
+            const rsi = await binanceFutures.getSymbolRsi(symbol, '15m');
+            if (rsi !== undefined) {
+              const minRsiShort = this.config.minRsiShort ?? 48;
+              const maxRsiLong = this.config.maxRsiLong ?? 62;
+
+              if (detectedSide === 'SHORT' && rsi < minRsiShort) {
+                logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: RSI 15m (${rsi}) < ${minRsiShort} (Koin sudah oversold di dasar jurang).`);
+                continue;
+              }
+              if (detectedSide === 'LONG' && rsi > maxRsiLong) {
+                logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: RSI 15m (${rsi}) > ${maxRsiLong} (Koin sudah overbought di pucuk gunung).`);
+                continue;
+              }
+              reason += ` | RSI 15m: ${rsi}`;
+            }
+          }
+
           const signalId = `sm_${symbol}_${Date.now()}`;
           const signal: SmartMoneySignal = {
             id: signalId,

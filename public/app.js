@@ -2660,8 +2660,18 @@ function populateSettingsForm(cfg) {
   const smTrailingCb = document.getElementById('cfg-sm-trailing-tp');
   if (smTrailingCb) smTrailingCb.checked = smCfg.trailingTpEnabled !== false;
   setVal('cfg-sm-trailing-callback', smCfg.trailingCallbackPct ?? 0.3);
+  const smRsiCb = document.getElementById('cfg-sm-rsi-filter');
+  if (smRsiCb) smRsiCb.checked = smCfg.rsiFilterEnabled !== false;
+  setVal('cfg-sm-min-rsi-short', smCfg.minRsiShort ?? 48);
+  setVal('cfg-sm-max-rsi-long', smCfg.maxRsiLong ?? 62);
+  const smPullbackCb = document.getElementById('cfg-sm-pullback-enabled');
+  if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false;
+  setVal('cfg-sm-pullback-min', smCfg.pullbackMinPct ?? 0.3);
+  setVal('cfg-sm-pullback-wait', smCfg.pullbackMaxWaitSeconds ?? 12);
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
+  if (typeof toggleSmRsiInput === 'function') toggleSmRsiInput();
+  if (typeof toggleSmPullbackInput === 'function') toggleSmPullbackInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -2947,6 +2957,12 @@ function getSettingsFormData() {
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
       trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
+      rsiFilterEnabled: !!document.getElementById('cfg-sm-rsi-filter')?.checked,
+      minRsiShort: parseFloat(getVal('cfg-sm-min-rsi-short', '48')) || 48,
+      maxRsiLong: parseFloat(getVal('cfg-sm-max-rsi-long', '62')) || 62,
+      pullbackConfirmationEnabled: !!document.getElementById('cfg-sm-pullback-enabled')?.checked,
+      pullbackMinPct: parseFloat(getVal('cfg-sm-pullback-min', '0.3')) || 0.3,
+      pullbackMaxWaitSeconds: parseInt(getVal('cfg-sm-pullback-wait', '12'), 10) || 12,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -3628,6 +3644,24 @@ function toggleSmTrailingInput() {
   }
 }
 window.toggleSmTrailingInput = toggleSmTrailingInput;
+
+function toggleSmRsiInput() {
+  const cb = document.getElementById('cfg-sm-rsi-filter');
+  const box = document.getElementById('cfg-sm-rsi-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmRsiInput = toggleSmRsiInput;
+
+function toggleSmPullbackInput() {
+  const cb = document.getElementById('cfg-sm-pullback-enabled');
+  const box = document.getElementById('cfg-sm-pullback-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmPullbackInput = toggleSmPullbackInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

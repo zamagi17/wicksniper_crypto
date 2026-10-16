@@ -129,6 +129,10 @@ export interface SmartMoneyConfig {
   thresholdShortRatio: number; // e.g. 0.60 (Whale short >= 60%)
   thresholdLongRatio: number;  // e.g. 0.60 (Whale long >= 60%)
   retailTrapFilter: boolean;   // Konfirmasi retail di sisi berlawanan
+  rsiFilterEnabled?: boolean;  // Filter RSI Anti-Pucuk/Lembah
+  minRsiShort?: number;        // Batas minimal RSI untuk Short (e.g. 48)
+  maxRsiLong?: number;         // Batas maksimal RSI untuk Long (e.g. 62)
+  pullbackConfirmationEnabled?: boolean; // Menunggu pantulan/diskon sebelum eksekusi
   pullbackMinPct: number;      // Pullback minimal sebelum eksekusi (%)
   pullbackMaxWaitSeconds: number; // Batas tunggu konfirmasi pullback (detik)
   entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA

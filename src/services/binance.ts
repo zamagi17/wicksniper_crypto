@@ -1582,6 +1582,56 @@ export class BinanceFuturesClient {
     }
   }
 
+  private rsiCache: Map<string, { timestamp: number; rsi: number }> = new Map();
+
+  public async getSymbolRsi(symbol: string, interval: string = '15m'): Promise<number | undefined> {
+    const cacheKey = `${symbol}_${interval}`;
+    const cached = this.rsiCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 30_000) {
+      return cached.rsi;
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get('/fapi/v1/klines', {
+        params: { symbol, interval, limit: 25 },
+        timeout: 4000,
+      });
+      if (res && Array.isArray(res.data) && res.data.length >= 15) {
+        const closes = res.data.map((k: any) => parseFloat(k[4]));
+        const period = 14;
+        let gains = 0;
+        let losses = 0;
+        for (let i = 1; i <= period; i++) {
+          const diff = closes[i] - closes[i - 1];
+          if (diff >= 0) gains += diff;
+          else losses += Math.abs(diff);
+        }
+        let avgGain = gains / period;
+        let avgLoss = losses / period;
+        for (let i = period + 1; i < closes.length; i++) {
+          const diff = closes[i] - closes[i - 1];
+          const gain = diff > 0 ? diff : 0;
+          const loss = diff < 0 ? Math.abs(diff) : 0;
+          avgGain = (avgGain * (period - 1) + gain) / period;
+          avgLoss = (avgLoss * (period - 1) + loss) / period;
+        }
+        let rsi = 50;
+        if (avgLoss === 0 && avgGain === 0) rsi = 50;
+        else if (avgLoss === 0) rsi = 100;
+        else if (avgGain === 0) rsi = 0;
+        else {
+          const rs = avgGain / avgLoss;
+          rsi = Math.round((100 - 100 / (1 + rs)) * 10) / 10;
+        }
+        this.rsiCache.set(cacheKey, { timestamp: now, rsi });
+        return rsi;
+      }
+    } catch {}
+    return undefined;
+  }
+
   public isUserStreamActive(): boolean {
     return this.isUserWsConnected;
   }

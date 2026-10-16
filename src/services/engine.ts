@@ -146,8 +146,12 @@ export class WickSniperEngine {
       thresholdShortRatio: 0.60,
       thresholdLongRatio: 0.60,
       retailTrapFilter: true,
-      pullbackMinPct: 0.5,
-      pullbackMaxWaitSeconds: 15,
+      rsiFilterEnabled: true,
+      minRsiShort: 48,
+      maxRsiLong: 62,
+      pullbackConfirmationEnabled: true,
+      pullbackMinPct: 0.3,
+      pullbackMaxWaitSeconds: 12,
       entryLayers: 1,
       layerSpacingPct: 0.8,
       marginUsdt: 5.0,
@@ -4994,14 +4998,67 @@ export class WickSniperEngine {
 
     this.deployingSymbols.add(symbol);
     try {
-      const cooldownMins = this.config.smartMoney?.cooldownMinutes || 30;
+      const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+      const cooldownMins = smCfg.cooldownMinutes || 30;
       this.smartMoneyScanner.setCooldown(symbol, cooldownMins);
 
       logger.log(
         'SNIPER',
-        `🐋 [SMART MONEY SIGNAL] ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi otomatis...`,
+        `🐋 [SMART MONEY SIGNAL] ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga Awal: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi...`,
         symbol
       );
+
+      // Konfirmasi Pullback Retest Mikro (Tunggu Pantulan Diskon Sebelum Eksekusi)
+      if (smCfg.pullbackConfirmationEnabled !== false && (smCfg.pullbackMinPct || 0) > 0) {
+        const minPullback = smCfg.pullbackMinPct;
+        const maxWaitSec = smCfg.pullbackMaxWaitSeconds || 12;
+        const startTime = Date.now();
+        const deadline = startTime + maxWaitSec * 1000;
+        let confirmed = false;
+
+        logger.log(
+          'INFO',
+          `🎯 [PULLBACK WAIT] ${symbol}: Menunggu koreksi/pantulan min ${minPullback}% (Maks ${maxWaitSec}s) sebelum eksekusi ${signal.side}...`,
+          symbol
+        );
+
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 600));
+          const livePrice = this.scanner.getCurrentPrice(symbol);
+          if (livePrice > 0) {
+            if (signal.side === 'SHORT') {
+              const bouncePct = ((livePrice - signal.currentPrice) / signal.currentPrice) * 100;
+              if (bouncePct >= minPullback) {
+                confirmed = true;
+                signal.currentPrice = livePrice;
+                logger.log(
+                  'INFO',
+                  `✅ [PULLBACK CONFIRMED] ${symbol}: Harga memantul naik +${bouncePct.toFixed(2)}% ke $${formatCryptoPrice(livePrice)}. Eksekusi SHORT di harga puncak diskon!`,
+                  symbol
+                );
+                break;
+              }
+            } else {
+              const dipPct = ((signal.currentPrice - livePrice) / signal.currentPrice) * 100;
+              if (dipPct >= minPullback) {
+                confirmed = true;
+                signal.currentPrice = livePrice;
+                logger.log(
+                  'INFO',
+                  `✅ [PULLBACK CONFIRMED] ${symbol}: Harga koreksi turun -${dipPct.toFixed(2)}% ke $${formatCryptoPrice(livePrice)}. Eksekusi LONG di harga dasar diskon!`,
+                  symbol
+                );
+                break;
+              }
+            }
+          }
+        }
+
+        if (!confirmed) {
+          const latestPrice = this.scanner.getCurrentPrice(symbol);
+          if (latestPrice > 0) signal.currentPrice = latestPrice;
+        }
+      }
 
       await this.deploySmartMoneyPosition(signal);
     } catch (err: any) {
