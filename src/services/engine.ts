@@ -5193,9 +5193,10 @@ export class WickSniperEngine {
     this.activePositions.set(symbol, initialPos);
     await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
+    const volUsdt = (qty * currentPrice).toFixed(2);
     logger.log(
       'SUCCESS',
-      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Layers: ${numLayers}x | Margin: $${actualMargin.toFixed(2)} ($${totalMargin.toFixed(2)} Total) (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${slPct}%)`,
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Layers: ${numLayers}x | Margin Modal: $${actualMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${slPct}%)`,
       symbol
     );
 

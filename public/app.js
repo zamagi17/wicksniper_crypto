@@ -840,7 +840,7 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
-              <span class="badge-margin-tag">💰 Margin: $${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT</span>
+              <span class="badge-margin-tag">💰 Margin: ${pos.strategyType === 'SMART_MONEY' ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
               <div class="pos-pnl">
@@ -2654,6 +2654,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-tp-pct', smCfg.takeProfitPct ?? 1.5);
   setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 3.0);
   setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
+  setVal('cfg-sm-leverage', smCfg.leverage ?? cfg.leverage ?? 5);
   setVal('cfg-sm-cooldown', smCfg.cooldownMinutes ?? 30);
   setVal('cfg-sm-layers', smCfg.entryLayers ?? 1);
   setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
@@ -2952,6 +2953,7 @@ function getSettingsFormData() {
       takeProfitPct: parseFloat(getVal('cfg-sm-tp-pct', '1.5')) || 1.5,
       stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '3.0')) || 3.0,
       marginUsdt: parseFloat(getVal('cfg-sm-margin', '5')) || 5,
+      leverage: parseInt(getVal('cfg-sm-leverage', '5'), 10) || 5,
       cooldownMinutes: parseInt(getVal('cfg-sm-cooldown', '30'), 10) || 30,
       entryLayers: parseInt(getVal('cfg-sm-layers', '1'), 10) || 1,
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,

@@ -144,15 +144,24 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
     const isLong = pos.side === 'LONG';
     const tpSign = isLong ? '+' : '-';
     const slSign = isLong ? '-' : '+';
+    const isSmartMoney = pos.strategyType === 'SMART_MONEY';
+    const triggerLine = isSmartMoney
+      ? `🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b>`
+      : `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
+    const layersLine = isSmartMoney
+      ? `🎯 <b>Model Entry:</b> ${pos.layers.length > 1 ? `${pos.layers.length} Layer (Jarak ${spacingPct}%)` : '1 Single Sniper Entry'}`
+      : `🕸️ <b>Jaring Terpasang:</b> ${pos.layers.length} Layer (Jarak ${spacingPct}%)`;
+    const marginLine = `💰 <b>Modal Margin:</b> $${pos.totalMarginUsed.toFixed(2)} USDT (Vol Order: $${vol0Usdt.toFixed(2)} USDT @ ${pos.leverage}x)`;
+
     const msg =
 `🚀 <b>[ORDER BARU DITERBITKAN]</b> 🎯
 
 🪙 <b>Koin:</b> <code>${pos.symbol}</code>
 📊 <b>Aksi:</b> <b>${pos.side || 'SHORT'} ${pos.leverage}x</b>
-⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}
-💵 <b>Layer #0 Entry:</b> <code>$${formatCryptoPrice(pos.avgEntryPrice)}</code>
-🕸️ <b>Jaring Terpasang:</b> ${pos.layers.length} Layer (Jarak ${spacingPct}%)
-💰 <b>Modal Awal Layer #0:</b> $${pos.totalMarginUsed.toFixed(2)} USDT (Vol: $${vol0Usdt.toFixed(2)} USDT)
+${triggerLine}
+💵 <b>Entry Rata-rata:</b> <code>$${formatCryptoPrice(pos.avgEntryPrice)}</code>
+${layersLine}
+${marginLine}
 🎯 <b>Target TP:</b> <code>$${formatCryptoPrice(pos.targetTpPrice)}</code> (${tpSign}${tpPct}%)
 🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}%)
 ⚙️ <b>Mode:</b> ${modeTag}`;
