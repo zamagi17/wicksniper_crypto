@@ -290,6 +290,20 @@ export interface ActivePosition {
   lastTpAttempt?: number;
   paramsSnapshot?: Record<string, any>;
   marketSnapshot?: MarketSnapshot;
+  smartMoneyFlowStatus?: SmartMoneyFlowStatus;
+}
+
+export interface SmartMoneyFlowStatus {
+  whaleLongRatio: number;
+  whaleShortRatio: number;
+  whaleLongShortRatio: number;
+  retailLongRatio?: number;
+  retailShortRatio?: number;
+  aligned: boolean;
+  reversalDetected: boolean;
+  label: string;
+  detail?: string;
+  updatedAt: number;
 }
 
 export interface PostExitSnapshot {

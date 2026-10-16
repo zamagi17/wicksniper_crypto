@@ -843,6 +843,34 @@ function renderActivePositions(positions) {
         })
         .join('');
 
+      const smFlow = pos.smartMoneyFlowStatus;
+      let smFlowBadgeHtml = '';
+      let smReversalBannerHtml = '';
+      if (smFlow) {
+        const flowClass = smFlow.reversalDetected ? 'sm-reversal' : smFlow.aligned ? 'sm-aligned' : 'sm-neutral';
+        const flowBg = smFlow.reversalDetected
+          ? 'background: rgba(255, 69, 58, 0.16); border: 1px solid rgba(255, 69, 58, 0.45); color: #ff453a;'
+          : smFlow.aligned
+            ? 'background: rgba(48, 209, 88, 0.16); border: 1px solid rgba(48, 209, 88, 0.45); color: #30d158;'
+            : 'background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); color: #8e8e93;';
+        smFlowBadgeHtml = `<span class="badge-tag ${flowClass}" style="${flowBg} padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; cursor: help;" title="${smFlow.detail || ''} (Murni sebagai analisa arah aliran Paus)">${smFlow.label}</span>`;
+
+        if (smFlow.reversalDetected) {
+          const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
+          const oppRatio = ((pos.side === 'LONG' ? smFlow.whaleShortRatio : smFlow.whaleLongRatio) * 100).toFixed(0);
+          smReversalBannerHtml = `
+            <div style="background: linear-gradient(90deg, rgba(255, 69, 58, 0.14), rgba(255, 159, 10, 0.08)); border: 1px dashed rgba(255, 69, 58, 0.45); border-radius: 6px; padding: 7px 12px; margin: 8px 0 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 11.5px;">
+              <span style="color: #ff453a; font-weight: 600;">
+                ⚠️ <b>ANALISA ALIRAN PAUS BERUBAH ARAH:</b> Dominasi Paus saat ini berbalik menjadi <b>${oppSide} (${oppRatio}%)</b>!
+              </span>
+              <span style="color: #ffd60a; font-size: 11px; font-weight: 500;">
+                ℹ️ Posisi tetap floating sesuai TP/SL (Tanda analisa pengawasan).
+              </span>
+            </div>
+          `;
+        }
+      }
+
       return `
         <div class="position-card">
           <div class="pos-header">
@@ -852,6 +880,7 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
+              ${smFlowBadgeHtml}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -867,6 +896,7 @@ function renderActivePositions(positions) {
           </div>
 
           ${tpBannerHtml}
+          ${smReversalBannerHtml}
 
           <div class="pos-metrics">
             <div class="pos-metric-item">
@@ -888,6 +918,17 @@ function renderActivePositions(positions) {
             <div class="pos-metric-item">
               <small>${slMetricLabel}</small>
               ${slMetricHtml}
+            </div>
+            <div class="pos-metric-item">
+              <small>Aliran Paus (Analisa)</small>
+              ${smFlow ? `
+                <span style="${smFlow.reversalDetected ? 'color: #ff453a; font-weight: 600;' : smFlow.aligned ? 'color: #30d158; font-weight: 600;' : 'color: #8e8e93; font-weight: 500;'}">
+                  ${smFlow.label}
+                </span>
+                ${smFlow.detail ? `<small class="text-muted" style="font-size: 10px;" title="${smFlow.detail}">${smFlow.detail}</small>` : ''}
+              ` : `
+                <span class="text-muted">Memuat data paus...</span>
+              `}
             </div>
             ${isSm ? `
             <div class="pos-metric-item">

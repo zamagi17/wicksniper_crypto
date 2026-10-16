@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneySignal, SpikeAlert, SpikeSimResult } from '../types';
+import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -568,6 +568,11 @@ export class WickSniperEngine {
         // Update simulasi koin yang ditolak (Shadow Trading) tiap 2 detik
         if (tickCount % 2 === 0 && this.activeSimSpikes.size > 0) {
           this.updateActiveSimSpikes();
+        }
+
+        // Evaluasi analisa pergerakan Smart Money untuk posisi floating tiap 10 detik
+        if (tickCount % 10 === 0 && this.activePositions.size > 0) {
+          this.updateActivePositionsSmartMoneyFlow().catch(() => {});
         }
 
         // Relaksasi interval sync posisi dan balance ke 5 detik (dari 3 detik) untuk menghemat kuota REST
@@ -5202,6 +5207,19 @@ export class WickSniperEngine {
       },
     };
 
+    initialPos.smartMoneyFlowStatus = {
+      whaleLongRatio: signal.whaleLongRatio,
+      whaleShortRatio: signal.whaleShortRatio,
+      whaleLongShortRatio: signal.whaleLongShortRatio || (signal.whaleShortRatio > 0 ? signal.whaleLongRatio / signal.whaleShortRatio : 1),
+      retailLongRatio: signal.retailLongRatio,
+      retailShortRatio: signal.retailShortRatio,
+      aligned: true,
+      reversalDetected: false,
+      label: `🐋 Paus ${signal.side} (${((signal.side === 'LONG' ? signal.whaleLongRatio : signal.whaleShortRatio) * 100).toFixed(0)}%) • Searah`,
+      detail: `Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S`,
+      updatedAt: Date.now(),
+    };
+
     this.activePositions.set(symbol, initialPos);
     await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
@@ -5215,5 +5233,66 @@ export class WickSniperEngine {
     telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, 0, tpPct, slPct);
 
     this.broadcastStatus();
+  }
+
+  /**
+   * Memperbarui analisa aliran Smart Money (Paus) secara real-time untuk seluruh posisi floating.
+   * Menandai apakah pergerakan Paus masih searah atau sudah berbalik arah (murni sebagai analisa pengawasan).
+   */
+  public async updateActivePositionsSmartMoneyFlow() {
+    if (this.activePositions.size === 0) return;
+
+    const period = this.config.smartMoney?.period || '5m';
+    const now = Date.now();
+
+    for (const pos of this.activePositions.values()) {
+      if (pos.status === 'CLOSING' || pos.status === 'CLOSED') continue;
+
+      // Throttle per posisi: maksimal 1x per 15 detik agar hemat kuota REST
+      if (pos.smartMoneyFlowStatus && now - pos.smartMoneyFlowStatus.updatedAt < 15_000) {
+        continue;
+      }
+
+      try {
+        const metrics = await binanceFutures.getSmartMoneyMetrics(pos.symbol, period);
+        if (!metrics) continue;
+
+        const isLong = pos.side === 'LONG';
+        const sameSideRatio = isLong ? metrics.whaleLongRatio : metrics.whaleShortRatio;
+        const oppSideRatio = isLong ? metrics.whaleShortRatio : metrics.whaleLongRatio;
+        const sameSideName = isLong ? 'LONG' : 'SHORT';
+        const oppSideName = isLong ? 'SHORT' : 'LONG';
+
+        // Deteksi pembalikan arah paus jika rasio paus lawan >= 52%
+        const reversalDetected = oppSideRatio >= 0.52;
+        const aligned = sameSideRatio >= 0.52;
+
+        let label = '';
+        if (reversalDetected) {
+          label = `⚠️ Paus Berbalik: ${oppSideName} (${(oppSideRatio * 100).toFixed(0)}%) • Berlawanan`;
+        } else if (aligned) {
+          label = `🐋 Paus ${sameSideName} (${(sameSideRatio * 100).toFixed(0)}%) • Searah`;
+        } else {
+          label = `⚖️ Paus Seimbang (${(sameSideRatio * 100).toFixed(0)}% : ${(oppSideRatio * 100).toFixed(0)}%)`;
+        }
+
+        const detail = `Paus: ${(metrics.whaleLongRatio * 100).toFixed(0)}% L / ${(metrics.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(metrics.retailLongRatio * 100).toFixed(0)}% L / ${(metrics.retailShortRatio * 100).toFixed(0)}% S`;
+
+        pos.smartMoneyFlowStatus = {
+          whaleLongRatio: metrics.whaleLongRatio,
+          whaleShortRatio: metrics.whaleShortRatio,
+          whaleLongShortRatio: metrics.whaleLongShortRatio,
+          retailLongRatio: metrics.retailLongRatio,
+          retailShortRatio: metrics.retailShortRatio,
+          aligned,
+          reversalDetected,
+          label,
+          detail,
+          updatedAt: now,
+        };
+      } catch (err: any) {
+        // Silent fail untuk analisa background
+      }
+    }
   }
 }
