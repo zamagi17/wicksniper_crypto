@@ -1520,6 +1520,68 @@ export class BinanceFuturesClient {
     this.accountUpdateListeners.push(callback);
   }
 
+  private smartMoneyCache: Map<string, { timestamp: number; data: any }> = new Map();
+
+  public async getSmartMoneyMetrics(symbol: string, period: string = '5m'): Promise<{
+    symbol: string;
+    whaleLongRatio: number;
+    whaleShortRatio: number;
+    whaleLongShortRatio: number;
+    retailLongRatio: number;
+    retailShortRatio: number;
+    timestamp: number;
+  } | null> {
+    const cacheKey = `${symbol}_${period}`;
+    const cached = this.smartMoneyCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 45000) {
+      return cached.data;
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      const [posRes, globalRes] = await Promise.all([
+        client.get('/futures/data/topLongShortPositionRatio', {
+          params: { symbol, period, limit: 1 },
+          timeout: 5000,
+        }),
+        client.get('/futures/data/globalLongShortAccountRatio', {
+          params: { symbol, period, limit: 1 },
+          timeout: 5000,
+        }).catch(() => null),
+      ]);
+
+      const posData = posRes?.data?.[0];
+      if (!posData) return null;
+
+      const whaleLongRatio = parseFloat(posData.longAccount || '0');
+      const whaleShortRatio = parseFloat(posData.shortAccount || '0');
+      const whaleLongShortRatio = parseFloat(posData.longShortRatio || '1');
+
+      let retailLongRatio = 0.5;
+      let retailShortRatio = 0.5;
+      if (globalRes?.data?.[0]) {
+        retailLongRatio = parseFloat(globalRes.data[0].longAccount || '0.5');
+        retailShortRatio = parseFloat(globalRes.data[0].shortAccount || '0.5');
+      }
+
+      const result = {
+        symbol,
+        whaleLongRatio,
+        whaleShortRatio,
+        whaleLongShortRatio,
+        retailLongRatio,
+        retailShortRatio,
+        timestamp: posData.timestamp || now,
+      };
+
+      this.smartMoneyCache.set(cacheKey, { timestamp: now, data: result });
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
   public isUserStreamActive(): boolean {
     return this.isUserWsConnected;
   }

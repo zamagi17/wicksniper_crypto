@@ -2641,6 +2641,22 @@ function populateSettingsForm(cfg) {
     if (el && val !== undefined && val !== null) el.value = val;
   };
 
+  setVal('cfg-trigger-strategy', cfg.triggerStrategy || 'SMART_MONEY');
+  const smCfg = cfg.smartMoney || {};
+  const smCheckbox = document.getElementById('cfg-sm-enabled');
+  if (smCheckbox) smCheckbox.checked = smCfg.enabled !== false;
+  setVal('cfg-sm-direction', smCfg.direction || 'BOTH');
+  setVal('cfg-sm-period', smCfg.period || '5m');
+  setVal('cfg-sm-thresh-short', Math.round((smCfg.thresholdShortRatio || 0.60) * 100));
+  setVal('cfg-sm-thresh-long', Math.round((smCfg.thresholdLongRatio || 0.60) * 100));
+  const smRetailCheckbox = document.getElementById('cfg-sm-retail-trap');
+  if (smRetailCheckbox) smRetailCheckbox.checked = smCfg.retailTrapFilter !== false;
+  setVal('cfg-sm-tp-pct', smCfg.takeProfitPct ?? 1.5);
+  setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 3.0);
+  setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
+  setVal('cfg-sm-cooldown', smCfg.cooldownMinutes ?? 30);
+  if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
+
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
   setVal('cfg-virtual-balance', cfg.paperTrading?.initialVirtualBalance ?? currentStatus?.virtualBalance ?? 245);
   setVal('cfg-leverage', cfg.leverage || 5);
@@ -2907,6 +2923,20 @@ function getSettingsFormData() {
   };
 
   return {
+    triggerStrategy: getVal('cfg-trigger-strategy', 'SMART_MONEY'),
+    smartMoney: {
+      ...(currentConfig?.smartMoney || {}),
+      enabled: !!document.getElementById('cfg-sm-enabled')?.checked,
+      direction: getVal('cfg-sm-direction', 'BOTH'),
+      period: getVal('cfg-sm-period', '5m'),
+      thresholdShortRatio: (parseFloat(getVal('cfg-sm-thresh-short', '60')) || 60) / 100,
+      thresholdLongRatio: (parseFloat(getVal('cfg-sm-thresh-long', '60')) || 60) / 100,
+      retailTrapFilter: !!document.getElementById('cfg-sm-retail-trap')?.checked,
+      takeProfitPct: parseFloat(getVal('cfg-sm-tp-pct', '1.5')) || 1.5,
+      stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '3.0')) || 3.0,
+      marginUsdt: parseFloat(getVal('cfg-sm-margin', '5')) || 5,
+      cooldownMinutes: parseInt(getVal('cfg-sm-cooldown', '30'), 10) || 30,
+    },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
     marginType: getVal('cfg-margin-type', 'CROSSED'),
@@ -3558,6 +3588,16 @@ function toggleDataSourceGroup() {
   }
 }
 window.toggleDataSourceGroup = toggleDataSourceGroup;
+
+function toggleStrategySettingsView() {
+  const select = document.getElementById('cfg-trigger-strategy');
+  const panel = document.getElementById('smart-money-panel');
+  if (panel) {
+    const val = select ? select.value : 'SMART_MONEY';
+    panel.style.display = (val === 'SMART_MONEY' || val === 'HYBRID') ? 'flex' : 'none';
+  }
+}
+window.toggleStrategySettingsView = toggleStrategySettingsView;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

@@ -227,6 +227,16 @@ app.post('/api/close-position', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/smart-money/metrics', requireAuth, (req, res) => {
+  try {
+    const scanner = engine.getSmartMoneyScanner();
+    const metrics = scanner ? scanner.getTrackedMetrics() : [];
+    res.json({ success: true, metrics });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.post('/api/check-binance', requireAuth, async (req, res) => {
   try {
     const { apiKey, apiSecret, isTestnet } = req.body || {};

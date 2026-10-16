@@ -109,6 +109,8 @@ export interface BotConfig {
       notifyOnAutoBlacklist?: boolean;
     heartbeatIntervalHours?: number;
   };
+  triggerStrategy?: 'WICK_SNIPER' | 'SMART_MONEY' | 'HYBRID';
+  smartMoney?: SmartMoneyConfig;
   momentumLong?: MomentumLongConfig;
   autoTuner?: AutoTunerConfig;
   security?: {
@@ -117,6 +119,44 @@ export interface BotConfig {
   server: {
     port: number;
   };
+}
+
+export interface SmartMoneyConfig {
+  enabled: boolean;
+  mode: 'STANDALONE' | 'FILTER_ONLY';
+  direction: 'BOTH' | 'SHORT_ONLY' | 'LONG_ONLY';
+  period: '5m' | '15m' | '1h';
+  thresholdShortRatio: number; // e.g. 0.60 (Whale short >= 60%)
+  thresholdLongRatio: number;  // e.g. 0.60 (Whale long >= 60%)
+  retailTrapFilter: boolean;   // Konfirmasi retail di sisi berlawanan
+  pullbackMinPct: number;      // Pullback minimal sebelum eksekusi (%)
+  pullbackMaxWaitSeconds: number; // Batas tunggu konfirmasi pullback (detik)
+  entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA
+  layerSpacingPct: number;     // Jarak antar layer jika entryLayers > 1
+  marginUsdt?: number;         // Modal margin per posisi (USDT)
+  leverage?: number;           // Leverage
+  takeProfitPct?: number;      // Take Profit (%)
+  trailingTpEnabled?: boolean; // Trailing Take Profit
+  trailingCallbackPct?: number;// Trailing callback (%)
+  stopLossPct?: number;        // Hard Stop Loss (%)
+  cooldownMinutes: number;     // Cooldown antar trade simbol yang sama
+  scanIntervalSeconds?: number;// Interval pengecekan rasio pasar
+}
+
+export interface SmartMoneySignal {
+  id: string;
+  symbol: string;
+  side: 'SHORT' | 'LONG';
+  currentPrice: number;
+  triggerPrice: number;
+  whaleLongRatio: number;
+  whaleShortRatio: number;
+  whaleLongShortRatio: number;
+  retailLongRatio: number;
+  retailShortRatio: number;
+  timestamp: number;
+  status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
+  reason?: string;
 }
 
 export interface MomentumLongConfig {
@@ -207,7 +247,7 @@ export interface ActivePosition {
   id: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
-  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG';
+  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY';
   leverage: number;
   totalQty: number;
   avgEntryPrice: number;

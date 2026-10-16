@@ -260,9 +260,14 @@ export class SpikeScanner {
   }
 
   public start() {
+    this.config.enabled = true;
     binanceFutures.onTickers((tickers: any[]) => {
       this.processTickers(tickers);
     });
+  }
+
+  public stop() {
+    this.config.enabled = false;
   }
 
   private processTickers(tickers: any[]) {

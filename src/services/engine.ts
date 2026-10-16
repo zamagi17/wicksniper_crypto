@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SpikeAlert, SpikeSimResult } from '../types';
+import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneySignal, SpikeAlert, SpikeSimResult } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
+import { SmartMoneyScanner } from './smartMoneyScanner';
 import { logger } from './logger';
 import { db } from './db';
 import { telegram } from './telegram';
@@ -98,6 +99,7 @@ export class WickSniperEngine {
   private configPath: string;
   private isRunning: boolean = false;
   private scanner: SpikeScanner;
+  private smartMoneyScanner: SmartMoneyScanner;
   private virtualBalance: number = 1000;
   private activePositions: Map<string, ActivePosition> = new Map();
   private deployingSymbols: Set<string> = new Set(); // Kunci slot konkurensi (Anti-Race Condition lonjakan bersamaan)
@@ -135,11 +137,36 @@ export class WickSniperEngine {
   private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
 
+  public getDefaultSmartMoneyConfig(): SmartMoneyConfig {
+    return {
+      enabled: true,
+      mode: 'STANDALONE',
+      direction: 'BOTH',
+      period: '5m',
+      thresholdShortRatio: 0.60,
+      thresholdLongRatio: 0.60,
+      retailTrapFilter: true,
+      pullbackMinPct: 0.5,
+      pullbackMaxWaitSeconds: 15,
+      entryLayers: 1,
+      layerSpacingPct: 0.8,
+      marginUsdt: 5.0,
+      leverage: 5,
+      takeProfitPct: 1.5,
+      trailingTpEnabled: true,
+      trailingCallbackPct: 0.3,
+      stopLossPct: 3.0,
+      cooldownMinutes: 30,
+      scanIntervalSeconds: 30,
+    };
+  }
+
   constructor(configPath: string) {
     this.configPath = configPath;
     this.config = this.loadConfig();
     this.virtualBalance = this.config.paperTrading?.initialVirtualBalance || 1000;
     this.scanner = new SpikeScanner(this.config.scanner);
+    this.smartMoneyScanner = new SmartMoneyScanner(this.config.smartMoney || this.getDefaultSmartMoneyConfig(), this.config.scanner);
     telegram.updateConfig(this.config.telegram);
     if (this.config.apiKey && this.config.apiSecret) {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
@@ -256,6 +283,28 @@ export class WickSniperEngine {
         notifyOnLayerFill: false,
         notifyOnClose: true,
       },
+      triggerStrategy: 'SMART_MONEY',
+      smartMoney: {
+        enabled: true,
+        mode: 'STANDALONE',
+        direction: 'BOTH',
+        period: '5m',
+        thresholdShortRatio: 0.60,
+        thresholdLongRatio: 0.60,
+        retailTrapFilter: true,
+        pullbackMinPct: 0.5,
+        pullbackMaxWaitSeconds: 15,
+        entryLayers: 1,
+        layerSpacingPct: 0.8,
+        marginUsdt: 5.0,
+        leverage: 5,
+        takeProfitPct: 1.5,
+        trailingTpEnabled: true,
+        trailingCallbackPct: 0.3,
+        stopLossPct: 3.0,
+        cooldownMinutes: 30,
+        scanIntervalSeconds: 30,
+      },
       autoTuner: {
         enabled: false,
         mode: 'SEMI_AUTO',
@@ -279,6 +328,10 @@ export class WickSniperEngine {
     this.config = {
       ...this.config,
       ...newConfig,
+      triggerStrategy: newConfig.triggerStrategy !== undefined ? newConfig.triggerStrategy : (this.config.triggerStrategy || 'SMART_MONEY'),
+      smartMoney: newConfig.smartMoney !== undefined
+        ? { ...(this.config.smartMoney || this.getDefaultSmartMoneyConfig()), ...(newConfig.smartMoney || {}) }
+        : this.config.smartMoney,
       exit: { ...this.config.exit, ...(newConfig.exit || {}) },
       scanner: { ...this.config.scanner, ...(newConfig.scanner || {}) },
       grid: { ...this.config.grid, ...(newConfig.grid || {}) },
@@ -292,6 +345,16 @@ export class WickSniperEngine {
       security: { ...this.config.security, ...(newConfig.security || {}) },
     };
     this.scanner.updateConfig(this.config.scanner);
+    if (this.config.smartMoney) {
+      this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
+      if (this.isRunning) {
+        if (this.config.triggerStrategy === 'SMART_MONEY' || this.config.triggerStrategy === 'HYBRID' || this.config.smartMoney.enabled) {
+          this.smartMoneyScanner.start();
+        } else {
+          this.smartMoneyScanner.stop();
+        }
+      }
+    }
     if (this.config.telegram) {
       telegram.updateConfig(this.config.telegram);
     }
@@ -336,7 +399,12 @@ export class WickSniperEngine {
       this.handleSpikeAlert(alert);
     });
 
+    this.smartMoneyScanner.onSignal((signal: SmartMoneySignal) => {
+      this.handleSmartMoneySignal(signal);
+    });
+
     binanceFutures.onTickers((tickers: any[]) => {
+      this.smartMoneyScanner.setPrices(tickers);
       this.onPriceTick(tickers);
     });
 
@@ -434,7 +502,14 @@ export class WickSniperEngine {
     await binanceFutures.syncTime();
     await binanceFutures.loadExchangeInfo();
     await binanceFutures.startTickerWebSocket(this.config.scanner.dataSource, this.config.scanner.pollingIntervalMs);
-    this.scanner.start();
+    
+    const strat = this.config.triggerStrategy || 'SMART_MONEY';
+    if (strat !== 'SMART_MONEY') {
+      this.scanner.start();
+    }
+    if (strat === 'SMART_MONEY' || strat === 'HYBRID' || this.config.smartMoney?.enabled) {
+      this.smartMoneyScanner.start();
+    }
 
     // Pulihkan status cooldown koin dari riwayat trade terakhir di database agar tidak hilang saat restart
     try {
@@ -568,6 +643,8 @@ export class WickSniperEngine {
 
   public stop() {
     this.isRunning = false;
+    this.scanner.stop();
+    this.smartMoneyScanner.stop();
     logger.log('WARN', '🛑 Wick Sniper Engine dinonaktifkan (Tidak akan membuka trade baru).');
     if (this.activePositions.size > 0) {
       logger.log('INFO', `🛡️ Masih terdapat ${this.activePositions.size} posisi aktif. Bot tetap mengawal TP/SL hingga semua posisi selesai ditutup.`);
@@ -626,6 +703,17 @@ export class WickSniperEngine {
    */
   private async handleSpikeAlert(alert: SpikeAlert) {
     if (!this.isRunning) return;
+    if (this.config.triggerStrategy === 'SMART_MONEY') {
+      return; // Mode Smart Money murni aktif; jangan tembak lonjakan wick
+    }
+    if (this.config.triggerStrategy === 'HYBRID') {
+      const sm = await binanceFutures.getSmartMoneyMetrics(alert.symbol, this.config.smartMoney?.period || '5m');
+      if (sm && sm.whaleShortRatio < (this.config.smartMoney?.thresholdShortRatio || 0.55)) {
+        logger.log('INFO', `🛡️ [HYBRID SKIP] ${alert.symbol}: Lonjakan dibatalkan karena Smart Money tidak Short (${(sm.whaleShortRatio * 100).toFixed(1)}%).`, alert.symbol);
+        this.recordSkippedSpike(alert, `Hybrid Filter: Whale Short hanya ${(sm.whaleShortRatio * 100).toFixed(1)}%`);
+        return;
+      }
+    }
     this.spikesDetectedToday++;
     this.totalSpikesCount++;
     alert.paramsSnapshot ??= this.captureParamsSnapshot();
@@ -1708,13 +1796,20 @@ export class WickSniperEngine {
         }
 
         // B. Evaluasi Take Profit & Trailing TP untuk LONG
+        const isSmLong = pos.strategyType === 'SMART_MONEY';
         const longCfg = this.config.momentumLong;
-        const trailingEnabled = longCfg?.trailingTpEnabled !== false;
+        const trailingEnabled = isSmLong
+          ? (this.config.smartMoney?.trailingTpEnabled !== false)
+          : (longCfg?.trailingTpEnabled !== false);
         const profitPct = ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
 
         if (trailingEnabled) {
-          const activationPct = longCfg?.trailingActivationPct ?? 1.5;
-          const callbackPct = longCfg?.trailingCallbackPct ?? 0.8;
+          const activationPct = isSmLong
+            ? (this.config.smartMoney?.takeProfitPct ?? 1.5)
+            : (longCfg?.trailingActivationPct ?? 1.5);
+          const callbackPct = isSmLong
+            ? (this.config.smartMoney?.trailingCallbackPct ?? 0.3)
+            : (longCfg?.trailingCallbackPct ?? 0.8);
 
           if (!pos.trailingTpActive && (profitPct >= activationPct || currentPrice >= pos.targetTpPrice)) {
             pos.trailingTpActive = true;
@@ -1811,7 +1906,11 @@ export class WickSniperEngine {
           if (this.config.tradingMode === 'LIVE') {
             // JIKA TRAILING TP DIAKTIFKAN:
             // Aktifkan runner jika harga menyentuh atau melampaui target TP
-            if (this.config.exit.trailingTpEnabled) {
+            const isSmPos = pos.strategyType === 'SMART_MONEY';
+            const trailingAllowed = isSmPos
+              ? (this.config.smartMoney?.trailingTpEnabled !== false)
+              : this.config.exit.trailingTpEnabled;
+            if (trailingAllowed) {
               if (!pos.trailingTpActive) {
                 pos.trailingTpActive = true;
                 pos.lowestPrice = currentPrice;
@@ -1912,7 +2011,11 @@ export class WickSniperEngine {
 
       // C. TRAILING TAKE PROFIT (DILENGKAPI GEMBOK PROFIT ANTI-MINUS & ANTI-SLIPPAGE)
       const trailingAgeMs = Date.now() - pos.openedAt;
-      if (this.config.exit.trailingTpEnabled && pos.trailingTpActive && trailingAgeMs >= 3000) {
+      const isSmShort = pos.strategyType === 'SMART_MONEY';
+      const isTrailingActive = isSmShort
+        ? (this.config.smartMoney?.trailingTpEnabled !== false && pos.trailingTpActive)
+        : (this.config.exit.trailingTpEnabled && pos.trailingTpActive);
+      if (isTrailingActive && trailingAgeMs >= 3000) {
         // Catat titik harga terendah (profit terdalam untuk posisi SHORT)
         pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
 
@@ -1948,7 +2051,9 @@ export class WickSniperEngine {
         }
 
         // PROTEKSI 2: Hitung callback dari titik terendah riil
-        const callbackPct = this.config.exit.trailingCallbackPct || 0.4;
+        const callbackPct = isSmShort
+          ? (this.config.smartMoney?.trailingCallbackPct || 0.3)
+          : (this.config.exit.trailingCallbackPct || 0.4);
         const bouncePct = ((currentPrice - pos.lowestPrice) / pos.lowestPrice) * 100;
 
         if (bouncePct >= callbackPct && currentPrice <= safeTrailingMaxPrice) {
@@ -4839,5 +4944,162 @@ export class WickSniperEngine {
         await this.rollbackLastTuning();
       }
     }
+  }
+
+  public getSmartMoneyScanner(): SmartMoneyScanner {
+    return this.smartMoneyScanner;
+  }
+
+  private async handleSmartMoneySignal(signal: SmartMoneySignal) {
+    if (!this.isRunning) return;
+    if (this.config.triggerStrategy === 'WICK_SNIPER') return;
+    if (this.config.smartMoney?.enabled === false) return;
+
+    const symbol = signal.symbol;
+    if (this.smartMoneyScanner.isCoolingDown(symbol)) return;
+    if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) return;
+
+    const maxConcurrent = this.config.grid?.maxConcurrentCoins || 3;
+    if (this.activePositions.size >= maxConcurrent) {
+      return;
+    }
+
+    // Proteksi Circuit Breaker Harian
+    const maxDailyLoss = this.config.risk?.maxDailyLossUsdt ?? 0;
+    if (maxDailyLoss > 0) {
+      const todayStartTs = this.getStartOfDayWibTimestamp();
+      const currentDailyPnl = this.cachedDbStats
+        ? this.cachedDbStats.dailyPnl
+        : Math.round(this.closedTrades.filter(t => t.timestamp >= todayStartTs && (this.config.tradingMode === 'PAPER' ? t.isPaper : !t.isPaper)).reduce((acc, t) => acc + t.realizedPnl, 0) * 100) / 100;
+      if (currentDailyPnl <= -Math.abs(maxDailyLoss)) {
+        logger.log('WARN', `🛑 [CIRCUIT BREAKER] Eksekusi Smart Money ${symbol} dibatalkan karena batas kerugian harian tercapai.`, symbol);
+        return;
+      }
+    }
+
+    this.deployingSymbols.add(symbol);
+    try {
+      const cooldownMins = this.config.smartMoney?.cooldownMinutes || 30;
+      this.smartMoneyScanner.setCooldown(symbol, cooldownMins);
+
+      logger.log(
+        'SNIPER',
+        `🐋 [SMART MONEY SIGNAL] ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi otomatis...`,
+        symbol
+      );
+
+      await this.deploySmartMoneyPosition(signal);
+    } catch (err: any) {
+      logger.log('ERROR', `❌ [SMART MONEY DEPLOY ERROR] ${symbol}: ${err?.message || err}`, symbol);
+    } finally {
+      this.deployingSymbols.delete(symbol);
+    }
+  }
+
+  private async deploySmartMoneyPosition(signal: SmartMoneySignal) {
+    const symbol = signal.symbol;
+    const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+    const isShort = signal.side === 'SHORT';
+    const currentPrice = signal.currentPrice;
+    const leverage = smCfg.leverage || this.config.leverage || 5;
+    const margin = smCfg.marginUsdt || this.config.grid?.marginPerLayerUsdt || 5.0;
+    const prec = binanceFutures.getPrecision(symbol);
+
+    let plannedQty = (margin * leverage) / currentPrice;
+    if (plannedQty * currentPrice < prec.minNotional) {
+      plannedQty = (prec.minNotional * 1.05) / currentPrice;
+    }
+    const qty = parseFloat(binanceFutures.formatQty(symbol, plannedQty));
+    const actualMargin = (qty * currentPrice) / leverage;
+
+    const tpPct = smCfg.takeProfitPct || 1.5;
+    const slPct = smCfg.stopLossPct || 3.0;
+    const tpPrice = isShort
+      ? parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - tpPct / 100)))
+      : parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + tpPct / 100)));
+    const slPrice = isShort
+      ? parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + slPct / 100)))
+      : parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - slPct / 100)));
+
+    if (this.config.tradingMode === 'LIVE') {
+      try {
+        await binanceFutures.setLeverage(symbol, leverage);
+        await binanceFutures.setMarginType(symbol, this.config.marginType);
+        const orderSide = isShort ? 'SELL' : 'BUY';
+        const res = await binanceFutures.openMarketOrder(symbol, orderSide, qty);
+        if (!res || !res.orderId) {
+          logger.log('ERROR', `❌ [LIVE SMART MONEY ORDER GAGAL] ${symbol} order rejected`, symbol);
+          return;
+        }
+      } catch (err: any) {
+        logger.log('ERROR', `❌ [LIVE SMART MONEY EXCEPTION] ${symbol}: ${err?.message || err}`, symbol);
+        return;
+      }
+    } else {
+      if (this.virtualBalance < actualMargin) {
+        logger.log('WARN', `Saldo demo paper ($${this.virtualBalance.toFixed(2)}) tidak cukup untuk margin $${actualMargin.toFixed(2)} USDT.`, symbol);
+        return;
+      }
+      this.virtualBalance = Math.max(0, this.virtualBalance - actualMargin);
+    }
+
+    const layer0: GridLayer = {
+      layerIndex: 0,
+      price: currentPrice,
+      qty,
+      marginUsdt: actualMargin,
+      volumeUsdt: parseFloat((qty * currentPrice).toFixed(2)),
+      status: 'FILLED',
+      filledAt: Date.now(),
+    };
+
+    const initialPos: ActivePosition = {
+      id: `${symbol}_SM_${Date.now()}`,
+      symbol,
+      side: signal.side,
+      strategyType: 'SMART_MONEY',
+      leverage,
+      totalQty: qty,
+      avgEntryPrice: currentPrice,
+      currentPrice,
+      unrealizedPnl: 0,
+      pnlPct: 0,
+      peakPnlPct: 0,
+      totalMarginUsed: actualMargin,
+      layers: [layer0],
+      openedAt: Date.now(),
+      targetTpPrice: tpPrice,
+      hardSlPrice: slPrice,
+      status: 'SNIPING',
+      trailingTpActive: smCfg.trailingTpEnabled ?? true,
+      highestPrice: currentPrice,
+      lowestPrice: currentPrice,
+      paramsSnapshot: {
+        strategy: 'SMART_MONEY',
+        side: signal.side,
+        whaleShortRatio: signal.whaleShortRatio,
+        whaleLongRatio: signal.whaleLongRatio,
+        retailLongRatio: signal.retailLongRatio,
+        retailShortRatio: signal.retailShortRatio,
+        takeProfitPct: tpPct,
+        stopLossPct: slPct,
+        tradingMode: this.config.tradingMode,
+        marginUsdt: actualMargin,
+        leverage,
+      },
+    };
+
+    this.activePositions.set(symbol, initialPos);
+    await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+
+    logger.log(
+      'SUCCESS',
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Margin: $${actualMargin.toFixed(2)} (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${slPct}%)`,
+      symbol
+    );
+
+    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, 0, tpPct, slPct);
+
+    this.broadcastStatus();
   }
 }

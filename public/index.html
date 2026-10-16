@@ -462,6 +462,97 @@
       </div>
 
       <div class="modal-body">
+        <!-- STRATEGY SELECTOR TOGGLE -->
+        <div class="form-row" style="background: rgba(10, 132, 255, 0.08); border: 1px solid rgba(10, 132, 255, 0.4); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2;">
+            <label style="font-size: 1.05rem; font-weight: 700; color: #5ac8fa; display: flex; align-items: center; gap: 8px;">
+              <span>🎯 Strategi Pemicu Entry (Trigger Strategy)</span>
+            </label>
+            <select id="cfg-trigger-strategy" class="form-control" onchange="toggleStrategySettingsView()" style="font-weight: 600; font-size: 0.95rem; background: #1c2438; border-color: #0a84ff;">
+              <option value="SMART_MONEY">🐋 SMART MONEY HUNTER (Ikuti Aliran Dana Paus Institusi - Rekomendasi)</option>
+              <option value="WICK_SNIPER">⚡ WICK SNIPER (Berburu Lonjakan Spike Sumbu Cepat)</option>
+              <option value="HYBRID">🛡️ HYBRID (Tembak Wick Hanya Jika Searah Smart Money)</option>
+            </select>
+            <small class="form-hint" style="color: #9ac7fa; margin-top: 6px;">
+              <b>Smart Money:</b> Menganalisis rasio posisi Top Trader Binance secara otomatis & entry terarah.<br>
+              <b>Wick Sniper:</b> Strategi lama mendeteksi lonjakan spike harga cepat.
+            </small>
+          </div>
+        </div>
+
+        <!-- SMART MONEY PARAMETERS PANEL -->
+        <div id="smart-money-panel" class="form-row" style="background: rgba(46, 213, 115, 0.05); border: 1px dashed rgba(46, 213, 115, 0.4); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 6px;">
+            <label style="font-weight: 700; color: #2ed573; display: flex; align-items: center; gap: 8px;">
+              <input type="checkbox" id="cfg-sm-enabled" style="width: 18px; height: 18px; accent-color: #2ed573;" checked>
+              <span>🐋 Parameter Khusus Smart Money</span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>Arah Eksekusi</label>
+            <select id="cfg-sm-direction" class="form-control">
+              <option value="BOTH">🔄 Otomatis SHORT & LONG (Sesuai Paus)</option>
+              <option value="SHORT_ONLY">📉 SHORT ONLY (Fokus Dump/Short Whale)</option>
+              <option value="LONG_ONLY">📈 LONG ONLY (Fokus Pump/Long Whale)</option>
+            </select>
+            <small class="form-hint">Arah posisi yang diperbolehkan dieksekusi.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Periode Analisis Binance</label>
+            <select id="cfg-sm-period" class="form-control">
+              <option value="5m" selected>⚡ 5 Menit (Responsif)</option>
+              <option value="15m">⏱️ 15 Menit (Seimbang)</option>
+              <option value="1h">🛡️ 1 Jam (Tren Makro)</option>
+            </select>
+            <small class="form-hint">Timeframe rasio modal top trader Binance.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Dominasi Whale Short Min (%)</label>
+            <input type="number" id="cfg-sm-thresh-short" min="50" max="95" step="1" class="form-control" placeholder="60">
+            <small class="form-hint">Paus harus pegang >= X% volume Short untuk trigger Short (Standar: 60%).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Dominasi Whale Long Min (%)</label>
+            <input type="number" id="cfg-sm-thresh-long" min="50" max="95" step="1" class="form-control" placeholder="60">
+            <small class="form-hint">Paus harus pegang >= X% volume Long untuk trigger Long (Standar: 60%).</small>
+          </div>
+
+          <div class="form-group" style="grid-column: span 2; display: flex; align-items: center; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #e4e7eb; margin: 0;">
+              <input type="checkbox" id="cfg-sm-retail-trap" style="width: 16px; height: 16px; accent-color: #2ed573;" checked>
+              <span>🛡️ Konfirmasi Retail Trap (Wajib retail berada di sisi berlawanan)</span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>Target Take Profit Smart Money (%)</label>
+            <input type="number" id="cfg-sm-tp-pct" min="0.5" max="20" step="0.1" class="form-control" placeholder="1.5">
+            <small class="form-hint">Standar: 1.5% - 2.5%.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Hard Stop Loss Smart Money (%)</label>
+            <input type="number" id="cfg-sm-sl-pct" min="1.0" max="30" step="0.1" class="form-control" placeholder="3.0">
+            <small class="form-hint">Proteksi batas rugi ketat (Standar: 3.0%).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Margin Modal Per Trade (USDT)</label>
+            <input type="number" id="cfg-sm-margin" min="1" step="1" class="form-control" placeholder="5">
+            <small class="form-hint">Modal margin per koin.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Cooldown Antar Trade Koin (Menit)</label>
+            <input type="number" id="cfg-sm-cooldown" min="1" step="1" class="form-control" placeholder="30">
+            <small class="form-hint">Jeda koin yang sama sebelum boleh open posisi lagi (Standar: 30m).</small>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>Mode Trading</label>
