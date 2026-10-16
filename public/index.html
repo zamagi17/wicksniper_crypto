@@ -482,15 +482,16 @@
 
         <!-- SMART MONEY PARAMETERS PANEL -->
         <div id="smart-money-panel" class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; background: rgba(46, 213, 115, 0.05); border: 1px dashed rgba(46, 213, 115, 0.4); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 16px;">
-          <div class="form-group" style="grid-column: span 2; margin-bottom: 4px; padding-bottom: 8px; border-bottom: 1px solid rgba(46, 213, 115, 0.2);">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 4px; padding-bottom: 8px; border-bottom: 1px solid rgba(46, 213, 115, 0.2); display: flex; align-items: center; justify-content: space-between;">
             <label style="font-weight: 700; color: #2ed573; font-size: 0.95rem; display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;">
               <input type="checkbox" id="cfg-sm-enabled" style="width: 18px; height: 18px; accent-color: #2ed573;" checked>
               <span>🐋 Parameter Khusus Smart Money</span>
             </label>
+            <span class="badge-tag badge-smart-money">Aktif saat Mode SMART_MONEY</span>
           </div>
 
           <div class="form-group">
-            <label>Arah Eksekusi</label>
+            <label>Arah Eksekusi <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <select id="cfg-sm-direction" class="form-control">
               <option value="BOTH">🔄 Otomatis SHORT & LONG (Sesuai Paus)</option>
               <option value="SHORT_ONLY">📉 SHORT ONLY (Fokus Dump/Short Whale)</option>
@@ -500,7 +501,7 @@
           </div>
 
           <div class="form-group">
-            <label>Periode Analisis Binance</label>
+            <label>Periode Analisis Binance <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <select id="cfg-sm-period" class="form-control">
               <option value="5m" selected>⚡ 5 Menit (Responsif)</option>
               <option value="15m">⏱️ 15 Menit (Seimbang)</option>
@@ -510,13 +511,13 @@
           </div>
 
           <div class="form-group">
-            <label>Dominasi Whale Short Min (%)</label>
+            <label>Dominasi Whale Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-thresh-short" min="50" max="95" step="1" class="form-control" placeholder="60">
             <small class="form-hint">Paus harus pegang >= X% volume Short untuk trigger Short (Standar: 60%).</small>
           </div>
 
           <div class="form-group">
-            <label>Dominasi Whale Long Min (%)</label>
+            <label>Dominasi Whale Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-thresh-long" min="50" max="95" step="1" class="form-control" placeholder="60">
             <small class="form-hint">Paus harus pegang >= X% volume Long untuk trigger Long (Standar: 60%).</small>
           </div>
@@ -530,33 +531,60 @@
           </div>
 
           <div class="form-group">
-            <label>Target Take Profit Smart Money (%)</label>
+            <label>Model Entry & Layering <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <select id="cfg-sm-layers" class="form-control" onchange="toggleSmLayerSpacing()">
+              <option value="1" selected>🎯 1 Layer (Single Sniper Entry - Sangat Direkomendasikan)</option>
+              <option value="2">🪜 2 Layer (Defensive Limit Re-entry)</option>
+              <option value="3">🪜 3 Layer (Defensive Limit Bertingkat)</option>
+            </select>
+            <small class="form-hint">Smart money tidak butuh 25 layer martingale. Cukup 1 sniper entry, atau maks 2-3 limit order defensif.</small>
+          </div>
+
+          <div class="form-group" id="cfg-sm-layer-spacing-group" style="display: none;">
+            <label>Jarak Antar Layer Retest (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-layer-spacing" min="0.3" max="5.0" step="0.1" class="form-control" placeholder="0.8">
+            <small class="form-hint">Jarak harga untuk memasang layer limit ke-2 dan ke-3 jika harga sedikit overshoot (Standar: 0.8%).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Modal Margin Per Posisi (USDT) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-margin" min="1" step="1" class="form-control" placeholder="5">
+            <small class="form-hint">Total margin modal per koin (Standar: $5 - $20 USDT).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Cooldown Antar Trade Koin (Menit) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-cooldown" min="1" step="1" class="form-control" placeholder="30">
+            <small class="form-hint">Jeda koin yang sama sebelum boleh open posisi lagi (Standar: 30m).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Target Take Profit (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-tp-pct" min="0.5" max="20" step="0.1" class="form-control" placeholder="1.5">
             <small class="form-hint">Standar: 1.5% - 2.5%.</small>
           </div>
 
           <div class="form-group">
-            <label>Hard Stop Loss Smart Money (%)</label>
+            <label>Hard Stop Loss (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-sl-pct" min="1.0" max="30" step="0.1" class="form-control" placeholder="3.0">
             <small class="form-hint">Proteksi batas rugi ketat (Standar: 3.0%).</small>
           </div>
 
-          <div class="form-group">
-            <label>Margin Modal Per Trade (USDT)</label>
-            <input type="number" id="cfg-sm-margin" min="1" step="1" class="form-control" placeholder="5">
-            <small class="form-hint">Modal margin per koin.</small>
-          </div>
-
-          <div class="form-group">
-            <label>Cooldown Antar Trade Koin (Menit)</label>
-            <input type="number" id="cfg-sm-cooldown" min="1" step="1" class="form-control" placeholder="30">
-            <small class="form-hint">Jeda koin yang sama sebelum boleh open posisi lagi (Standar: 30m).</small>
+          <div class="form-group" style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; background: rgba(10, 132, 255, 0.05); border: 1px solid rgba(10, 132, 255, 0.2); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #5ac8fa; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-trailing-tp" style="width: 16px; height: 16px; accent-color: #0a84ff;" checked onchange="toggleSmTrailingInput()">
+              <span>🚀 Aktifkan Trailing TP Runner Smart Money</span>
+            </label>
+            <div id="cfg-sm-callback-box" style="display: flex; align-items: center; gap: 8px;">
+              <label style="margin: 0; font-size: 11px; color: var(--text-muted);">Callback (%):</label>
+              <input type="number" id="cfg-sm-trailing-callback" min="0.1" max="2.0" step="0.1" style="width: 75px; padding: 4px 8px;" class="form-control" placeholder="0.3">
+            </div>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>Mode Trading</label>
+            <label>Mode Trading <span class="badge-tag badge-shared">🌐 Global</span></label>
             <select id="cfg-mode" class="form-control">
               <option value="PAPER">🧪 Paper Trading (Simulasi Demo Saldo Aman)</option>
               <option value="LIVE">🟢 Live Trading (Akun Real Binance Futures)</option>
@@ -564,15 +592,15 @@
           </div>
 
           <div class="form-group">
-            <label>Leverage Default (1x - 50x)</label>
+            <label>Leverage Default (1x - 50x) <span class="badge-tag badge-shared">🌐 Global</span></label>
             <input type="number" id="cfg-leverage" min="1" max="50" step="1" class="form-control" placeholder="5">
-            <small class="form-hint">Leverage posisi Short (Leader rata-rata 5x - 10x).</small>
+            <small class="form-hint">Leverage posisi Smart Money & Wick (Standar: 5x - 10x).</small>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>Tipe Margin</label>
+            <label>Tipe Margin <span class="badge-tag badge-shared">🌐 Global</span></label>
             <select id="cfg-margin-type" class="form-control">
               <option value="CROSSED">Cross Margin (Disarankan)</option>
               <option value="ISOLATED">Isolated Margin</option>
@@ -580,7 +608,7 @@
           </div>
 
           <div class="form-group">
-            <label>Saldo Virtual Paper (USDT)</label>
+            <label>Saldo Virtual Paper (USDT) <span class="badge-tag badge-shared">🌐 Global</span></label>
             <input type="number" id="cfg-virtual-balance" min="5" step="1" class="form-control" placeholder="245">
             <small class="form-hint">Saldo simulasi untuk pengujian bot.</small>
           </div>
@@ -588,7 +616,7 @@
 
         <div class="form-row">
           <div class="form-group" style="grid-column: span 2;">
-            <label>Sumber Data Live Market (Kill-Switch)</label>
+            <label>Sumber Data Live Market (Kill-Switch) <span class="badge-tag badge-shared">🌐 Global</span></label>
             <select id="cfg-data-source" class="form-control" onchange="toggleDataSourceGroup()">
               <option value="WEBSOCKET">Real-Time WebSocket (Tercepat, latensi milidetik)</option>
               <option value="POLLING">HTTP Polling (REST API, 100% Anti-Shadowban)</option>
@@ -597,7 +625,7 @@
           </div>
 
           <div class="form-group" id="polling-interval-group" style="grid-column: span 2; display: none;">
-            <label>Kecepatan Interval Polling REST</label>
+            <label>Kecepatan Interval Polling REST <span class="badge-tag badge-shared">🌐 Global</span></label>
             <select id="cfg-polling-interval" class="form-control">
               <option value="500">⚡ 500 ms (Agresif & Reaktif, ~50% Kuota REST)</option>
               <option value="750">⏱️ 750 ms (Cepat & Seimbang, ~33% Kuota REST)</option>
@@ -611,13 +639,13 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label>Minimal Spike Lonjakan (%)</label>
+            <label>Minimal Spike Lonjakan (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-spike-pct" step="0.1" class="form-control" placeholder="2.0">
             <small class="form-hint">Memicu jika harga melonjak >= X% dalam 20 detik.</small>
           </div>
 
           <div class="form-group">
-            <label>Target Take Profit (%)</label>
+            <label>Target Take Profit (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-tp-pct" step="0.1" class="form-control" placeholder="1.2">
             <small class="form-hint">Exit saat harga koreksi X% di bawah harga rata-rata.</small>
           </div>
@@ -625,24 +653,24 @@
 
         <div class="form-row" style="background: rgba(10, 132, 255, 0.04); border: 1px dashed rgba(10, 132, 255, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="flex: 1;">
-            <label>🛡️ Min Volume 24 Jam (USDT)</label>
+            <label>🛡️ Min Volume 24 Jam (USDT) <span class="badge-tag badge-shared">🌐 Global</span></label>
             <input type="number" id="cfg-min-24h-vol" min="0" step="100000" class="form-control" placeholder="1500000">
-            <small class="form-hint">Filter koin mati suri/zombie (Standar: 1.500.000 USDT). Isi 0 untuk mematikan filter.</small>
+            <small class="form-hint">Filter koin mati suri/zombie (Standar: 1.500.000 USDT). Dipakai oleh Scanner Wick & Smart Money.</small>
           </div>
           <div class="form-group" style="flex: 1;">
-            <label>🛡️ Maksimal Spread Bid-Ask (%)</label>
+            <label>🛡️ Maksimal Spread Bid-Ask (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-max-spread" min="0.05" max="2.0" step="0.05" class="form-control" placeholder="0.25">
             <small class="form-hint">Proteksi orderbook kosong. Lewati jika selisih Ask - Bid > X% (Standar: 0.25%).</small>
           </div>
           <div class="form-group" style="flex: 1;">
-            <label>🛑 Max Volume 24 Jam (USDT)</label>
+            <label>🛑 Max Volume 24 Jam (USDT) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-max-24h-vol" min="0" step="10000000" class="form-control" placeholder="300000000">
             <small class="form-hint">Batas koin mania/frenzy (Saran: 300.000.000 USDT). Isi 0 jika tanpa batas.</small>
           </div>
           <div class="form-group" style="flex: 1; align-self: center; display:flex; gap:8px; align-items:center;">
             <label style="margin:0; display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="cfg-auto-blacklist" style="width:16px; height:16px;" />
-              <span style="font-weight:600;">Aktifkan Auto Blacklist</span>
+              <span style="font-weight:600;">Aktifkan Auto Blacklist <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></span>
             </label>
             <small class="form-hint" style="margin-left:6px;">Jika aktif, koin bervolume > Max Volume otomatis di-blacklist 24 jam.</small>
           </div>
@@ -650,7 +678,7 @@
 
         <div class="form-row" style="background: rgba(255, 59, 48, 0.06); border: 1px dashed rgba(255, 59, 48, 0.4); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="flex: 1;">
-            <label>🚨 Max Perubahan 24 Jam (%)</label>
+            <label>🚨 Max Perubahan 24 Jam (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-max-24h-change" min="0" step="5" class="form-control" placeholder="40">
             <small class="form-hint">Blokir koin dengan perubahan harga 24 jam > X% untuk menghindari monster parabolic pump (Standar: 40%). Isi 0 untuk mematikan filter.</small>
           </div>
@@ -660,16 +688,16 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #9f96ff;">
               <input type="checkbox" id="cfg-ema-trend-enabled" style="width: 16px; height: 16px; accent-color: #9f96ff;">
-              📈 Aktifkan EMA Trend Filter
+              📈 Aktifkan EMA Trend Filter <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Membatasi entry hanya saat trend jangka pendek tetap konsisten di bawah/di atas EMA slow, mencegah masuk saat market acak atau sideways.</small>
           </div>
           <div class="form-group">
-            <label>EMA Cepat</label>
+            <label>EMA Cepat <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-ema-fast-period" min="3" max="50" step="1" class="form-control" placeholder="9">
           </div>
           <div class="form-group">
-            <label>EMA Lambat</label>
+            <label>EMA Lambat <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-ema-slow-period" min="8" max="100" step="1" class="form-control" placeholder="21">
           </div>
         </div>
@@ -678,12 +706,12 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--color-green);">
               <input type="checkbox" id="cfg-quality-score-enabled" style="width: 16px; height: 16px; accent-color: var(--color-green);">
-              ✅ Aktifkan Trade Quality Scoring
+              ✅ Aktifkan Trade Quality Scoring <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Hanya lanjutkan entry bila skor kualitas trade memenuhi ambang minimum. Default nonaktif agar tidak mengubah perilaku lama.</small>
           </div>
           <div class="form-group" style="flex: 1; min-width: 180px;">
-            <label>Ambang Skor Kualitas</label>
+            <label>Ambang Skor Kualitas <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-quality-threshold" min="0" max="100" step="1" class="form-control" placeholder="60">
             <small class="form-hint">Semakin tinggi, semakin ketat filter quality. Standar: 60.</small>
           </div>
@@ -691,13 +719,13 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label>Hard Stop Loss (%)</label>
+            <label>Hard Stop Loss (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-sl-pct" step="0.1" class="form-control" placeholder="4.5">
             <small class="form-hint">Cut loss mutlak jika koin terus melesak tanpa koreksi.</small>
           </div>
 
           <div class="form-group">
-            <label>Maks Waktu Hold (Menit)</label>
+            <label>Maks Waktu Hold (Menit) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-max-hold" min="1" step="1" class="form-control" placeholder="60">
             <small class="form-hint">Otomatis exit jika posisi bertahan melebihi X menit.</small>
           </div>
@@ -708,7 +736,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-green);">
               <input type="checkbox" id="cfg-extend-hold-red-enabled" onchange="toggleExtendHoldRedInput()" style="width: 16px; height: 16px; accent-color: var(--color-green);">
-              ⏳ Perpanjang Waktu Hold jika Candle 1m Merah (Bearish)
+              ⏳ Perpanjang Waktu Hold jika Candle 1m Merah (Bearish) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Ketika sisa waktu hold tersisa &le; 30 detik dan candle 1m sedang merah (harga sedang turun menuju TP), tambahkan waktu ekstra agar posisi SHORT tidak terputus prematur di tengah penurunan harga.</small>
           </div>
@@ -730,7 +758,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #ffb347;">
               <input type="checkbox" id="cfg-atr-dynamic-enabled" style="width: 16px; height: 16px; accent-color: #ffb347;">
-              📐 Aktifkan ATR Dynamic SL / TP
+              📐 Aktifkan ATR Dynamic SL / TP <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Saat aktif, target TP & SL mengikuti ATR agar strategi lebih adaptif terhadap volatilitas. Default nonaktif agar konfigurasi lama tetap utuh.</small>
           </div>
@@ -763,7 +791,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-red);">
               <input type="checkbox" id="cfg-early-exit-momentum-enabled" style="width: 16px; height: 16px; accent-color: var(--color-red);">
-              ⚠️ Aktifkan Early Exit Momentum
+              ⚠️ Aktifkan Early Exit Momentum <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Menutup SHORT lebih cepat jika harga di atas average entry dan momentum naik memenuhi ambang candle. Default nonaktif.</small>
           </div>
@@ -816,7 +844,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-warning, #ff9f0a);">
               <input type="checkbox" id="cfg-bottom-rejection-enabled" onchange="toggleBottomRejectionInput()" style="width: 16px; height: 16px; accent-color: var(--color-warning, #ff9f0a);">
-              🛡️ Aktifkan Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep)
+              🛡️ Aktifkan Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Membatalkan/skip entry Short jika candle 1m sebelumnya mengalami dump dalam yang langsung ditarik naik agresif (ekor bawah panjang / liquidity sweep), mencegah jebakan V-reversal menabrak Hard SL.</small>
           </div>
@@ -844,7 +872,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
               <input type="checkbox" id="cfg-upper-wick-pullback-enabled" onchange="toggleUpperWickInput()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
-              🎯 Aktifkan Konfirmasi Ekor Atas / Pullback Mikro (Anti-Monster Pump)
+              🎯 Aktifkan Konfirmasi Ekor Atas / Pullback Mikro (Anti-Monster Pump) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Mencegah menembak Short saat koin sedang melaju roket ke atas. Bot akan menahan tembakan beberapa detik untuk memastikan harga membentuk jarum ekor atas (pullback) dari titik puncak sebelum menembakkan jaring SHORT. Jika koin terus terbang tanpa pullback, koin otomatis dilewati (skip).</small>
           </div>
@@ -875,7 +903,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #ffb300;">
               <input type="checkbox" id="cfg-trade-gap-enabled" onchange="toggleTradeGapInput()" style="width: 16px; height: 16px; accent-color: #ffb300;">
-              ⏱️ Aktifkan Filter Jeda Transaksi / Gap Tape (Anti Koin Sepi)
+              ⏱️ Aktifkan Filter Jeda Transaksi / Gap Tape (Anti Koin Sepi) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Mendeteksi koin yang tidak likuid / sepi transaksi (terdapat gap waktu 10-20 detik antar transaksi di riwayat trades). Koin tetap terdeteksi di Radar Spike tetapi status dieksekusi dilewati (SKIP) dengan alasan detail.</small>
           </div>
@@ -900,7 +928,7 @@
         <div class="form-row" style="background: rgba(168, 85, 247, 0.04); border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #c084fc;">
-              📊 Filter RSI 1m Minimum & Rasio Volume 1m (Min / Maks)
+              📊 Filter RSI 1m Minimum & Rasio Volume 1m (Min / Maks) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Mencegah jebakan fatal: (1) Membuka SHORT saat koin oversold/mantul dari jurang (RSI &lt; 50), (2) Spike volume kering/tipis (&lt; 1.0x rata-rata), dan (3) Menghadang roket breakout volume raksasa (&gt; 20x volume rata-rata).</small>
           </div>
@@ -949,7 +977,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
               <input type="checkbox" id="cfg-trailing-sl-enabled" onchange="toggleTrailingSL()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
-              📉 Aktifkan Trailing Stop Loss (Dynamic SL Protection)
+              📉 Aktifkan Trailing Stop Loss (Dynamic SL Protection) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Otomatis mengencangkan SL saat jaring terisi untuk mengunci profit sambil tetap membiarkan jaring averaging bekerja. Leverage-aware: rasio SL/TP tetap konsisten di semua leverage.</small>
           </div>
@@ -972,7 +1000,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
               <input type="checkbox" id="cfg-partial-tp-enabled" onchange="togglePartialTpInput()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
-              🎯 Aktifkan Stage 1 & Stage 2 Take Profit (Dual TP + Auto BEP Defense)
+              🎯 Aktifkan Stage 1 & Stage 2 Take Profit (Dual TP + Auto BEP Defense) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Saat TP 1 tercapai, cairkan sebagian posisi (misal 70%) untuk mengunci profit, lalu otomatis geser Stop-Loss sisa posisi (misal 30%) ke titik BEP (+ buffer parameter BEP). Sisa koin memburu TP 2 bebas risiko!</small>
           </div>
@@ -997,7 +1025,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #ff453a;">
               <input type="checkbox" id="cfg-bep-defense-enabled" onchange="toggleBepDefenseInput()" style="width: 16px; height: 16px; accent-color: #ff453a;">
-              🛡️ Aktifkan Emergency BEP Defense (Penyelamat Modal saat Monster Pump)
+              🛡️ Aktifkan Emergency BEP Defense (Penyelamat Modal saat Monster Pump) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Jika jaring tertelan sangat cepat (Velocity Shock) atau mendekati layer penuh, bot otomatis mengalihkan target TP ke titik BEP (Break-Even + Fee Buffer). Begitu harga retrace sedikit ke rata-rata entry, posisi seketika ditutup impas (0% rugi) demi menyelamatkan seluruh modal dari risiko Hard Stop Loss.</small>
           </div>
@@ -1052,7 +1080,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-purple, #bf5af2);">
               <input type="checkbox" id="cfg-trailing-tp-enabled" onchange="toggleTrailingTpInput()" style="width: 16px; height: 16px; accent-color: var(--color-purple, #bf5af2);">
-              📈 Aktifkan Trailing Take Profit (Trailing Callback)
+              📈 Aktifkan Trailing Take Profit (Trailing Callback) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
             <small class="form-hint">Saat harga menyentuh Target TP awal (sebagai pemicu aktivasi), bot tidak langsung keluar melainkan membiarkan cuan bertambah lebih dalam. Posisi baru ditutup saat harga memantul naik sebesar Callback %.</small>
           </div>
@@ -1066,51 +1094,51 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label>Modal Per Layer (USDT)</label>
+            <label>Modal Per Layer (USDT) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-margin-layer" min="1" step="1" class="form-control" placeholder="3">
-            <small class="form-hint">Modal dasar untuk jaring pertama (Layer 0).</small>
+            <small class="form-hint">Modal dasar untuk jaring pertama (Layer 0) Wick Sniper.</small>
           </div>
 
           <div class="form-group">
-            <label>Maksimal Margin Per Koin (USDT)</label>
+            <label>Maksimal Margin Per Koin (USDT) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-max-margin" min="5" step="1" class="form-control" placeholder="50">
-            <small class="form-hint">Batas akumulasi margin maksimal untuk satu koin.</small>
+            <small class="form-hint">Batas akumulasi margin 25-layer untuk Wick Sniper.</small>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>Jumlah Layer Jaring (Maks 25)</label>
+            <label>Jumlah Layer Jaring (Maks 25) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-total-layers" min="1" max="25" step="1" class="form-control" placeholder="25">
-            <small class="form-hint">Total lapis jaring averaging.</small>
+            <small class="form-hint">Total lapis jaring averaging Wick Sniper.</small>
           </div>
 
           <div class="form-group">
-            <label>Jarak Antar Jaring (%)</label>
+            <label>Jarak Antar Jaring (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-layer-spacing" min="0.1" step="0.1" class="form-control" placeholder="1.2">
-            <small class="form-hint">Jarak kenaikan harga tiap tingkatan layer.</small>
+            <small class="form-hint">Jarak kenaikan harga tiap tingkatan layer Wick Sniper.</small>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>Maksimal Koin Aktif Bersamaan</label>
+            <label>Maksimal Koin Aktif Bersamaan <span class="badge-tag badge-shared">🌐 Global</span></label>
             <input type="number" id="cfg-max-coins" min="1" max="10" step="1" class="form-control" placeholder="2">
-            <small class="form-hint">Kuota koin yang boleh ditembak bersamaan.</small>
+            <small class="form-hint">Kuota total koin yang boleh aktif bersamaan (Smart Money & Wick).</small>
           </div>
 
           <div class="form-group">
-            <label>Cooldown Antar Trade (Menit)</label>
+            <label>Cooldown Antar Trade (Menit) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-cooldown" min="1" max="180" step="1" class="form-control" placeholder="20">
-            <small class="form-hint">Jeda istirahat koin setelah trade ditutup (rekomendasi: 20 menit).</small>
+            <small class="form-hint">Jeda istirahat koin setelah trade Wick ditutup (Smart Money punya cooldown terpisah di atas).</small>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group" style="grid-column: span 2;">
-            <label>Pengali Martingale (x)</label>
+            <label>Pengali Martingale (x) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
             <input type="number" id="cfg-martingale" min="1.0" max="2.5" step="0.05" class="form-control" placeholder="1.1">
-            <small class="form-hint">Faktor kelipatan modal pada layer berikutnya.</small>
+            <small class="form-hint">Faktor kelipatan modal layer berikutnya untuk averaging Wick Sniper.</small>
           </div>
         </div>
 
@@ -1119,9 +1147,9 @@
           <div style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; color: #00e676; font-size: 14px;">
               <input type="checkbox" id="cfg-long-enabled" onchange="toggleLongSettingsGroup()" style="width: 18px; height: 18px; accent-color: #00e676;">
-              🚀 Aktifkan Peluang MOMENTUM LONG (Short Squeeze & Trend Runner)
+              🚀 Aktifkan Peluang MOMENTUM LONG (Short Squeeze & Trend Runner) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
             </label>
-            <span style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 230, 118, 0.15); color: #00e676; font-weight: 700;">STRATEGI LONG</span>
+            <span style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 230, 118, 0.15); color: #00e676; font-weight: 700;">STRATEGI LONG WICK</span>
           </div>
           <div style="grid-column: span 2; margin-bottom: 10px;">
             <small class="form-hint" style="color: rgba(255,255,255,0.75);">Menangkap koin yang meledak super-trend seperti SANDUSDT. Jika lonjakan harga diiringi volume raksasa dan funding rate minus, bot otomatis beralih menembak <b>BUY LONG</b> (bukan SHORT).</small>

@@ -1734,7 +1734,8 @@ export class WickSniperEngine {
       if (this.config.tradingMode === 'PAPER') {
         let layersChanged = false;
         for (const layer of pos.layers) {
-          if (layer.status === 'PENDING' && currentPrice >= layer.price) {
+          const isHit = pos.side === 'LONG' ? (currentPrice <= layer.price) : (currentPrice >= layer.price);
+          if (layer.status === 'PENDING' && isHit) {
             layer.status = 'FILLED';
             layer.filledAt = Date.now();
             layer.volumeUsdt = layer.volumeUsdt || parseFloat((layer.qty * layer.price).toFixed(2));
@@ -2160,6 +2161,13 @@ export class WickSniperEngine {
       return { targetTpPrice: bepTarget, targetTp2Price: bepTarget, isBepActive: true, bepReason: reason };
     }
 
+    if (pos.strategyType === 'SMART_MONEY') {
+      const smTpPct = this.config.smartMoney?.takeProfitPct || 1.5;
+      const isLong = pos.side === 'LONG';
+      const smTp = isLong ? pos.avgEntryPrice * (1 + smTpPct / 100) : pos.avgEntryPrice * (1 - smTpPct / 100);
+      return { targetTpPrice: smTp, targetTp2Price: smTp, isBepActive: false };
+    }
+
     const normalTp1 = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
     const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0
       ? exitCfg.takeProfit2Pct
@@ -2209,7 +2217,14 @@ export class WickSniperEngine {
       }
 
       if (!pos.partialTpDone) {
-        pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+        if (pos.strategyType === 'SMART_MONEY') {
+          const smSl = this.config.smartMoney?.stopLossPct || 3.0;
+          pos.hardSlPrice = pos.side === 'LONG'
+            ? pos.avgEntryPrice * (1 - smSl / 100)
+            : pos.avgEntryPrice * (1 + smSl / 100);
+        } else {
+          pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+        }
       }
 
       if (this.config.exit.atrDynamicSlTpEnabled) {
@@ -5002,10 +5017,12 @@ export class WickSniperEngine {
     const isShort = signal.side === 'SHORT';
     const currentPrice = signal.currentPrice;
     const leverage = smCfg.leverage || this.config.leverage || 5;
-    const margin = smCfg.marginUsdt || this.config.grid?.marginPerLayerUsdt || 5.0;
+    const numLayers = Math.max(1, Math.min(3, smCfg.entryLayers || 1));
+    const totalMargin = smCfg.marginUsdt || this.config.grid?.marginPerLayerUsdt || 5.0;
+    const marginPerLayer = numLayers > 1 ? totalMargin / numLayers : totalMargin;
     const prec = binanceFutures.getPrecision(symbol);
 
-    let plannedQty = (margin * leverage) / currentPrice;
+    let plannedQty = (marginPerLayer * leverage) / currentPrice;
     if (plannedQty * currentPrice < prec.minNotional) {
       plannedQty = (prec.minNotional * 1.05) / currentPrice;
     }
@@ -5053,6 +5070,31 @@ export class WickSniperEngine {
       filledAt: Date.now(),
     };
 
+    const layers: GridLayer[] = [layer0];
+    const spacingPct = smCfg.layerSpacingPct || 0.8;
+
+    for (let i = 1; i < numLayers; i++) {
+      const layerPriceRaw = isShort
+        ? currentPrice * (1 + (i * spacingPct) / 100)
+        : currentPrice * (1 - (i * spacingPct) / 100);
+      const layerPrice = parseFloat(binanceFutures.formatPrice(symbol, layerPriceRaw));
+      let layerPlanned = (marginPerLayer * leverage) / layerPrice;
+      if (layerPlanned * layerPrice < prec.minNotional) {
+        layerPlanned = (prec.minNotional * 1.05) / layerPrice;
+      }
+      const layerQty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
+      const layerMargin = (layerQty * layerPrice) / leverage;
+
+      layers.push({
+        layerIndex: i,
+        price: layerPrice,
+        qty: layerQty,
+        marginUsdt: layerMargin,
+        volumeUsdt: parseFloat((layerQty * layerPrice).toFixed(2)),
+        status: 'PENDING',
+      });
+    }
+
     const initialPos: ActivePosition = {
       id: `${symbol}_SM_${Date.now()}`,
       symbol,
@@ -5066,7 +5108,7 @@ export class WickSniperEngine {
       pnlPct: 0,
       peakPnlPct: 0,
       totalMarginUsed: actualMargin,
-      layers: [layer0],
+      layers,
       openedAt: Date.now(),
       targetTpPrice: tpPrice,
       hardSlPrice: slPrice,
@@ -5077,6 +5119,8 @@ export class WickSniperEngine {
       paramsSnapshot: {
         strategy: 'SMART_MONEY',
         side: signal.side,
+        entryLayers: numLayers,
+        layerSpacingPct: spacingPct,
         whaleShortRatio: signal.whaleShortRatio,
         whaleLongRatio: signal.whaleLongRatio,
         retailLongRatio: signal.retailLongRatio,
@@ -5094,7 +5138,7 @@ export class WickSniperEngine {
 
     logger.log(
       'SUCCESS',
-      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Margin: $${actualMargin.toFixed(2)} (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${slPct}%)`,
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Layers: ${numLayers}x | Margin: $${actualMargin.toFixed(2)} ($${totalMargin.toFixed(2)} Total) (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${slPct}%)`,
       symbol
     );
 

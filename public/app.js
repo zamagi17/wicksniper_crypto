@@ -2655,6 +2655,13 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 3.0);
   setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
   setVal('cfg-sm-cooldown', smCfg.cooldownMinutes ?? 30);
+  setVal('cfg-sm-layers', smCfg.entryLayers ?? 1);
+  setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
+  const smTrailingCb = document.getElementById('cfg-sm-trailing-tp');
+  if (smTrailingCb) smTrailingCb.checked = smCfg.trailingTpEnabled !== false;
+  setVal('cfg-sm-trailing-callback', smCfg.trailingCallbackPct ?? 0.3);
+  if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
+  if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -2936,6 +2943,10 @@ function getSettingsFormData() {
       stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '3.0')) || 3.0,
       marginUsdt: parseFloat(getVal('cfg-sm-margin', '5')) || 5,
       cooldownMinutes: parseInt(getVal('cfg-sm-cooldown', '30'), 10) || 30,
+      entryLayers: parseInt(getVal('cfg-sm-layers', '1'), 10) || 1,
+      layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
+      trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
+      trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -3598,6 +3609,25 @@ function toggleStrategySettingsView() {
   }
 }
 window.toggleStrategySettingsView = toggleStrategySettingsView;
+
+function toggleSmLayerSpacing() {
+  const sel = document.getElementById('cfg-sm-layers');
+  const grp = document.getElementById('cfg-sm-layer-spacing-group');
+  if (grp) {
+    const val = parseInt(sel?.value || '1', 10);
+    grp.style.display = val > 1 ? 'block' : 'none';
+  }
+}
+window.toggleSmLayerSpacing = toggleSmLayerSpacing;
+
+function toggleSmTrailingInput() {
+  const cb = document.getElementById('cfg-sm-trailing-tp');
+  const box = document.getElementById('cfg-sm-callback-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmTrailingInput = toggleSmTrailingInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER
