@@ -2435,10 +2435,11 @@ export class WickSniperEngine {
       pos.symbol
     );
 
+    const layerSide: 'BUY' | 'SELL' = pos.side === 'LONG' ? 'BUY' : 'SELL';
     try {
       const res = await binanceFutures.placeLimitOrder(
         pos.symbol,
-        'SELL',
+        layerSide,
         nextQueuedLayer.qty,
         nextQueuedLayer.price,
         false
@@ -2448,7 +2449,7 @@ export class WickSniperEngine {
         nextQueuedLayer.orderId = String(res.orderId);
         this.auditTradeLifecycle(pos.symbol, 'GRID_LAYER_PLACED', {
           layerIndex: nextQueuedLayer.layerIndex,
-          side: 'SELL',
+          side: layerSide,
           price: nextQueuedLayer.price,
           qty: nextQueuedLayer.qty,
           orderId: nextQueuedLayer.orderId,
@@ -2456,7 +2457,7 @@ export class WickSniperEngine {
         });
         logger.log(
           'SUCCESS',
-          `✅ [GRID QUEUE AKTIF] ${pos.symbol}: Layer #${nextQueuedLayer.layerIndex} berhasil dipasang di Binance (Order ID: #${nextQueuedLayer.orderId})`,
+          `✅ [GRID QUEUE AKTIF] ${pos.symbol}: Layer #${nextQueuedLayer.layerIndex} (${layerSide}) berhasil dipasang di Binance (Order ID: #${nextQueuedLayer.orderId})`,
           pos.symbol
         );
       } else {
@@ -2626,12 +2627,14 @@ export class WickSniperEngine {
     this.syncingTpSymbols.add(pos.symbol);
 
     try {
-      // 1. Batalkan SELURUH order BUY Take Profit lama yang ada di Binance untuk koin ini
+      // 1. Batalkan SELURUH order Take Profit lama yang ada di Binance untuk koin ini
       // Ini mencegah duplikasi order ganda dan error "ReduceOnly Order Failed" akibat sisa order di Binance
+      const isLong = pos.side === 'LONG';
+      const tpClosingSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
       try {
         const openOrders = await binanceFutures.getOpenOrders(pos.symbol);
-        const existingBuyOrders = openOrders.filter((o: any) => o.side === 'BUY');
-        for (const bo of existingBuyOrders) {
+        const existingTpOrders = openOrders.filter((o: any) => o.side === tpClosingSide);
+        for (const bo of existingTpOrders) {
           await binanceFutures.cancelOrder(pos.symbol, bo.orderId).catch(() => {});
         }
       } catch { }
@@ -2643,11 +2646,12 @@ export class WickSniperEngine {
       pos.tpOrderId = undefined;
       pos.tp2OrderId = undefined;
 
-      // Pastikan target TP valid untuk posisi SHORT (target TP harus di bawah harga entry rata-rata)
-      if (pos.targetTpPrice >= pos.avgEntryPrice) {
+      // Pastikan target TP valid (untuk SHORT di bawah modal, untuk LONG di atas modal)
+      const isTpValid = isLong ? (pos.targetTpPrice > pos.avgEntryPrice) : (pos.targetTpPrice < pos.avgEntryPrice);
+      if (!isTpValid) {
         logger.log(
           'WARN',
-          `⚠️ [TARGET TP TIDAK VALID] ${pos.symbol}: Target TP ($${pos.targetTpPrice.toFixed(6)}) >= Avg Entry ($${pos.avgEntryPrice.toFixed(6)}). Menunda order limit.`,
+          `⚠️ [TARGET TP TIDAK VALID] ${pos.symbol}: Target TP ($${pos.targetTpPrice.toFixed(6)}) ${isLong ? '<=' : '>='} Avg Entry ($${pos.avgEntryPrice.toFixed(6)}). Menunda order limit.`,
           pos.symbol
         );
         return;
@@ -2817,12 +2821,16 @@ export class WickSniperEngine {
         );
         return;
       }
-      const tpOrderPrice = atrMode && pos.targetTpPrice ? pos.targetTpPrice : pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+      const tpOrderPrice = atrMode && pos.targetTpPrice
+        ? pos.targetTpPrice
+        : (isLong
+            ? pos.avgEntryPrice * (1 + (pos.strategyType === 'SMART_MONEY' ? (this.config.smartMoney?.takeProfitPct || 1.5) : exitCfg.takeProfitPct) / 100)
+            : pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100));
       pos.targetTpPrice = tpOrderPrice;
       const tpStartTime = Date.now();
       const tpRes = await binanceFutures.placeLimitOrder(
         pos.symbol,
-        'BUY',
+        tpClosingSide,
         pos.totalQty,
         tpOrderPrice,
         true
@@ -2832,7 +2840,7 @@ export class WickSniperEngine {
       if (tpRes?.orderId) {
         pos.tpOrderId = String(tpRes.orderId);
         this.auditTradeLifecycle(pos.symbol, 'TP_LIMIT_PLACED', {
-          side: 'BUY',
+          side: tpClosingSide,
           targetTpPrice: pos.targetTpPrice,
           qty: pos.totalQty,
           orderId: pos.tpOrderId,
@@ -4055,20 +4063,22 @@ export class WickSniperEngine {
               let detectedReason: ClosedTrade['exitReason'] = 'TAKE_PROFIT';
               let detectedClosePrice = pos.targetTpPrice || pos.currentPrice;
               try {
+                const isLong = pos.side === 'LONG';
+                const closingSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
                 const trades = await binanceFutures.getUserTrades(symbol, 5);
-                const latestBuy = trades.find((t: any) => t.side === 'BUY');
-                if (latestBuy) {
-                  const bPrice = parseFloat(latestBuy.price || '0');
-                  const bPnl = parseFloat(latestBuy.realizedPnl || '0');
+                const latestClose = trades.find((t: any) => t.side === closingSide);
+                if (latestClose) {
+                  const bPrice = parseFloat(latestClose.price || '0');
+                  const bPnl = parseFloat(latestClose.realizedPnl || '0');
                   if (bPrice > 0) detectedClosePrice = bPrice;
                   if (bPnl < 0) {
                     detectedReason = 'HARD_STOP_LOSS';
                   } else if (pos.isBepDefenseActive) {
                     detectedReason = 'BEP_DEFENSE';
                   } else if (
-                    (pos.tpOrderId && String(latestBuy.orderId) === String(pos.tpOrderId)) ||
-                    (pos.tp2OrderId && String(latestBuy.orderId) === String(pos.tp2OrderId)) ||
-                    (pos.lastTpOrderId && String(latestBuy.orderId) === String(pos.lastTpOrderId))
+                    (pos.tpOrderId && String(latestClose.orderId) === String(pos.tpOrderId)) ||
+                    (pos.tp2OrderId && String(latestClose.orderId) === String(pos.tp2OrderId)) ||
+                    (pos.lastTpOrderId && String(latestClose.orderId) === String(pos.lastTpOrderId))
                   ) {
                     detectedReason = 'TAKE_PROFIT';
                   } else if (pos.trailingTpActive) {
@@ -4085,10 +4095,19 @@ export class WickSniperEngine {
           // Sinkronisasi kuantitas & avg entry price jika ada layer tambahan atau TP1 terisi di Binance
           if (realPos && Math.abs(realPos.positionAmt) > 0) {
             const isLiveLong = realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0);
+            const isLiveShort = realPos.positionSide === 'SHORT' || (realPos.positionSide === 'BOTH' && realPos.positionAmt < 0);
             if (isLiveLong && pos.side === 'SHORT') {
               logger.log(
                 'ERROR',
                 `🚨 [ANOMALI ARAH POSISI] ${symbol}: Di Binance terdeteksi posisi LONG (${realPos.positionAmt}), sedangkan bot memegang SHORT. Menolak sinkronisasi grid/TP agar tidak merusak posisi!`,
+                symbol
+              );
+              continue;
+            }
+            if (isLiveShort && pos.side === 'LONG') {
+              logger.log(
+                'ERROR',
+                `🚨 [ANOMALI ARAH POSISI] ${symbol}: Di Binance terdeteksi posisi SHORT (${realPos.positionAmt}), sedangkan bot memegang LONG. Menolak sinkronisasi grid/TP agar tidak merusak posisi!`,
                 symbol
               );
               continue;
@@ -4162,17 +4181,18 @@ export class WickSniperEngine {
             }
           }
 
-          // Pastikan posisi aktif SELALU memiliki order Limit Take Profit di Binance
-          const isLiveLongPos = realPos && (realPos.positionSide === 'LONG' || (realPos.positionSide === 'BOTH' && realPos.positionAmt > 0));
-          if (!isLiveLongPos && realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol) && !this.closingSymbols.has(symbol)) {
+          // Pastikan posisi aktif SELALU memiliki order Limit Take Profit di Binance jika bukan mode trailing
+          if (realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol) && !this.closingSymbols.has(symbol)) {
             try {
               // Best practice: Jangan pasang order Limit TP kaku jika Trailing Runner sedang aktif
               const isTrailingRunnerActive = pos.strategyType === 'SMART_MONEY'
                 ? (pos.trailingTpActive || (this.config.smartMoney?.trailingTpEnabled !== false))
                 : (pos.trailingTpActive || (this.config.exit.trailingTpEnabled && (pos.partialTpDone || !this.config.exit.partialTpEnabled)));
               if (!isTrailingRunnerActive) {
+                const isLong = pos.side === 'LONG';
+                const tpSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
                 const openOrders = await binanceFutures.getOpenOrders(symbol);
-                const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
+                const hasTpOrder = openOrders.some((o: any) => o.side === tpSide);
                 if (!hasTpOrder && pos.status === 'SNIPING' && !this.closingSymbols.has(symbol)) {
                   const now = Date.now();
                   if (!pos.lastTpAttempt || now - pos.lastTpAttempt >= 10000) {
@@ -4199,28 +4219,37 @@ export class WickSniperEngine {
           Math.abs(livePos.positionAmt) > 0
         ) {
           const isLiveLong = livePos.positionSide === 'LONG' || (livePos.positionSide === 'BOTH' && livePos.positionAmt > 0);
-          if (isLiveLong) {
-            // Wick Sniper murni bot SHORT spike reversal. Jangan mengadopsi posisi LONG di Binance!
+          const allowLong = this.config.triggerStrategy === 'SMART_MONEY' || this.config.triggerStrategy === 'HYBRID' || !!this.config.smartMoney?.enabled;
+          if (isLiveLong && !allowLong) {
+            // Wick Sniper murni bot SHORT spike reversal. Jangan mengadopsi posisi LONG di Binance jika mode Paus tidak aktif!
             continue;
           }
 
           logger.log(
             'WARN',
-            `🔄 [RE-ADOPSI POSISI] Menemukan posisi aktif ${livePos.symbol} di Binance (Qty: ${Math.abs(livePos.positionAmt)}, Entry: $${livePos.entryPrice}). Memulihkan ke radar bot & memasang proteksi TP...`,
+            `🔄 [RE-ADOPSI POSISI] Menemukan posisi aktif ${livePos.symbol} di Binance (${isLiveLong ? 'LONG' : 'SHORT'} | Qty: ${Math.abs(livePos.positionAmt)}, Entry: $${livePos.entryPrice}). Memulihkan ke radar bot & memasang proteksi TP...`,
             livePos.symbol
           );
 
           const exitCfg = this.config.exit;
+          const smCfg = this.config.smartMoney;
           const leverage = livePos.leverage || this.config.leverage || 10;
           const totalQty = Math.abs(livePos.positionAmt);
           const entryPrice = livePos.entryPrice;
-          const targetTpPrice = entryPrice * (1 - exitCfg.takeProfitPct / 100);
-          const hardSlPrice = entryPrice * (1 + exitCfg.hardStopLossPct / 100);
+          const tpPct = isLiveLong ? (smCfg?.takeProfitPct || 1.5) : exitCfg.takeProfitPct;
+          const slPct = isLiveLong ? (smCfg?.stopLossPct || 1.2) : exitCfg.hardStopLossPct;
+          const targetTpPrice = isLiveLong
+            ? entryPrice * (1 + tpPct / 100)
+            : entryPrice * (1 - tpPct / 100);
+          const hardSlPrice = isLiveLong
+            ? entryPrice * (1 - slPct / 100)
+            : entryPrice * (1 + slPct / 100);
 
           const adoptedPos: ActivePosition = {
             id: `adopt_${livePos.symbol}_${Date.now()}`,
             symbol: livePos.symbol,
-            side: 'SHORT',
+            side: isLiveLong ? 'LONG' : 'SHORT',
+            strategyType: isLiveLong ? 'SMART_MONEY' : 'WICK_SNIPER',
             leverage,
             totalQty,
             avgEntryPrice: entryPrice,
@@ -5165,15 +5194,36 @@ export class WickSniperEngine {
 
     const slPrice = parseFloat(binanceFutures.formatPrice(symbol, slPriceRaw));
 
+    let realEntryPrice = currentPrice;
+    let realQty = qty;
+    let liveOrderId: string | undefined = undefined;
+
     if (this.config.tradingMode === 'LIVE') {
       try {
+        if (this.liveAvailableBalance > 0 && this.liveAvailableBalance < actualMargin) {
+          logger.log('WARN', `❌ [LIVE MARGIN KURANG] Saldo USDT tersedia ($${this.liveAvailableBalance.toFixed(2)}) tidak cukup untuk margin $${actualMargin.toFixed(2)} USDT.`, symbol);
+          return;
+        }
         await binanceFutures.setLeverage(symbol, leverage);
         await binanceFutures.setMarginType(symbol, this.config.marginType);
         const orderSide = isShort ? 'SELL' : 'BUY';
         const res = await binanceFutures.openMarketOrder(symbol, orderSide, qty);
         if (!res || !res.orderId) {
-          logger.log('ERROR', `❌ [LIVE SMART MONEY ORDER GAGAL] ${symbol} order rejected`, symbol);
+          const errMsg = binanceFutures.lastOrderError || 'Order rejected by Binance';
+          logger.log('ERROR', `❌ [LIVE SMART MONEY ORDER GAGAL] ${symbol} order rejected: ${errMsg}`, symbol);
           return;
+        }
+        liveOrderId = String(res.orderId);
+        const fillAvg = parseFloat(res.avgPrice || '0');
+        const fillExec = parseFloat(res.executedQty || '0');
+        const fillCum = parseFloat(res.cumQuote || '0');
+        if (fillAvg > 0) {
+          realEntryPrice = fillAvg;
+        } else if (fillExec > 0 && fillCum > 0) {
+          realEntryPrice = fillCum / fillExec;
+        }
+        if (fillExec > 0) {
+          realQty = fillExec;
         }
       } catch (err: any) {
         logger.log('ERROR', `❌ [LIVE SMART MONEY EXCEPTION] ${symbol}: ${err?.message || err}`, symbol);
@@ -5188,14 +5238,44 @@ export class WickSniperEngine {
       }
     }
 
+    const effectiveMargin = (realQty * realEntryPrice) / leverage;
+
+    // Hitung ulang target TP dan SL dengan acuan harga riil eksekusi
+    const effectiveTpPrice = isShort
+      ? parseFloat(binanceFutures.formatPrice(symbol, realEntryPrice * (1 - tpPct / 100)))
+      : parseFloat(binanceFutures.formatPrice(symbol, realEntryPrice * (1 + tpPct / 100)));
+
+    let effectiveSlPriceRaw = slPriceRaw;
+    if (realEntryPrice !== currentPrice) {
+      if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
+        if (isShort) {
+          const structuralLevel = signal.whaleAvgEntry * (1 + bufferPct);
+          const minSl = realEntryPrice * 1.008;
+          const maxSl = realEntryPrice * (1 + Math.max(1.5, fallbackSlPct) / 100);
+          effectiveSlPriceRaw = Math.max(minSl, Math.min(structuralLevel, maxSl));
+        } else {
+          const structuralLevel = signal.whaleAvgEntry * (1 - bufferPct);
+          const minSl = realEntryPrice * 0.992;
+          const maxSl = realEntryPrice * (1 - Math.max(1.5, fallbackSlPct) / 100);
+          effectiveSlPriceRaw = Math.min(minSl, Math.max(structuralLevel, maxSl));
+        }
+      } else {
+        effectiveSlPriceRaw = isShort
+          ? realEntryPrice * (1 + fallbackSlPct / 100)
+          : realEntryPrice * (1 - fallbackSlPct / 100);
+      }
+    }
+    const effectiveSlPrice = parseFloat(binanceFutures.formatPrice(symbol, effectiveSlPriceRaw));
+
     const layer0: GridLayer = {
       layerIndex: 0,
-      price: currentPrice,
-      qty,
-      marginUsdt: actualMargin,
-      volumeUsdt: parseFloat((qty * currentPrice).toFixed(2)),
+      price: realEntryPrice,
+      qty: realQty,
+      marginUsdt: effectiveMargin,
+      volumeUsdt: parseFloat((realQty * realEntryPrice).toFixed(2)),
       status: 'FILLED',
       filledAt: Date.now(),
+      orderId: liveOrderId,
     };
 
     const layers: GridLayer[] = [layer0];
@@ -5203,8 +5283,8 @@ export class WickSniperEngine {
 
     for (let i = 1; i < numLayers; i++) {
       const layerPriceRaw = isShort
-        ? currentPrice * (1 + (i * spacingPct) / 100)
-        : currentPrice * (1 - (i * spacingPct) / 100);
+        ? realEntryPrice * (1 + (i * spacingPct) / 100)
+        : realEntryPrice * (1 - (i * spacingPct) / 100);
       const layerPrice = parseFloat(binanceFutures.formatPrice(symbol, layerPriceRaw));
       let layerPlanned = (marginPerLayer * leverage) / layerPrice;
       if (layerPlanned * layerPrice < prec.minNotional) {
@@ -5229,21 +5309,21 @@ export class WickSniperEngine {
       side: signal.side,
       strategyType: 'SMART_MONEY',
       leverage,
-      totalQty: qty,
-      avgEntryPrice: currentPrice,
-      currentPrice,
+      totalQty: realQty,
+      avgEntryPrice: realEntryPrice,
+      currentPrice: realEntryPrice,
       unrealizedPnl: 0,
       pnlPct: 0,
       peakPnlPct: 0,
-      totalMarginUsed: actualMargin,
+      totalMarginUsed: effectiveMargin,
       layers,
       openedAt: Date.now(),
-      targetTpPrice: tpPrice,
-      hardSlPrice: slPrice,
+      targetTpPrice: effectiveTpPrice,
+      hardSlPrice: effectiveSlPrice,
       status: 'SNIPING',
       trailingTpActive: false,
-      highestPrice: currentPrice,
-      lowestPrice: currentPrice,
+      highestPrice: realEntryPrice,
+      lowestPrice: realEntryPrice,
       slDescription: slLogDesc,
       paramsSnapshot: {
         strategy: 'SMART_MONEY',
@@ -5300,11 +5380,20 @@ export class WickSniperEngine {
     this.activePositions.set(symbol, initialPos);
     await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
-    const volUsdt = (qty * currentPrice).toFixed(2);
-    const actualEffectiveSlPct = Math.abs(((slPrice - currentPrice) / currentPrice) * 100).toFixed(2);
+    if (this.config.tradingMode === 'LIVE') {
+      if (numLayers > 1) {
+        await this.deployNextGridLayerInQueue(initialPos);
+      }
+      if (smCfg.trailingTpEnabled === false) {
+        await this.syncLiveTakeProfitOrder(initialPos);
+      }
+    }
+
+    const volUsdt = (realQty * realEntryPrice).toFixed(2);
+    const actualEffectiveSlPct = Math.abs(((effectiveSlPrice - realEntryPrice) / realEntryPrice) * 100).toFixed(2);
     logger.log(
       'SUCCESS',
-      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Layers: ${numLayers}x | Margin Modal: $${actualMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${actualEffectiveSlPct}%, ${slLogDesc})`,
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(realEntryPrice)} | Layers: ${numLayers}x | Margin Modal: $${effectiveMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(effectiveTpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(effectiveSlPrice)} (-${actualEffectiveSlPct}%, ${slLogDesc})`,
       symbol
     );
 
