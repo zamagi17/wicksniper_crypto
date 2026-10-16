@@ -705,6 +705,38 @@ function renderStatus(status) {
     }
   }
 
+  const totalFloatingPnl = (status.activePositions || []).reduce((sum, p) => sum + (Number(p.unrealizedPnl) || 0), 0);
+  const totalFloatingPct = totalActiveMargin > 0 ? (totalFloatingPnl / totalActiveMargin) * 100 : 0;
+  const isProfitFloat = totalFloatingPnl >= 0;
+  const floatSign = isProfitFloat ? '+' : '';
+  const floatColor = isProfitFloat ? '#30d158' : '#ff453a';
+  const floatBg = isProfitFloat ? 'rgba(48, 209, 88, 0.14)' : 'rgba(255, 69, 58, 0.14)';
+  const floatBorder = isProfitFloat ? 'rgba(48, 209, 88, 0.4)' : 'rgba(255, 69, 58, 0.4)';
+
+  const activeFloatingEl = document.getElementById('active-floating-pnl-tag');
+  if (activeFloatingEl) {
+    if (status.activePositionsCount > 0) {
+      activeFloatingEl.style.display = 'inline-block';
+      activeFloatingEl.style.background = floatBg;
+      activeFloatingEl.style.borderColor = floatBorder;
+      activeFloatingEl.style.color = floatColor;
+      activeFloatingEl.innerText = `Floating: ${floatSign}$${totalFloatingPnl.toFixed(2)} (${floatSign}${totalFloatingPct.toFixed(1)}%)`;
+    } else {
+      activeFloatingEl.style.display = 'none';
+    }
+  }
+
+  const metricFloatingSub = document.getElementById('metric-floating-sub');
+  if (metricFloatingSub) {
+    if (status.activePositionsCount > 0) {
+      metricFloatingSub.style.display = 'block';
+      metricFloatingSub.style.color = floatColor;
+      metricFloatingSub.innerText = `Floating: ${floatSign}$${totalFloatingPnl.toFixed(2)} (${floatSign}${totalFloatingPct.toFixed(1)}%)`;
+    } else {
+      metricFloatingSub.style.display = 'none';
+    }
+  }
+
   document.getElementById('closed-count-tag').innerText = `${status.totalTrades} Trade`;
 
   // Render Cooldown Strip
@@ -764,7 +796,35 @@ function renderActivePositions(positions) {
     return;
   }
 
-  container.innerHTML = positions
+  const totalMargin = positions.reduce((sum, p) => sum + (Number(p.totalMarginUsed) || 0), 0);
+  const totalVolume = positions.reduce((sum, p) => sum + ((Number(p.totalQty) || 0) * (Number(p.avgEntryPrice) || Number(posPrice(p)) || 0)), 0);
+  const totalFloatingPnl = positions.reduce((sum, p) => sum + (Number(p.unrealizedPnl) || 0), 0);
+  const totalFloatingPct = totalMargin > 0 ? (totalFloatingPnl / totalMargin) * 100 : 0;
+  const isProfitTotal = totalFloatingPnl >= 0;
+  const pnlHexTotal = isProfitTotal ? '#30d158' : '#ff453a';
+  const pnlBgTotal = isProfitTotal ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)';
+  const pnlBorderTotal = isProfitTotal ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
+  const pnlSignTotal = isProfitTotal ? '+' : '';
+
+  function posPrice(p) { return p.currentPrice || 0; }
+
+  const summaryHeaderHtml = `
+    <div class="positions-summary-bar" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-muted, #8e8e93); flex-wrap: wrap;">
+        <span style="color: var(--text-primary, #fff); font-weight: 700;">📊 ${positions.length} Posisi Aktif</span>
+        <span>•</span>
+        <span>Total Margin: <b style="color: var(--text-primary, #fff);">$${totalMargin.toFixed(2)} USDT</b></span>
+        <span>•</span>
+        <span>Volume: <b style="color: var(--text-primary, #fff);">$${totalVolume.toFixed(1)} USDT</b></span>
+      </div>
+      <div style="background: ${pnlBgTotal}; border: 1px solid ${pnlBorderTotal}; color: ${pnlHexTotal}; font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
+        <span>Total Floating PnL:</span>
+        <span>${pnlSignTotal}$${totalFloatingPnl.toFixed(2)} (${pnlSignTotal}${totalFloatingPct.toFixed(2)}%)</span>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = summaryHeaderHtml + positions
     .map((pos) => {
       try {
         const isProfit = (pos.unrealizedPnl || 0) >= 0;

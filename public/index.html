@@ -125,6 +125,7 @@
         <div class="kpi-label">Realized PnL (Hari Ini)</div>
         <div class="kpi-value" id="metric-pnl">+$0.00</div>
         <div class="kpi-sub" id="metric-pnl-sub">Hari Ini (00:00 WIB) • Total: +$0.00</div>
+        <div class="kpi-sub" id="metric-floating-sub" style="display: none; margin-top: 3px; font-weight: 700;">Floating: +$0.00</div>
       </div>
 
       <div class="kpi-card">
@@ -183,8 +184,9 @@
               <span class="icon">⚡</span>
               <h2>Posisi Aktif & Jaring Grid Ladder</h2>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
               <span class="badge-margin-tag" id="active-margin-tag" style="display: none;">Margin Aktif: $0.00 USDT</span>
+              <span class="badge-floating-tag" id="active-floating-pnl-tag" style="display: none; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">Floating: +$0.00</span>
               <span class="tag-counter" id="active-count-tag">0 Posisi</span>
             </div>
           </div>
