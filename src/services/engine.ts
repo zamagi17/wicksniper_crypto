@@ -161,6 +161,7 @@ export class WickSniperEngine {
       trailingCallbackPct: 0.3,
       stopLossPct: 3.0,
       cooldownMinutes: 30,
+      maxConcurrentPositions: 3,
       scanIntervalSeconds: 30,
     };
   }
@@ -4978,7 +4979,7 @@ export class WickSniperEngine {
     if (this.smartMoneyScanner.isCoolingDown(symbol)) return;
     if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) return;
 
-    const maxConcurrent = this.config.grid?.maxConcurrentCoins || 3;
+    const maxConcurrent = this.config.smartMoney?.maxConcurrentPositions || this.config.grid?.maxConcurrentCoins || 3;
     if (this.activePositions.size >= maxConcurrent) {
       return;
     }

@@ -144,6 +144,7 @@ export interface SmartMoneyConfig {
   trailingCallbackPct?: number;// Trailing callback (%)
   stopLossPct?: number;        // Hard Stop Loss (%)
   cooldownMinutes: number;     // Cooldown antar trade simbol yang sama
+  maxConcurrentPositions?: number; // Maksimal koin/posisi aktif bersamaan untuk Smart Money
   scanIntervalSeconds?: number;// Interval pengecekan rasio pasar
 }
 

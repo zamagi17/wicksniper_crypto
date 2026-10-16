@@ -573,7 +573,13 @@
             <small class="form-hint">Proteksi batas rugi ketat (Standar: 3.0%).</small>
           </div>
 
-          <div class="form-group" style="grid-column: span 2;">
+          <div class="form-group">
+            <label>Maksimal Posisi Aktif Bersamaan <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-max-positions" min="1" max="10" step="1" class="form-control" placeholder="3">
+            <small class="form-hint">Batas kuota koin Smart Money yang boleh dibuka berbarengan (Standar: 2 - 3 koin).</small>
+          </div>
+
+          <div class="form-group">
             <label>Cooldown Antar Trade Koin (Menit) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-cooldown" min="1" step="1" class="form-control" placeholder="30">
             <small class="form-hint">Jeda koin yang sama sebelum boleh open posisi baru lagi (Standar: 30m).</small>

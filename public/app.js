@@ -2674,6 +2674,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 3.0);
   setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
   setVal('cfg-sm-leverage', smCfg.leverage ?? cfg.leverage ?? 5);
+  setVal('cfg-sm-max-positions', smCfg.maxConcurrentPositions ?? cfg.grid?.maxConcurrentCoins ?? 3);
   setVal('cfg-sm-cooldown', smCfg.cooldownMinutes ?? 30);
   setVal('cfg-sm-layers', smCfg.entryLayers ?? 1);
   setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
@@ -2973,6 +2974,7 @@ function getSettingsFormData() {
       stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '3.0')) || 3.0,
       marginUsdt: parseFloat(getVal('cfg-sm-margin', '5')) || 5,
       leverage: parseInt(getVal('cfg-sm-leverage', '5'), 10) || 5,
+      maxConcurrentPositions: parseInt(getVal('cfg-sm-max-positions', '3'), 10) || 3,
       cooldownMinutes: parseInt(getVal('cfg-sm-cooldown', '30'), 10) || 30,
       entryLayers: parseInt(getVal('cfg-sm-layers', '1'), 10) || 1,
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
