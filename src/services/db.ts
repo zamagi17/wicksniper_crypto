@@ -325,29 +325,35 @@ export class DatabaseService {
          LIMIT $1;`,
         params
       );
-      return res.rows.map((r: any) => ({
-        id: r.id,
-        symbol: r.symbol,
-        side: r.side,
-        entryPrice: parseFloat(r.entryPrice),
-        exitPrice: parseFloat(r.exitPrice),
-        qty: parseFloat(r.qty),
-        marginUsed: parseFloat(r.marginUsed),
-        realizedPnl: parseFloat(r.realizedPnl),
-        grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
-        fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
-        pnlPct: parseFloat(r.pnlPct),
-        durationSeconds: parseInt(r.durationSeconds, 10),
-        exitReason: r.exitReason,
-        isPaper: r.isPaper,
-        closedAt: r.closedAt,
-        timestamp: parseInt(r.timestamp, 10),
-        layersFilled: r.layersFilled || undefined,
-        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
-        marketSnapshot: (typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot)?.marketSnapshot || null,
-        layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
-        postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
-      }));
+      return res.rows.map((r: any) => {
+        const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
+        return {
+          id: r.id,
+          symbol: r.symbol,
+          side: r.side,
+          entryPrice: parseFloat(r.entryPrice),
+          exitPrice: parseFloat(r.exitPrice),
+          qty: parseFloat(r.qty),
+          marginUsed: parseFloat(r.marginUsed),
+          realizedPnl: parseFloat(r.realizedPnl),
+          grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
+          fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
+          pnlPct: parseFloat(r.pnlPct),
+          durationSeconds: parseInt(r.durationSeconds, 10),
+          exitReason: r.exitReason,
+          isPaper: r.isPaper,
+          closedAt: r.closedAt,
+          timestamp: parseInt(r.timestamp, 10),
+          layersFilled: r.layersFilled || undefined,
+          strategyType: parsedSnap?.strategy || (parsedSnap?.smartMoneyFlowStatus ? 'SMART_MONEY' : undefined),
+          smartMoneyFlowStatus: parsedSnap?.smartMoneyFlowStatus || null,
+          slDescription: parsedSnap?.slDescription || null,
+          paramsSnapshot: parsedSnap,
+          marketSnapshot: parsedSnap?.marketSnapshot || null,
+          layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
+          postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
+        };
+      });
     } catch (e: any) {
       console.error('[Database] Gagal load trades dari DB:', e.message);
       return [];

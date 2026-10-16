@@ -1625,6 +1625,10 @@ function renderClosedTradesTable(trades) {
       const isWin = realizedPnl >= 0;
       const pnlColor = isWin ? 'text-green' : 'text-red';
       const sign = isWin ? '+' : '';
+      const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio;
+      const stratBadge = isSmTrade
+        ? `<span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Smart Money (Whale Flow)">🐋 SM</span>`
+        : '';
       const layerBadge = t.layersFilled
         ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
         : '';
@@ -1641,7 +1645,7 @@ function renderClosedTradesTable(trades) {
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
-          <td><b>${t.symbol}</b> <span class="badge-side ${t.side === 'LONG' ? 'long' : 'short'}">${t.side || 'SHORT'}</span> ${layerBadge}</td>
+          <td><b>${t.symbol}</b> <span class="badge-side ${t.side === 'LONG' ? 'long' : 'short'}">${t.side || 'SHORT'}</span> ${stratBadge} ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
           <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
@@ -1764,20 +1768,24 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     const pnlColor = isWin ? 'text-green' : 'text-red';
     const sign = isWin ? '+' : '';
 
+    // Fallback snapshot jika trade lama belum memiliki snapshot
+    let snap = t.paramsSnapshot;
+    if (typeof snap === 'string') {
+      try { snap = JSON.parse(snap); } catch (_) { snap = null; }
+    }
+
+    const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio;
+    const stratName = isSm ? '🐋 Smart Money' : t.strategyType === 'MOMENTUM_LONG' ? '🚀 Momentum Long' : '⚡ Wick Sniper';
+
     // Header Title & Badge
     const titleEl = document.getElementById('td-title');
-    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} SHORT (${t.isPaper ? 'Paper' : 'Live'})`;
+    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${t.side || 'SHORT'} [${stratName}] (${t.isPaper ? 'Paper' : 'Live'})`;
     const badge = document.getElementById('td-pnl-badge');
     if (badge) {
       badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
       badge.innerText = `${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)`;
     }
 
-    // Fallback snapshot jika trade lama belum memiliki snapshot
-    let snap = t.paramsSnapshot;
-    if (typeof snap === 'string') {
-      try { snap = JSON.parse(snap); } catch (_) { snap = null; }
-    }
     snap = snap || {
       marginPerLayerUsdt: 3,
       totalLayers: 6,
@@ -2046,6 +2054,20 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Sumber Data Market', snap.dataSource, currScanner.dataSource)}
       ${renderCompareRow('Rem Rugi Harian (Circuit Breaker)', snap.maxDailyLossUsdt, currRisk.maxDailyLossUsdt, ' USDT', formatZeroDisabled(' USDT'))}
       ${renderCompareRow('Batas Saldo Pengaman (Floor)', snap.minSafetyBalanceUsdt, currRisk.minSafetyBalanceUsdt, ' USDT', formatZeroDisabled(' USDT'))}
+
+      ${isSm ? `
+      ${renderGroupHeader('🐋 Smart Money Flow Parameters')}
+      ${renderCompareRow('Target Rasio Paus Short', snap.thresholdShortRatio, curr.smartMoney?.thresholdShortRatio, '', formatRatioPct)}
+      ${renderCompareRow('Target Rasio Paus Long', snap.thresholdLongRatio, curr.smartMoney?.thresholdLongRatio, '', formatRatioPct)}
+      ${renderCompareRow('Filter Jebakan Ritel', snap.retailTrapFilter, curr.smartMoney?.retailTrapFilter)}
+      ${renderCompareRow('Filter Kesehatan Paus (Anti-Nyangkut)', snap.whaleHealthFilterEnabled, curr.smartMoney?.whaleHealthFilterEnabled)}
+      ${renderCompareRow('Min. % Paus Meraih Laba', snap.minWhaleWinratePct, curr.smartMoney?.minWhaleWinratePct, '%')}
+      ${renderCompareRow('Maks. Toleransi Rugi Modal Paus', snap.maxWhaleAdverseLossPct, curr.smartMoney?.maxWhaleAdverseLossPct, '%')}
+      ${renderCompareRow('Filter Jarak Modal Paus (Anti-FOMO)', snap.whaleDistanceFilterEnabled, curr.smartMoney?.whaleDistanceFilterEnabled)}
+      ${renderCompareRow('Maksimal Jarak Modal Paus', snap.maxWhaleDistancePct, curr.smartMoney?.maxWhaleDistancePct, '%')}
+      ${renderCompareRow('Dynamic Structural SL', snap.structuralSlEnabled, curr.smartMoney?.structuralSlEnabled)}
+      ${renderCompareRow('Buffer Structural SL', snap.structuralSlBufferPct, curr.smartMoney?.structuralSlBufferPct, '%')}
+      ` : ''}
     `;
 
     console.log('[TradeDetail] diffCount:', diffCount, 'totalParams:', totalParamCount);
@@ -2183,6 +2205,86 @@ function openTradeDetailModal(tradeId, tradeIndex) {
                   $${formatShortUsdt(mSnap.vol1mUsdt)} USDT
                   ${mSnap.volRatio ? `<small style="font-size:10px; color:var(--text-muted); font-weight:normal;"> (${mSnap.volRatio}x Normal)</small>` : ''}
                 </div>
+              </div>` : ''}
+            </div>
+          `;
+        })()}
+
+        <!-- SMART MONEY & WHALE FLOW SAAT ENTRY -->
+        ${(() => {
+          const sm = t.smartMoneyFlowStatus || snap?.smartMoneyFlowStatus || null;
+          const isSmTrade = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!sm || snap?.whaleAvgEntry !== undefined || snap?.whaleShortRatio !== undefined;
+          if (!isSmTrade) return '';
+
+          const whaleShortRatio = snap?.whaleShortRatio ?? sm?.whaleShortRatio;
+          const whaleLongRatio = snap?.whaleLongRatio ?? sm?.whaleLongRatio;
+          const whaleAvg = snap?.whaleAvgEntry ?? sm?.whaleAvgEntry;
+          const whaleDist = snap?.whaleDistancePct ?? sm?.whaleDistancePct;
+          const whaleWin = snap?.whaleWinratePct ?? sm?.whaleWinratePct;
+          const whaleProfit = snap?.whaleProfitWhales ?? sm?.whaleProfitWhales;
+          const whaleTotal = snap?.whaleTotalWhales ?? sm?.whaleTotalWhales;
+          const whalePositions = snap?.whalePositionsUsdt ?? sm?.whalePositionsUsdt ?? (t.side === 'LONG' ? sm?.longWhalePositionsUsdt : sm?.shortWhalePositionsUsdt);
+          const retailLong = snap?.retailLongRatio ?? sm?.retailLongRatio;
+          const retailShort = snap?.retailShortRatio ?? sm?.retailShortRatio;
+          const slDesc = snap?.slDescription || t.slDescription;
+          const signalReason = snap?.signalReason;
+
+          const sameSideRatio = t.side === 'LONG' ? whaleLongRatio : whaleShortRatio;
+          const oppSideRatio = t.side === 'LONG' ? whaleShortRatio : whaleLongRatio;
+
+          const distColor = whaleDist !== undefined ? (Math.abs(whaleDist) <= 0.8 ? 'text-green' : Math.abs(whaleDist) <= 1.5 ? 'text-yellow' : 'text-red') : '';
+          const distSign = (whaleDist || 0) > 0 ? '+' : '';
+          const winColor = (whaleWin || 0) >= 50 ? 'text-green' : 'text-red';
+
+          return `
+            <div class="td-section-title" style="margin-top: 14px;">🐋 Snapshot Aliran Smart Money (Paus) Saat Entry</div>
+            <div class="td-kpi-grid">
+              ${sameSideRatio !== undefined ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🐋 Dominasi Paus ${t.side || 'SHORT'}</div>
+                <div class="td-kpi-val text-cyan"><b>${(Number(sameSideRatio) * 100).toFixed(1)}%</b> <small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(Lawan: ${(Number(oppSideRatio || 0) * 100).toFixed(1)}%)</small></div>
+              </div>` : ''}
+
+              ${whaleAvg ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">⚓ Modal Masuk Rata-rata Paus</div>
+                <div class="td-kpi-val" style="color: #ff9f0a;"><b>$${formatCryptoPrice(whaleAvg)}</b></div>
+              </div>` : ''}
+
+              ${whaleDist !== undefined ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">📏 Jarak Entry vs Modal Paus</div>
+                <div class="td-kpi-val ${distColor}"><b>${distSign}${Number(whaleDist).toFixed(2)}%</b> <small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(${Math.abs(whaleDist) <= 0.8 ? 'Sweet Spot 🎯' : Math.abs(whaleDist) <= 1.5 ? 'Wajar' : 'Jauh ⚠️'})</small></div>
+              </div>` : ''}
+
+              ${whaleWin !== undefined ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🩺 Kesehatan Paus (% Laba)</div>
+                <div class="td-kpi-val ${winColor}"><b>${Number(whaleWin).toFixed(1)}% Laba</b> ${whaleTotal ? `<small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(${whaleProfit || 0}/${whaleTotal} Paus)</small>` : ''}</div>
+              </div>` : ''}
+
+              ${whalePositions ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">💰 Total Posisi Whale (USDT)</div>
+                <div class="td-kpi-val text-purple"><b>$${formatShortUsdt(whalePositions)} USDT</b></div>
+              </div>` : ''}
+
+              ${retailLong !== undefined && retailShort !== undefined ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">👥 Rasio Trader Ritel</div>
+                <div class="td-kpi-val" style="font-size: 11.5px;">${(Number(retailLong) * 100).toFixed(0)}% Long / ${(Number(retailShort) * 100).toFixed(0)}% Short</div>
+              </div>` : ''}
+
+              ${slDesc ? `
+              <div class="td-kpi-card" style="grid-column: span 2;">
+                <div class="td-kpi-label">🛡️ Aturan Stop Loss Smart Money</div>
+                <div class="td-kpi-val" style="font-size: 12px; color: #34c759;">${escapeHtml(slDesc)}</div>
+              </div>` : ''}
+
+              ${signalReason ? `
+              <div class="td-kpi-card" style="grid-column: span 2;">
+                <div class="td-kpi-label">🎯 Log Pemicu Entry</div>
+                <div class="td-kpi-val" style="font-size: 11.5px; color: var(--text-muted); font-weight: 500;">${escapeHtml(signalReason)}</div>
               </div>` : ''}
             </div>
           `;

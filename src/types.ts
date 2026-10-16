@@ -303,6 +303,7 @@ export interface ActivePosition {
   lastTpAttempt?: number;
   paramsSnapshot?: Record<string, any>;
   marketSnapshot?: MarketSnapshot;
+  slDescription?: string;
   smartMoneyFlowStatus?: SmartMoneyFlowStatus;
 }
 
@@ -340,7 +341,7 @@ export interface ClosedTrade {
   id: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
-  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG';
+  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY';
   entryPrice: number;
   exitPrice: number;
   qty: number;
@@ -376,6 +377,8 @@ export interface ClosedTrade {
   maePct?: number;
   peakPnlPct?: number;
   postExit30m?: PostExitSnapshot;
+  smartMoneyFlowStatus?: SmartMoneyFlowStatus;
+  slDescription?: string;
 }
 
 export interface EngineStatus {
