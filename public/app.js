@@ -3594,7 +3594,7 @@ function toggleStrategySettingsView() {
   const panel = document.getElementById('smart-money-panel');
   if (panel) {
     const val = select ? select.value : 'SMART_MONEY';
-    panel.style.display = (val === 'SMART_MONEY' || val === 'HYBRID') ? 'flex' : 'none';
+    panel.style.display = (val === 'SMART_MONEY' || val === 'HYBRID') ? 'grid' : 'none';
   }
 }
 window.toggleStrategySettingsView = toggleStrategySettingsView;

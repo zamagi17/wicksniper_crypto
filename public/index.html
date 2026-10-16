@@ -481,9 +481,9 @@
         </div>
 
         <!-- SMART MONEY PARAMETERS PANEL -->
-        <div id="smart-money-panel" class="form-row" style="background: rgba(46, 213, 115, 0.05); border: 1px dashed rgba(46, 213, 115, 0.4); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
-          <div class="form-group" style="grid-column: span 2; margin-bottom: 6px;">
-            <label style="font-weight: 700; color: #2ed573; display: flex; align-items: center; gap: 8px;">
+        <div id="smart-money-panel" class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; background: rgba(46, 213, 115, 0.05); border: 1px dashed rgba(46, 213, 115, 0.4); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 4px; padding-bottom: 8px; border-bottom: 1px solid rgba(46, 213, 115, 0.2);">
+            <label style="font-weight: 700; color: #2ed573; font-size: 0.95rem; display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;">
               <input type="checkbox" id="cfg-sm-enabled" style="width: 18px; height: 18px; accent-color: #2ed573;" checked>
               <span>🐋 Parameter Khusus Smart Money</span>
             </label>
@@ -521,11 +521,12 @@
             <small class="form-hint">Paus harus pegang >= X% volume Long untuk trigger Long (Standar: 60%).</small>
           </div>
 
-          <div class="form-group" style="grid-column: span 2; display: flex; align-items: center; gap: 8px;">
-            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #e4e7eb; margin: 0;">
+          <div class="form-group" style="grid-column: span 2; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 10px; font-weight: 600; color: #e4e7eb; margin: 0; cursor: pointer;">
               <input type="checkbox" id="cfg-sm-retail-trap" style="width: 16px; height: 16px; accent-color: #2ed573;" checked>
               <span>🛡️ Konfirmasi Retail Trap (Wajib retail berada di sisi berlawanan)</span>
             </label>
+            <small class="form-hint" style="margin-left: 26px; margin-top: 4px; display: block;">Hanya eksekusi sinyal jika mayoritas akun retail memegang posisi yang berlawanan dengan paus (retail tersangkut).</small>
           </div>
 
           <div class="form-group">
