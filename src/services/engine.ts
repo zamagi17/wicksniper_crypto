@@ -149,6 +149,8 @@ export class WickSniperEngine {
       rsiFilterEnabled: true,
       minRsiShort: 48,
       maxRsiLong: 62,
+      whaleDistanceFilterEnabled: true,
+      maxWhaleDistancePct: 1.5,
       pullbackConfirmationEnabled: true,
       pullbackMinPct: 0.3,
       pullbackMaxWaitSeconds: 12,
@@ -5213,10 +5215,12 @@ export class WickSniperEngine {
       whaleLongShortRatio: signal.whaleLongShortRatio || (signal.whaleShortRatio > 0 ? signal.whaleLongRatio / signal.whaleShortRatio : 1),
       retailLongRatio: signal.retailLongRatio,
       retailShortRatio: signal.retailShortRatio,
+      whaleAvgEntry: signal.whaleAvgEntry,
+      whaleDistancePct: signal.whaleDistancePct,
       aligned: true,
       reversalDetected: false,
       label: `🐋 Paus ${signal.side} (${((signal.side === 'LONG' ? signal.whaleLongRatio : signal.whaleShortRatio) * 100).toFixed(0)}%) • Searah`,
-      detail: `Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S`,
+      detail: `Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S${signal.whaleAvgEntry ? ` | Modal Paus: $${formatCryptoPrice(signal.whaleAvgEntry)}` : ''}`,
       updatedAt: Date.now(),
     };
 
@@ -5278,16 +5282,28 @@ export class WickSniperEngine {
 
         const detail = `Paus: ${(metrics.whaleLongRatio * 100).toFixed(0)}% L / ${(metrics.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(metrics.retailLongRatio * 100).toFixed(0)}% L / ${(metrics.retailShortRatio * 100).toFixed(0)}% S`;
 
+        const whaleAvgEntry = isLong ? metrics.whaleLongAvgEntry : metrics.whaleShortAvgEntry;
+        let whaleDistancePct: number | undefined;
+        if (whaleAvgEntry && whaleAvgEntry > 0) {
+          whaleDistancePct = isLong
+            ? ((pos.currentPrice - whaleAvgEntry) / whaleAvgEntry) * 100
+            : ((whaleAvgEntry - pos.currentPrice) / whaleAvgEntry) * -100;
+        }
+
         pos.smartMoneyFlowStatus = {
           whaleLongRatio: metrics.whaleLongRatio,
           whaleShortRatio: metrics.whaleShortRatio,
           whaleLongShortRatio: metrics.whaleLongShortRatio,
           retailLongRatio: metrics.retailLongRatio,
           retailShortRatio: metrics.retailShortRatio,
+          whaleAvgEntry,
+          whaleDistancePct,
+          longWhalePositionsUsdt: metrics.longWhalePositionsUsdt,
+          shortWhalePositionsUsdt: metrics.shortWhalePositionsUsdt,
           aligned,
           reversalDetected,
           label,
-          detail,
+          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : ''),
           updatedAt: now,
         };
       } catch (err: any) {

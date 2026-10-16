@@ -115,7 +115,7 @@ export class BinanceFuturesClient {
         }
       }
     } catch {}
-    const fallback = hostname.includes('testnet') ? '18.64.37.31' : '35.77.171.26';
+    const fallback = hostname.includes('www.binance') ? '18.244.51.24' : (hostname.includes('testnet') ? '18.64.37.31' : '35.77.171.26');
     this.dohCache.set(hostname, fallback);
     return fallback;
   }
@@ -125,6 +125,7 @@ export class BinanceFuturesClient {
 
     const fapiIp = await this.resolveHostViaDoH(this.isTestnet ? 'testnet.binancefuture.com' : 'fapi.binance.com');
     const fstreamIp = await this.resolveHostViaDoH(this.isTestnet ? 'stream.binancefuture.com' : 'fstream.binance.com');
+    const wwwBinanceIp = await this.resolveHostViaDoH('www.binance.com');
 
     this.dohAgent = new https.Agent({
       keepAlive: true,
@@ -132,8 +133,12 @@ export class BinanceFuturesClient {
         const cb = typeof options === 'function' ? options : callback;
         const opt = typeof options === 'object' ? options : {};
         let ip = fapiIp;
-        if (hostname.includes('stream') || hostname.includes('fstream')) {
+        if (hostname === 'www.binance.com') {
+          ip = wwwBinanceIp;
+        } else if (hostname.includes('stream') || hostname.includes('fstream')) {
           ip = fstreamIp;
+        } else if (hostname.includes('binance')) {
+          ip = fapiIp;
         }
         if (hostname.includes('binance')) {
           if (opt && (opt as any).all) {
@@ -1529,34 +1534,92 @@ export class BinanceFuturesClient {
     whaleLongShortRatio: number;
     retailLongRatio: number;
     retailShortRatio: number;
+    whaleLongAvgEntry?: number;
+    whaleShortAvgEntry?: number;
+    longWhalePositionsUsdt?: number;
+    shortWhalePositionsUsdt?: number;
+    longWhales?: number;
+    shortWhales?: number;
     timestamp: number;
   } | null> {
     const cacheKey = `${symbol}_${period}`;
     const cached = this.smartMoneyCache.get(cacheKey);
     const now = Date.now();
-    if (cached && now - cached.timestamp < 45000) {
+    if (cached && now - cached.timestamp < 30000) {
       return cached.data;
     }
 
     try {
       const client = await this.getHttpClient();
-      const [posRes, globalRes] = await Promise.all([
+      const dohAgent = await this.getOrCreateDohAgent();
+
+      const [posRes, globalRes, bapiStatsRes, bapiListRes] = await Promise.all([
         client.get('/futures/data/topLongShortPositionRatio', {
           params: { symbol, period, limit: 1 },
-          timeout: 5000,
-        }),
+          timeout: 4000,
+        }).catch(() => null),
         client.get('/futures/data/globalLongShortAccountRatio', {
           params: { symbol, period, limit: 1 },
-          timeout: 5000,
+          timeout: 4000,
+        }).catch(() => null),
+        axios.get(`https://www.binance.com/bapi/futures/v1/public/future/smart-money/signal/details/stats?symbol=${symbol}&timeRange=ALL`, {
+          httpsAgent: dohAgent,
+          timeout: 4000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'clienttype': 'web',
+          },
+        }).catch(() => null),
+        axios.get(`https://www.binance.com/bapi/futures/v1/public/future/smart-money/signal/details/list?symbol=${symbol}&page=1&rows=5&timeRange=ALL&sortingField=POSITION&sortingOrder=DESC`, {
+          httpsAgent: dohAgent,
+          timeout: 4000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'clienttype': 'web',
+          },
         }).catch(() => null),
       ]);
 
       const posData = posRes?.data?.[0];
-      if (!posData) return null;
+      let whaleLongRatio = parseFloat(posData?.longAccount || '0');
+      let whaleShortRatio = parseFloat(posData?.shortAccount || '0');
+      let whaleLongShortRatio = parseFloat(posData?.longShortRatio || '1');
 
-      const whaleLongRatio = parseFloat(posData.longAccount || '0');
-      const whaleShortRatio = parseFloat(posData.shortAccount || '0');
-      const whaleLongShortRatio = parseFloat(posData.longShortRatio || '1');
+      let whaleLongAvgEntry: number | undefined;
+      let whaleShortAvgEntry: number | undefined;
+      let longWhalePositionsUsdt: number | undefined;
+      let shortWhalePositionsUsdt: number | undefined;
+      let longWhales: number | undefined;
+      let shortWhales: number | undefined;
+
+      const bapiStats = bapiStatsRes?.data?.data;
+      if (bapiStats) {
+        longWhalePositionsUsdt = parseFloat(bapiStats.longWhalePositions || '0');
+        shortWhalePositionsUsdt = parseFloat(bapiStats.shortWhalePositions || '0');
+        longWhales = parseInt(bapiStats.longWhales || '0', 10);
+        shortWhales = parseInt(bapiStats.shortWhales || '0', 10);
+
+        const totalWhalePos = longWhalePositionsUsdt + shortWhalePositionsUsdt;
+        if (totalWhalePos > 0) {
+          whaleLongRatio = longWhalePositionsUsdt / totalWhalePos;
+          whaleShortRatio = shortWhalePositionsUsdt / totalWhalePos;
+          whaleLongShortRatio = shortWhalePositionsUsdt > 0 ? longWhalePositionsUsdt / shortWhalePositionsUsdt : 99;
+        }
+      }
+
+      const bapiList = bapiListRes?.data?.data;
+      if (Array.isArray(bapiList) && bapiList.length > 0) {
+        const buyItem = bapiList.find((x: any) => x.side === 'BUY' && x.userType === 2) || bapiList.find((x: any) => x.side === 'BUY');
+        const sellItem = bapiList.find((x: any) => x.side === 'SELL' && x.userType === 2) || bapiList.find((x: any) => x.side === 'SELL');
+        if (buyItem?.avgEntryPrice) {
+          whaleLongAvgEntry = parseFloat(buyItem.avgEntryPrice);
+        }
+        if (sellItem?.avgEntryPrice) {
+          whaleShortAvgEntry = parseFloat(sellItem.avgEntryPrice);
+        }
+      }
+
+      if (!posData && !bapiStats) return null;
 
       let retailLongRatio = 0.5;
       let retailShortRatio = 0.5;
@@ -1572,7 +1635,13 @@ export class BinanceFuturesClient {
         whaleLongShortRatio,
         retailLongRatio,
         retailShortRatio,
-        timestamp: posData.timestamp || now,
+        whaleLongAvgEntry,
+        whaleShortAvgEntry,
+        longWhalePositionsUsdt,
+        shortWhalePositionsUsdt,
+        longWhales,
+        shortWhales,
+        timestamp: posData?.timestamp || now,
       };
 
       this.smartMoneyCache.set(cacheKey, { timestamp: now, data: result });

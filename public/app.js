@@ -855,6 +855,14 @@ function renderActivePositions(positions) {
             : 'background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); color: #8e8e93;';
         smFlowBadgeHtml = `<span class="badge-tag ${flowClass}" style="${flowBg} padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; cursor: help;" title="${smFlow.detail || ''} (Murni sebagai analisa arah aliran Paus)">${smFlow.label}</span>`;
 
+        let modalPausTag = '';
+        if (smFlow.whaleAvgEntry) {
+          const distPct = smFlow.whaleDistancePct ?? 0;
+          const distSign = distPct > 0 ? '+' : '';
+          const distColor = Math.abs(distPct) <= 1.5 ? '#30d158' : Math.abs(distPct) <= 3.0 ? '#ffd60a' : '#ff453a';
+          modalPausTag = `<span class="badge-tag" style="background: rgba(255, 159, 10, 0.12); border: 1px solid rgba(255, 159, 10, 0.35); color: #ff9f0a; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Harga Masuk Rata-Rata Paus: $${formatCryptoPrice(smFlow.whaleAvgEntry)} (Selisih dari harga: ${distSign}${distPct.toFixed(1)}%)">🐋 Modal: $${formatCryptoPrice(smFlow.whaleAvgEntry)} <span style="color: ${distColor};">(${distSign}${distPct.toFixed(1)}%)</span></span>`;
+        }
+
         if (smFlow.reversalDetected) {
           const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
           const oppRatio = ((pos.side === 'LONG' ? smFlow.whaleShortRatio : smFlow.whaleLongRatio) * 100).toFixed(0);
@@ -881,6 +889,7 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
               ${smFlowBadgeHtml}
+              ${modalPausTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -2730,10 +2739,14 @@ function populateSettingsForm(cfg) {
   if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false;
   setVal('cfg-sm-pullback-min', smCfg.pullbackMinPct ?? 0.3);
   setVal('cfg-sm-pullback-wait', smCfg.pullbackMaxWaitSeconds ?? 12);
+  const smDistCb = document.getElementById('cfg-sm-whale-dist-enabled');
+  if (smDistCb) smDistCb.checked = smCfg.whaleDistanceFilterEnabled !== false;
+  setVal('cfg-sm-whale-max-dist', smCfg.maxWhaleDistancePct ?? 1.5);
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
   if (typeof toggleSmRsiInput === 'function') toggleSmRsiInput();
   if (typeof toggleSmPullbackInput === 'function') toggleSmPullbackInput();
+  if (typeof toggleSmWhaleDistInput === 'function') toggleSmWhaleDistInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -3027,6 +3040,8 @@ function getSettingsFormData() {
       pullbackConfirmationEnabled: !!document.getElementById('cfg-sm-pullback-enabled')?.checked,
       pullbackMinPct: parseFloat(getVal('cfg-sm-pullback-min', '0.3')) || 0.3,
       pullbackMaxWaitSeconds: parseInt(getVal('cfg-sm-pullback-wait', '12'), 10) || 12,
+      whaleDistanceFilterEnabled: !!document.getElementById('cfg-sm-whale-dist-enabled')?.checked,
+      maxWhaleDistancePct: parseFloat(getVal('cfg-sm-whale-max-dist', '1.5')) || 1.5,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -3726,6 +3741,15 @@ function toggleSmPullbackInput() {
   }
 }
 window.toggleSmPullbackInput = toggleSmPullbackInput;
+
+function toggleSmWhaleDistInput() {
+  const cb = document.getElementById('cfg-sm-whale-dist-enabled');
+  const box = document.getElementById('cfg-sm-whale-dist-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmWhaleDistInput = toggleSmWhaleDistInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

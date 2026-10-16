@@ -623,6 +623,20 @@
             </div>
           </div>
 
+          <div class="form-group" style="grid-column: span 2; background: rgba(255, 159, 10, 0.05); border: 1px solid rgba(255, 159, 10, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #ff9f0a; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-whale-dist-enabled" style="width: 16px; height: 16px; accent-color: #ff9f0a;" checked onchange="toggleSmWhaleDistInput()">
+              <span>🛡️ Filter Jarak Modal Paus / Anti-FOMO (Whale Avg Entry Guard) <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-whale-dist-box" style="display: flex; gap: 14px; margin-top: 8px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Maksimal Toleransi Jarak Modal Paus (%)</label>
+                <input type="number" id="cfg-sm-whale-max-dist" min="0.5" max="10.0" step="0.1" class="form-control" placeholder="1.5" style="padding: 4px 8px;">
+                <small class="form-hint">Dilarang entry jika harga koin sudah terbang/anjlok melebihi batas ini dari harga modal paus (Standar: 1.5%).</small>
+              </div>
+            </div>
+          </div>
+
           <div class="form-group" style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; background: rgba(10, 132, 255, 0.05); border: 1px solid rgba(10, 132, 255, 0.2); border-radius: var(--radius-sm); padding: 10px 14px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #5ac8fa; margin: 0; cursor: pointer;">
               <input type="checkbox" id="cfg-sm-trailing-tp" style="width: 16px; height: 16px; accent-color: #0a84ff;" checked onchange="toggleSmTrailingInput()">

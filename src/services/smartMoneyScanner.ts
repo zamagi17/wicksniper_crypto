@@ -2,6 +2,15 @@ import { BotConfig, SmartMoneyConfig, SmartMoneySignal } from '../types';
 import { binanceFutures } from './binance';
 import { logger } from './logger';
 
+function formatCryptoPrice(val: number): string {
+  if (val === 0) return '0.00';
+  const abs = Math.abs(val);
+  if (abs >= 1000) return val.toFixed(2);
+  if (abs >= 1) return val.toFixed(4);
+  if (abs >= 0.001) return val.toFixed(6);
+  return val.toFixed(8);
+}
+
 export class SmartMoneyScanner {
   private config: SmartMoneyConfig;
   private botScannerConfig?: BotConfig['scanner'];
@@ -183,6 +192,65 @@ export class SmartMoneyScanner {
         }
 
         if (detectedSide) {
+          // Filter Jarak Modal Paus / Anti-FOMO (Whale Avg Entry Guard)
+          let whaleAvgEntry: number | undefined;
+          let whaleDistancePct: number | undefined;
+          let whalePositionsUsdt: number | undefined;
+
+          if (detectedSide === 'SHORT') {
+            whalePositionsUsdt = metrics.shortWhalePositionsUsdt;
+            if (metrics.whaleShortAvgEntry && metrics.whaleShortAvgEntry > 0) {
+              whaleAvgEntry = metrics.whaleShortAvgEntry;
+              const distanceDropPct = ((whaleAvgEntry - currentPrice) / whaleAvgEntry) * 100;
+              whaleDistancePct = -distanceDropPct;
+
+              if (this.config.whaleDistanceFilterEnabled !== false) {
+                const maxDist = this.config.maxWhaleDistancePct ?? 1.5;
+                if (distanceDropPct > maxDist) {
+                  logger.log(
+                    'INFO',
+                    `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah anjlok -${distanceDropPct.toFixed(1)}% di bawah modal Paus Short ($${formatCryptoPrice(whaleAvgEntry)}). Melebihi batas aman maks ${maxDist}%. Rawan short squeeze/bounce.`
+                  );
+                  continue;
+                }
+                if (distanceDropPct < -5.0) {
+                  logger.log(
+                    'INFO',
+                    `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) berada +${Math.abs(distanceDropPct).toFixed(1)}% di atas modal Paus Short ($${formatCryptoPrice(whaleAvgEntry)}). Paus sedang floating loss / short squeeze.`
+                  );
+                  continue;
+                }
+              }
+              reason += ` | Modal Paus: $${formatCryptoPrice(whaleAvgEntry)} (Jarak: ${distanceDropPct >= 0 ? '-' : '+'}${Math.abs(distanceDropPct).toFixed(1)}%)`;
+            }
+          } else {
+            whalePositionsUsdt = metrics.longWhalePositionsUsdt;
+            if (metrics.whaleLongAvgEntry && metrics.whaleLongAvgEntry > 0) {
+              whaleAvgEntry = metrics.whaleLongAvgEntry;
+              const distanceSurgePct = ((currentPrice - whaleAvgEntry) / whaleAvgEntry) * 100;
+              whaleDistancePct = distanceSurgePct;
+
+              if (this.config.whaleDistanceFilterEnabled !== false) {
+                const maxDist = this.config.maxWhaleDistancePct ?? 1.5;
+                if (distanceSurgePct > maxDist) {
+                  logger.log(
+                    'INFO',
+                    `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah terbang +${distanceSurgePct.toFixed(1)}% di atas modal Paus Long ($${formatCryptoPrice(whaleAvgEntry)}). Melebihi batas aman maks ${maxDist}%. Rawan dump/distribusi.`
+                  );
+                  continue;
+                }
+                if (distanceSurgePct < -5.0) {
+                  logger.log(
+                    'INFO',
+                    `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) anjlok -${Math.abs(distanceSurgePct).toFixed(1)}% di bawah modal Paus Long ($${formatCryptoPrice(whaleAvgEntry)}). Paus sedang floating loss / dumping.`
+                  );
+                  continue;
+                }
+              }
+              reason += ` | Modal Paus: $${formatCryptoPrice(whaleAvgEntry)} (Jarak: +${distanceSurgePct.toFixed(1)}%)`;
+            }
+          }
+
           // Filter RSI 15m: Mencegah Short di dasar jurang (oversold) & Long di pucuk (overbought)
           if (this.config.rsiFilterEnabled !== false) {
             const rsi = await binanceFutures.getSymbolRsi(symbol, '15m');
@@ -214,6 +282,9 @@ export class SmartMoneyScanner {
             whaleLongShortRatio: metrics.whaleLongShortRatio,
             retailLongRatio: metrics.retailLongRatio,
             retailShortRatio: metrics.retailShortRatio,
+            whaleAvgEntry,
+            whaleDistancePct,
+            whalePositionsUsdt,
             timestamp: Date.now(),
             status: 'PENDING',
             reason,
