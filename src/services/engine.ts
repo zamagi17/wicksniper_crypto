@@ -5233,7 +5233,7 @@ export class WickSniperEngine {
       targetTpPrice: tpPrice,
       hardSlPrice: slPrice,
       status: 'SNIPING',
-      trailingTpActive: smCfg.trailingTpEnabled ?? true,
+      trailingTpActive: false,
       highestPrice: currentPrice,
       lowestPrice: currentPrice,
       paramsSnapshot: {
