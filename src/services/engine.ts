@@ -5121,11 +5121,12 @@ export class WickSniperEngine {
         return;
       }
     } else {
-      if (this.virtualBalance < actualMargin) {
-        logger.log('WARN', `Saldo demo paper ($${this.virtualBalance.toFixed(2)}) tidak cukup untuk margin $${actualMargin.toFixed(2)} USDT.`, symbol);
+      const activeMargin = Array.from(this.activePositions.values()).reduce((sum, p) => sum + (p.totalMarginUsed || 0), 0);
+      const availableVirtual = Math.max(0, this.virtualBalance - activeMargin);
+      if (availableVirtual < actualMargin) {
+        logger.log('WARN', `Saldo demo paper tersedia ($${availableVirtual.toFixed(2)}) tidak cukup untuk margin $${actualMargin.toFixed(2)} USDT.`, symbol);
         return;
       }
-      this.virtualBalance = Math.max(0, this.virtualBalance - actualMargin);
     }
 
     const layer0: GridLayer = {
