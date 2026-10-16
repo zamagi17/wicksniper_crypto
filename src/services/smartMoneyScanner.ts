@@ -192,62 +192,121 @@ export class SmartMoneyScanner {
         }
 
         if (detectedSide) {
-          // Filter Jarak Modal Paus / Anti-FOMO (Whale Avg Entry Guard)
+          // Filter Jarak & Kesehatan Modal Paus (Sweet Spot Guard)
           let whaleAvgEntry: number | undefined;
           let whaleDistancePct: number | undefined;
           let whalePositionsUsdt: number | undefined;
+          let whaleWinratePct: number | undefined;
+          let whaleProfitWhales: number | undefined;
+          let whaleTotalWhales: number | undefined;
 
           if (detectedSide === 'SHORT') {
             whalePositionsUsdt = metrics.shortWhalePositionsUsdt;
+            whaleWinratePct = metrics.shortWhaleWinratePct;
+            whaleProfitWhales = metrics.shortProfitWhales;
+            whaleTotalWhales = metrics.shortWhales;
+
+            // 1. Cek Filter Kesehatan Paus (% Meraih Laba)
+            if (this.config.whaleHealthFilterEnabled !== false && whaleWinratePct !== undefined) {
+              const minWinrate = this.config.minWhaleWinratePct ?? 50;
+              if (whaleWinratePct < minWinrate) {
+                logger.log(
+                  'INFO',
+                  `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Paus Short mayoritas sedang nyangkut/boncos (${whaleWinratePct.toFixed(1)}% laba [${whaleProfitWhales ?? 0}/${whaleTotalWhales ?? 0} paus] < min ${minWinrate}%). Rawan short squeeze.`
+                );
+                continue;
+              }
+            }
+
             if (metrics.whaleShortAvgEntry && metrics.whaleShortAvgEntry > 0) {
               whaleAvgEntry = metrics.whaleShortAvgEntry;
               const distanceDropPct = ((whaleAvgEntry - currentPrice) / whaleAvgEntry) * 100;
               whaleDistancePct = -distanceDropPct;
 
+              // 2. Cek Anti-Squeeze (Harga tidak boleh menembus modal paus ke arah rugi)
+              if (this.config.whaleHealthFilterEnabled !== false && currentPrice > whaleAvgEntry) {
+                const adverseLossPct = ((currentPrice - whaleAvgEntry) / whaleAvgEntry) * 100;
+                const maxAdverse = this.config.maxWhaleAdverseLossPct ?? 0.8;
+                if (adverseLossPct > maxAdverse) {
+                  logger.log(
+                    'INFO',
+                    `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) berada +${adverseLossPct.toFixed(2)}% di atas modal Paus Short ($${formatCryptoPrice(whaleAvgEntry)}). Paus Short sedang tertekan rugi / terjepit (Batas maks: ${maxAdverse}%).`
+                  );
+                  continue;
+                }
+              }
+
+              // 3. Cek Anti-FOMO (Harga tidak boleh sudah anjlok terlalu jauh ke bawah)
               if (this.config.whaleDistanceFilterEnabled !== false) {
                 const maxDist = this.config.maxWhaleDistancePct ?? 1.5;
                 if (distanceDropPct > maxDist) {
                   logger.log(
                     'INFO',
-                    `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah anjlok -${distanceDropPct.toFixed(1)}% di bawah modal Paus Short ($${formatCryptoPrice(whaleAvgEntry)}). Melebihi batas aman maks ${maxDist}%. Rawan short squeeze/bounce.`
-                  );
-                  continue;
-                }
-                if (distanceDropPct < -5.0) {
-                  logger.log(
-                    'INFO',
-                    `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) berada +${Math.abs(distanceDropPct).toFixed(1)}% di atas modal Paus Short ($${formatCryptoPrice(whaleAvgEntry)}). Paus sedang floating loss / short squeeze.`
+                    `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah anjlok -${distanceDropPct.toFixed(1)}% di bawah modal Paus Short ($${formatCryptoPrice(whaleAvgEntry)}). Melebihi batas aman maks ${maxDist}%. Rawan bounce.`
                   );
                   continue;
                 }
               }
+
               reason += ` | Modal Paus: $${formatCryptoPrice(whaleAvgEntry)} (Jarak: ${distanceDropPct >= 0 ? '-' : '+'}${Math.abs(distanceDropPct).toFixed(1)}%)`;
+            }
+
+            if (whaleWinratePct !== undefined) {
+              reason += ` | Laba: ${whaleWinratePct.toFixed(0)}% (${whaleProfitWhales ?? 0}/${whaleTotalWhales ?? 0})`;
             }
           } else {
             whalePositionsUsdt = metrics.longWhalePositionsUsdt;
+            whaleWinratePct = metrics.longWhaleWinratePct;
+            whaleProfitWhales = metrics.longProfitWhales;
+            whaleTotalWhales = metrics.longWhales;
+
+            // 1. Cek Filter Kesehatan Paus (% Meraih Laba)
+            if (this.config.whaleHealthFilterEnabled !== false && whaleWinratePct !== undefined) {
+              const minWinrate = this.config.minWhaleWinratePct ?? 50;
+              if (whaleWinratePct < minWinrate) {
+                logger.log(
+                  'INFO',
+                  `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Paus Long mayoritas sedang nyangkut/boncos (${whaleWinratePct.toFixed(1)}% laba [${whaleProfitWhales ?? 0}/${whaleTotalWhales ?? 0} paus] < min ${minWinrate}%). Rawan dump lanjutan.`
+                );
+                continue;
+              }
+            }
+
             if (metrics.whaleLongAvgEntry && metrics.whaleLongAvgEntry > 0) {
               whaleAvgEntry = metrics.whaleLongAvgEntry;
               const distanceSurgePct = ((currentPrice - whaleAvgEntry) / whaleAvgEntry) * 100;
               whaleDistancePct = distanceSurgePct;
 
+              // 2. Cek Anti-Dumping (Harga tidak boleh anjlok di bawah modal paus ke arah rugi)
+              if (this.config.whaleHealthFilterEnabled !== false && currentPrice < whaleAvgEntry) {
+                const adverseLossPct = ((whaleAvgEntry - currentPrice) / whaleAvgEntry) * 100;
+                const maxAdverse = this.config.maxWhaleAdverseLossPct ?? 0.8;
+                if (adverseLossPct > maxAdverse) {
+                  logger.log(
+                    'INFO',
+                    `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) anjlok -${adverseLossPct.toFixed(2)}% di bawah modal Paus Long ($${formatCryptoPrice(whaleAvgEntry)}). Paus Long sedang tertekan rugi / dumping (Batas maks: ${maxAdverse}%).`
+                  );
+                  continue;
+                }
+              }
+
+              // 3. Cek Anti-FOMO (Harga tidak boleh sudah terbang terlalu tinggi di atas)
               if (this.config.whaleDistanceFilterEnabled !== false) {
                 const maxDist = this.config.maxWhaleDistancePct ?? 1.5;
                 if (distanceSurgePct > maxDist) {
                   logger.log(
                     'INFO',
-                    `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah terbang +${distanceSurgePct.toFixed(1)}% di atas modal Paus Long ($${formatCryptoPrice(whaleAvgEntry)}). Melebihi batas aman maks ${maxDist}%. Rawan dump/distribusi.`
-                  );
-                  continue;
-                }
-                if (distanceSurgePct < -5.0) {
-                  logger.log(
-                    'INFO',
-                    `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) anjlok -${Math.abs(distanceSurgePct).toFixed(1)}% di bawah modal Paus Long ($${formatCryptoPrice(whaleAvgEntry)}). Paus sedang floating loss / dumping.`
+                    `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah terbang +${distanceSurgePct.toFixed(1)}% di atas modal Paus Long ($${formatCryptoPrice(whaleAvgEntry)}). Melebihi batas aman maks ${maxDist}%. Rawan distribusi/pucuk.`
                   );
                   continue;
                 }
               }
+
               reason += ` | Modal Paus: $${formatCryptoPrice(whaleAvgEntry)} (Jarak: +${distanceSurgePct.toFixed(1)}%)`;
+            }
+
+            if (whaleWinratePct !== undefined) {
+              reason += ` | Laba: ${whaleWinratePct.toFixed(0)}% (${whaleProfitWhales ?? 0}/${whaleTotalWhales ?? 0})`;
             }
           }
 
@@ -285,6 +344,9 @@ export class SmartMoneyScanner {
             whaleAvgEntry,
             whaleDistancePct,
             whalePositionsUsdt,
+            whaleWinratePct,
+            whaleProfitWhales,
+            whaleTotalWhales,
             timestamp: Date.now(),
             status: 'PENDING',
             reason,

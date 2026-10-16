@@ -848,6 +848,7 @@ function renderActivePositions(positions) {
       let smFlowBadgeHtml = '';
       let smReversalBannerHtml = '';
       let modalPausTag = '';
+      let whaleHealthTag = '';
       if (smFlow) {
         const flowClass = smFlow.reversalDetected ? 'sm-reversal' : smFlow.aligned ? 'sm-aligned' : 'sm-neutral';
         const flowBg = smFlow.reversalDetected
@@ -862,6 +863,14 @@ function renderActivePositions(positions) {
           const distSign = distPct > 0 ? '+' : '';
           const distColor = Math.abs(distPct) <= 1.5 ? '#30d158' : Math.abs(distPct) <= 3.0 ? '#ffd60a' : '#ff453a';
           modalPausTag = `<span class="badge-tag" style="background: rgba(255, 159, 10, 0.12); border: 1px solid rgba(255, 159, 10, 0.35); color: #ff9f0a; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Harga Masuk Rata-Rata Paus: $${formatCryptoPrice(smFlow.whaleAvgEntry)} (Selisih dari harga: ${distSign}${distPct.toFixed(1)}%)">🐋 Modal: $${formatCryptoPrice(smFlow.whaleAvgEntry)} <span style="color: ${distColor};">(${distSign}${distPct.toFixed(1)}%)</span></span>`;
+        }
+
+        if (smFlow.whaleWinratePct !== undefined) {
+          const winrate = smFlow.whaleWinratePct;
+          const winColor = winrate >= 50 ? '#30d158' : '#ff453a';
+          const winBg = winrate >= 50 ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)';
+          const winBorder = winrate >= 50 ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
+          whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Kesehatan Paus: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
         }
 
         if (smFlow.reversalDetected) {
@@ -891,6 +900,7 @@ function renderActivePositions(positions) {
               ${tpStatusBadge}
               ${smFlowBadgeHtml}
               ${modalPausTag}
+              ${whaleHealthTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -2747,6 +2757,10 @@ function populateSettingsForm(cfg) {
   const smDistCb = document.getElementById('cfg-sm-whale-dist-enabled');
   if (smDistCb) smDistCb.checked = smCfg.whaleDistanceFilterEnabled !== false;
   setVal('cfg-sm-whale-max-dist', smCfg.maxWhaleDistancePct ?? 1.5);
+  const smWhaleHealthCb = document.getElementById('cfg-sm-whale-health-enabled');
+  if (smWhaleHealthCb) smWhaleHealthCb.checked = smCfg.whaleHealthFilterEnabled !== false;
+  setVal('cfg-sm-min-whale-winrate', smCfg.minWhaleWinratePct ?? 50);
+  setVal('cfg-sm-max-whale-adverse', smCfg.maxWhaleAdverseLossPct ?? 0.8);
   const smStructSlCb = document.getElementById('cfg-sm-structural-sl-enabled');
   if (smStructSlCb) smStructSlCb.checked = smCfg.structuralSlEnabled !== false;
   setVal('cfg-sm-structural-sl-buffer', smCfg.structuralSlBufferPct ?? 0.3);
@@ -2755,6 +2769,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmRsiInput === 'function') toggleSmRsiInput();
   if (typeof toggleSmPullbackInput === 'function') toggleSmPullbackInput();
   if (typeof toggleSmWhaleDistInput === 'function') toggleSmWhaleDistInput();
+  if (typeof toggleSmWhaleHealthInput === 'function') toggleSmWhaleHealthInput();
   if (typeof toggleSmStructuralSlInput === 'function') toggleSmStructuralSlInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
@@ -3053,6 +3068,9 @@ function getSettingsFormData() {
       pullbackMaxWaitSeconds: parseInt(getVal('cfg-sm-pullback-wait', '12'), 10) || 12,
       whaleDistanceFilterEnabled: !!document.getElementById('cfg-sm-whale-dist-enabled')?.checked,
       maxWhaleDistancePct: parseFloat(getVal('cfg-sm-whale-max-dist', '1.5')) || 1.5,
+      whaleHealthFilterEnabled: !!document.getElementById('cfg-sm-whale-health-enabled')?.checked,
+      minWhaleWinratePct: parseFloat(getVal('cfg-sm-min-whale-winrate', '50')) || 50,
+      maxWhaleAdverseLossPct: parseFloat(getVal('cfg-sm-max-whale-adverse', '0.8')) || 0.8,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -3761,6 +3779,15 @@ function toggleSmWhaleDistInput() {
   }
 }
 window.toggleSmWhaleDistInput = toggleSmWhaleDistInput;
+
+function toggleSmWhaleHealthInput() {
+  const cb = document.getElementById('cfg-sm-whale-health-enabled');
+  const box = document.getElementById('cfg-sm-whale-health-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmWhaleHealthInput = toggleSmWhaleHealthInput;
 
 function toggleSmStructuralSlInput() {
   const cb = document.getElementById('cfg-sm-structural-sl-enabled');

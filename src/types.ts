@@ -134,6 +134,9 @@ export interface SmartMoneyConfig {
   maxRsiLong?: number;         // Batas maksimal RSI untuk Long (e.g. 62)
   whaleDistanceFilterEnabled?: boolean; // Filter Jarak Modal Paus (Anti-FOMO)
   maxWhaleDistancePct?: number;         // Maksimal toleransi jarak harga dari modal paus (%, default 1.5%)
+  whaleHealthFilterEnabled?: boolean;   // Filter Kesehatan Paus: Hanya ikuti paus yang sehat/meraih laba (Anti-Nyangkut)
+  minWhaleWinratePct?: number;          // Minimal % paus meraih laba (%, default 50%)
+  maxWhaleAdverseLossPct?: number;      // Maksimal batas harga menembus modal paus ke arah rugi (%, default 0.8%)
   pullbackConfirmationEnabled?: boolean; // Menunggu pantulan/diskon sebelum eksekusi
   pullbackMinPct: number;      // Pullback minimal sebelum eksekusi (%)
   pullbackMaxWaitSeconds: number; // Batas tunggu konfirmasi pullback (detik)
@@ -166,6 +169,9 @@ export interface SmartMoneySignal {
   whaleAvgEntry?: number;
   whaleDistancePct?: number;
   whalePositionsUsdt?: number;
+  whaleWinratePct?: number;
+  whaleProfitWhales?: number;
+  whaleTotalWhales?: number;
   timestamp: number;
   status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
   reason?: string;
@@ -310,6 +316,9 @@ export interface SmartMoneyFlowStatus {
   whaleDistancePct?: number;
   longWhalePositionsUsdt?: number;
   shortWhalePositionsUsdt?: number;
+  whaleWinratePct?: number;
+  whaleProfitWhales?: number;
+  whaleTotalWhales?: number;
   aligned: boolean;
   reversalDetected: boolean;
   label: string;

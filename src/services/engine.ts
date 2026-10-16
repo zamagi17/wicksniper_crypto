@@ -151,6 +151,9 @@ export class WickSniperEngine {
       maxRsiLong: 62,
       whaleDistanceFilterEnabled: true,
       maxWhaleDistancePct: 1.5,
+      whaleHealthFilterEnabled: true,
+      minWhaleWinratePct: 50,
+      maxWhaleAdverseLossPct: 0.8,
       pullbackConfirmationEnabled: true,
       pullbackMinPct: 0.3,
       pullbackMaxWaitSeconds: 12,
@@ -5262,6 +5265,9 @@ export class WickSniperEngine {
       retailShortRatio: signal.retailShortRatio,
       whaleAvgEntry: signal.whaleAvgEntry,
       whaleDistancePct: signal.whaleDistancePct,
+      whaleWinratePct: signal.whaleWinratePct,
+      whaleProfitWhales: signal.whaleProfitWhales,
+      whaleTotalWhales: signal.whaleTotalWhales,
       aligned: true,
       reversalDetected: false,
       label: `🐋 Paus ${signal.side} (${((signal.side === 'LONG' ? signal.whaleLongRatio : signal.whaleShortRatio) * 100).toFixed(0)}%) • Searah`,
@@ -5336,6 +5342,10 @@ export class WickSniperEngine {
             : ((whaleAvgEntry - pos.currentPrice) / whaleAvgEntry) * -100;
         }
 
+        const sameSideWinrate = isLong ? metrics.longWhaleWinratePct : metrics.shortWhaleWinratePct;
+        const sameSideProfit = isLong ? metrics.longProfitWhales : metrics.shortProfitWhales;
+        const sameSideTotal = isLong ? metrics.longWhales : metrics.shortWhales;
+
         pos.smartMoneyFlowStatus = {
           whaleLongRatio: metrics.whaleLongRatio,
           whaleShortRatio: metrics.whaleShortRatio,
@@ -5346,10 +5356,13 @@ export class WickSniperEngine {
           whaleDistancePct,
           longWhalePositionsUsdt: metrics.longWhalePositionsUsdt,
           shortWhalePositionsUsdt: metrics.shortWhalePositionsUsdt,
+          whaleWinratePct: sameSideWinrate,
+          whaleProfitWhales: sameSideProfit,
+          whaleTotalWhales: sameSideTotal,
           aligned,
           reversalDetected,
           label,
-          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : ''),
+          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : ''),
           updatedAt: now,
         };
       } catch (err: any) {

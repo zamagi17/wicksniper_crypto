@@ -1540,6 +1540,10 @@ export class BinanceFuturesClient {
     shortWhalePositionsUsdt?: number;
     longWhales?: number;
     shortWhales?: number;
+    longProfitWhales?: number;
+    shortProfitWhales?: number;
+    longWhaleWinratePct?: number;
+    shortWhaleWinratePct?: number;
     timestamp: number;
   } | null> {
     const cacheKey = `${symbol}_${period}`;
@@ -1553,7 +1557,7 @@ export class BinanceFuturesClient {
       const client = await this.getHttpClient();
       const dohAgent = await this.getOrCreateDohAgent();
 
-      const [posRes, globalRes, bapiStatsRes, bapiListRes] = await Promise.all([
+      const [posRes, globalRes, bapiStatsRes, bapiListRes, bapiOverviewRes] = await Promise.all([
         client.get('/futures/data/topLongShortPositionRatio', {
           params: { symbol, period, limit: 1 },
           timeout: 4000,
@@ -1578,6 +1582,14 @@ export class BinanceFuturesClient {
             'clienttype': 'web',
           },
         }).catch(() => null),
+        axios.get(`https://www.binance.com/bapi/futures/v1/public/future/smart-money/signal/overview?symbol=${symbol}`, {
+          httpsAgent: dohAgent,
+          timeout: 4000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'clienttype': 'web',
+          },
+        }).catch(() => null),
       ]);
 
       const posData = posRes?.data?.[0];
@@ -1591,6 +1603,10 @@ export class BinanceFuturesClient {
       let shortWhalePositionsUsdt: number | undefined;
       let longWhales: number | undefined;
       let shortWhales: number | undefined;
+      let longProfitWhales: number | undefined;
+      let shortProfitWhales: number | undefined;
+      let longWhaleWinratePct: number | undefined;
+      let shortWhaleWinratePct: number | undefined;
 
       const bapiStats = bapiStatsRes?.data?.data;
       if (bapiStats) {
@@ -1619,7 +1635,37 @@ export class BinanceFuturesClient {
         }
       }
 
-      if (!posData && !bapiStats) return null;
+      const bapiOverview = bapiOverviewRes?.data?.data;
+      if (bapiOverview) {
+        if (bapiOverview.longWhalesAvgEntryPrice && !whaleLongAvgEntry) {
+          const p = parseFloat(bapiOverview.longWhalesAvgEntryPrice);
+          if (p > 0) whaleLongAvgEntry = p;
+        }
+        if (bapiOverview.shortWhalesAvgEntryPrice && !whaleShortAvgEntry) {
+          const p = parseFloat(bapiOverview.shortWhalesAvgEntryPrice);
+          if (p > 0) whaleShortAvgEntry = p;
+        }
+        if (bapiOverview.longWhales !== undefined) {
+          longWhales = parseInt(bapiOverview.longWhales, 10);
+        }
+        if (bapiOverview.shortWhales !== undefined) {
+          shortWhales = parseInt(bapiOverview.shortWhales, 10);
+        }
+        if (bapiOverview.longProfitWhales !== undefined) {
+          longProfitWhales = parseInt(bapiOverview.longProfitWhales, 10);
+        }
+        if (bapiOverview.shortProfitWhales !== undefined) {
+          shortProfitWhales = parseInt(bapiOverview.shortProfitWhales, 10);
+        }
+        if (longWhales && longWhales > 0 && longProfitWhales !== undefined) {
+          longWhaleWinratePct = (longProfitWhales / longWhales) * 100;
+        }
+        if (shortWhales && shortWhales > 0 && shortProfitWhales !== undefined) {
+          shortWhaleWinratePct = (shortProfitWhales / shortWhales) * 100;
+        }
+      }
+
+      if (!posData && !bapiStats && !bapiOverview) return null;
 
       let retailLongRatio = 0.5;
       let retailShortRatio = 0.5;
@@ -1641,6 +1687,10 @@ export class BinanceFuturesClient {
         shortWhalePositionsUsdt,
         longWhales,
         shortWhales,
+        longProfitWhales,
+        shortProfitWhales,
+        longWhaleWinratePct,
+        shortWhaleWinratePct,
         timestamp: posData?.timestamp || now,
       };
 
