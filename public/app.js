@@ -783,15 +783,27 @@ function renderActivePositions(positions) {
         ? 'text-green'
         : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
 
-      const isDualTp = currentConfig?.exit?.partialTpEnabled;
+      const isSm = pos.strategyType === 'SMART_MONEY';
+      const isDualTp = isSm ? false : currentConfig?.exit?.partialTpEnabled;
       const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.7) * 100);
       const tp2RatioPct = 100 - tp1RatioPct;
 
       let tpStatusBadge = '';
+      if (isSm) {
+        tpStatusBadge = `<span class="badge-tag badge-smart-money" style="background: rgba(46, 213, 115, 0.15); border: 1px solid rgba(46, 213, 115, 0.4); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🐋 Smart Money</span>`;
+      }
       let tpBannerHtml = '';
-      let slMetricLabel = `Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)`;
+      const isLong = pos.side === 'LONG';
+      const smTpPct = pos.paramsSnapshot?.takeProfitPct || currentConfig?.smartMoney?.takeProfitPct || 1.5;
+      const smSlPct = pos.paramsSnapshot?.stopLossPct || currentConfig?.smartMoney?.stopLossPct || 3.0;
+
+      let slMetricLabel = isSm
+        ? `Hard SL (${isLong ? '-' : '+'}${smSlPct}%)`
+        : `Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)`;
       let slMetricHtml = `<span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>`;
-      let tpMetricLabel = `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
+      let tpMetricLabel = isSm
+        ? `Target TP (${isLong ? '+' : '-'}${smTpPct}%)`
+        : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
       if (pos.partialTpDone) {
@@ -840,7 +852,7 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
-              <span class="badge-margin-tag">💰 Margin: ${pos.strategyType === 'SMART_MONEY' ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
+              <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
               <div class="pos-pnl">
@@ -877,10 +889,17 @@ function renderActivePositions(positions) {
               <small>${slMetricLabel}</small>
               ${slMetricHtml}
             </div>
+            ${isSm ? `
+            <div class="pos-metric-item">
+              <small>Strategi</small>
+              <span class="text-cyan"><b>🐋 Smart Money</b> <small>${pos.trailingTpActive ? '🚀 Trailing TP Aktif' : '🎯 Sniper TP'}</small></span>
+            </div>
+            ` : `
             <div class="pos-metric-item">
               <small>Sisa Waktu Hold</small>
               <span class="${holdClass}"><b>${holdCountdown}</b> <small>${holdAction}</small></span>
             </div>
+            `}
           </div>
 
           <div class="grid-layers-bar">
