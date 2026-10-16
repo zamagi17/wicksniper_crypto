@@ -1850,16 +1850,18 @@ export class WickSniperEngine {
           }
         }
 
-        // C. Batas Waktu Hold Maksimum untuk LONG
-        const maxHoldMin = longCfg?.maxHoldMinutes ?? 60;
-        if (Date.now() - pos.openedAt >= maxHoldMin * 60 * 1000) {
-          logger.log(
-            'INFO',
-            `⏰ [LONG TIME LIMIT] ${pos.symbol}: Batas waktu hold ${maxHoldMin}m tercapai. Menutup posisi di $${formatCryptoPrice(currentPrice)}.`,
-            pos.symbol
-          );
-          this.closePosition(pos, 'TIME_LIMIT_EXIT', currentPrice);
-          continue;
+        // C. Batas Waktu Hold Maksimum untuk LONG (Hanya untuk MOMENTUM_LONG, bukan SMART_MONEY)
+        if (!isSmLong) {
+          const maxHoldMin = longCfg?.maxHoldMinutes ?? 60;
+          if (Date.now() - pos.openedAt >= maxHoldMin * 60 * 1000) {
+            logger.log(
+              'INFO',
+              `⏰ [LONG TIME LIMIT] ${pos.symbol}: Batas waktu hold ${maxHoldMin}m tercapai. Menutup posisi di $${formatCryptoPrice(currentPrice)}.`,
+              pos.symbol
+            );
+            this.closePosition(pos, 'TIME_LIMIT_EXIT', currentPrice);
+            continue;
+          }
         }
 
         // Selesai evaluasi LONG, lewati evaluasi SHORT di bawah
@@ -1908,11 +1910,11 @@ export class WickSniperEngine {
         // Biarkan Section C menangani trailing runner & callback
       } else {
         const tradeAgeMs = Date.now() - pos.openedAt;
+        const isSmPos = pos.strategyType === 'SMART_MONEY';
         if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
           if (this.config.tradingMode === 'LIVE') {
             // JIKA TRAILING TP DIAKTIFKAN:
             // Aktifkan runner jika harga menyentuh atau melampaui target TP
-            const isSmPos = pos.strategyType === 'SMART_MONEY';
             const trailingAllowed = isSmPos
               ? (this.config.smartMoney?.trailingTpEnabled !== false)
               : this.config.exit.trailingTpEnabled;
@@ -1940,7 +1942,7 @@ export class WickSniperEngine {
             continue;
           } else {
             // Mode PAPER TRADING:
-            if (this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.totalQty > 0) {
+            if (!isSmPos && this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.totalQty > 0) {
               const ratio = this.config.exit.partialTpRatio || 0.7;
               const desiredPartialQty = pos.totalQty * ratio;
               const safePartialQty = parseFloat(binanceFutures.formatQty(pos.symbol, desiredPartialQty));
@@ -2076,6 +2078,7 @@ export class WickSniperEngine {
   }
 
   private shouldEarlyExitMomentum(pos: ActivePosition, samples: { price: number; time: number }[]): boolean {
+    if (pos.strategyType === 'SMART_MONEY') return false;
     const exitCfg = this.config.exit;
     if (!exitCfg.earlyExitMomentumEnabled || pos.partialTpDone || samples.length < 2) return false;
     if (pos.currentPrice <= pos.avgEntryPrice) return false;
@@ -3936,6 +3939,8 @@ export class WickSniperEngine {
 
     for (const pos of this.activePositions.values()) {
       if (pos.status !== 'SNIPING') continue;
+      // Posisi Smart Money murni mengikuti pergerakan paus sampai TP / SL / Trailing Runner tercapai (tidak boleh dicut oleh timer Wick)
+      if (pos.strategyType === 'SMART_MONEY') continue;
 
       const totalAllowedMs = maxHoldMs + (pos.extendedHoldMs || 0);
       const holdDeadlineAt = pos.openedAt + totalAllowedMs;
