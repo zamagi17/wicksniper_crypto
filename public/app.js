@@ -766,7 +766,8 @@ function renderActivePositions(positions) {
 
   container.innerHTML = positions
     .map((pos) => {
-      const isProfit = (pos.unrealizedPnl || 0) >= 0;
+      try {
+        const isProfit = (pos.unrealizedPnl || 0) >= 0;
       const pnlColor = isProfit ? 'text-green' : 'text-red';
       const pnlSign = isProfit ? '+' : '';
       const remainingSeconds = Math.max(0, Number(pos.holdRemainingSeconds ?? 0));
@@ -846,6 +847,7 @@ function renderActivePositions(positions) {
       const smFlow = pos.smartMoneyFlowStatus;
       let smFlowBadgeHtml = '';
       let smReversalBannerHtml = '';
+      let modalPausTag = '';
       if (smFlow) {
         const flowClass = smFlow.reversalDetected ? 'sm-reversal' : smFlow.aligned ? 'sm-aligned' : 'sm-neutral';
         const flowBg = smFlow.reversalDetected
@@ -855,7 +857,6 @@ function renderActivePositions(positions) {
             : 'background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); color: #8e8e93;';
         smFlowBadgeHtml = `<span class="badge-tag ${flowClass}" style="${flowBg} padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; cursor: help;" title="${smFlow.detail || ''} (Murni sebagai analisa arah aliran Paus)">${smFlow.label}</span>`;
 
-        let modalPausTag = '';
         if (smFlow.whaleAvgEntry) {
           const distPct = smFlow.whaleDistancePct ?? 0;
           const distSign = distPct > 0 ? '+' : '';
@@ -957,6 +958,10 @@ function renderActivePositions(positions) {
           </div>
         </div>
       `;
+      } catch (err) {
+        console.error('[RENDER POS ERROR]', pos?.symbol, err);
+        return '';
+      }
     })
     .join('');
 }
