@@ -2631,7 +2631,7 @@ export class WickSniperEngine {
       const atrMode = !!this.config.exit.atrDynamicSlTpEnabled;
 
       // KASUS A: Partial TP Aktif dan Tahap 1 belum selesai -> Pasang DUAL LIMIT ORDER (TP1 50% & TP2 50%)
-      if (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive) {
+      if (pos.strategyType !== 'SMART_MONEY' && exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive) {
         const ratio = exitCfg.partialTpRatio || 0.7;
         const plannedTp1Qty = pos.totalQty * ratio;
         const tp1Qty = parseFloat(binanceFutures.formatQty(pos.symbol, plannedTp1Qty));
@@ -2736,7 +2736,7 @@ export class WickSniperEngine {
       }
 
       // KASUS B: Partial TP Aktif dan Tahap 1 sudah selesai -> Pasang Limit Order TP2 untuk sisa volume
-      if (exitCfg.partialTpEnabled && pos.partialTpDone) {
+      if (pos.strategyType !== 'SMART_MONEY' && exitCfg.partialTpEnabled && pos.partialTpDone) {
         if (exitCfg.trailingTpEnabled) {
           pos.trailingTpActive = true;
           pos.lowestPrice = Math.min(pos.lowestPrice || pos.avgEntryPrice, pos.currentPrice || pos.avgEntryPrice);
@@ -2780,7 +2780,10 @@ export class WickSniperEngine {
       }
 
       // KASUS C: Single TP Biasa (100% Volume)
-      if (exitCfg.trailingTpEnabled) {
+      const trailingAllowed = pos.strategyType === 'SMART_MONEY'
+        ? (this.config.smartMoney?.trailingTpEnabled !== false)
+        : exitCfg.trailingTpEnabled;
+      if (trailingAllowed) {
         logger.log(
           'INFO',
           `🎯 [TRAILING TP SIAGA] ${pos.symbol}: Mode Trailing TP aktif (100% Volume). Menunggu harga mencapai target $${pos.targetTpPrice.toFixed(6)} untuk mengaktifkan trailing runner...`,
@@ -4133,7 +4136,9 @@ export class WickSniperEngine {
           if (!isLiveLongPos && realPos && Math.abs(realPos.positionAmt) > 0 && pos.status === 'SNIPING' && !this.syncingTpSymbols.has(symbol) && !this.closingSymbols.has(symbol)) {
             try {
               // Best practice: Jangan pasang order Limit TP kaku jika Trailing Runner sedang aktif
-              const isTrailingRunnerActive = pos.trailingTpActive || (this.config.exit.trailingTpEnabled && (pos.partialTpDone || !this.config.exit.partialTpEnabled));
+              const isTrailingRunnerActive = pos.strategyType === 'SMART_MONEY'
+                ? (pos.trailingTpActive || (this.config.smartMoney?.trailingTpEnabled !== false))
+                : (pos.trailingTpActive || (this.config.exit.trailingTpEnabled && (pos.partialTpDone || !this.config.exit.partialTpEnabled)));
               if (!isTrailingRunnerActive) {
                 const openOrders = await binanceFutures.getOpenOrders(symbol);
                 const hasTpOrder = openOrders.some((o: any) => o.side === 'BUY');
