@@ -2721,7 +2721,7 @@ function populateSettingsForm(cfg) {
   const smRetailCheckbox = document.getElementById('cfg-sm-retail-trap');
   if (smRetailCheckbox) smRetailCheckbox.checked = smCfg.retailTrapFilter !== false;
   setVal('cfg-sm-tp-pct', smCfg.takeProfitPct ?? 1.5);
-  setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 3.0);
+  setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 1.2);
   setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
   setVal('cfg-sm-leverage', smCfg.leverage ?? cfg.leverage ?? 5);
   setVal('cfg-sm-max-positions', smCfg.maxConcurrentPositions ?? cfg.grid?.maxConcurrentCoins ?? 3);
@@ -2742,11 +2742,15 @@ function populateSettingsForm(cfg) {
   const smDistCb = document.getElementById('cfg-sm-whale-dist-enabled');
   if (smDistCb) smDistCb.checked = smCfg.whaleDistanceFilterEnabled !== false;
   setVal('cfg-sm-whale-max-dist', smCfg.maxWhaleDistancePct ?? 1.5);
+  const smStructSlCb = document.getElementById('cfg-sm-structural-sl-enabled');
+  if (smStructSlCb) smStructSlCb.checked = smCfg.structuralSlEnabled !== false;
+  setVal('cfg-sm-structural-sl-buffer', smCfg.structuralSlBufferPct ?? 0.3);
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
   if (typeof toggleSmRsiInput === 'function') toggleSmRsiInput();
   if (typeof toggleSmPullbackInput === 'function') toggleSmPullbackInput();
   if (typeof toggleSmWhaleDistInput === 'function') toggleSmWhaleDistInput();
+  if (typeof toggleSmStructuralSlInput === 'function') toggleSmStructuralSlInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -3025,7 +3029,9 @@ function getSettingsFormData() {
       thresholdLongRatio: (parseFloat(getVal('cfg-sm-thresh-long', '60')) || 60) / 100,
       retailTrapFilter: !!document.getElementById('cfg-sm-retail-trap')?.checked,
       takeProfitPct: parseFloat(getVal('cfg-sm-tp-pct', '1.5')) || 1.5,
-      stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '3.0')) || 3.0,
+      stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '1.2')) || 1.2,
+      structuralSlEnabled: !!document.getElementById('cfg-sm-structural-sl-enabled')?.checked,
+      structuralSlBufferPct: parseFloat(getVal('cfg-sm-structural-sl-buffer', '0.3')) || 0.3,
       marginUsdt: parseFloat(getVal('cfg-sm-margin', '5')) || 5,
       leverage: parseInt(getVal('cfg-sm-leverage', '5'), 10) || 5,
       maxConcurrentPositions: parseInt(getVal('cfg-sm-max-positions', '3'), 10) || 3,
@@ -3750,6 +3756,15 @@ function toggleSmWhaleDistInput() {
   }
 }
 window.toggleSmWhaleDistInput = toggleSmWhaleDistInput;
+
+function toggleSmStructuralSlInput() {
+  const cb = document.getElementById('cfg-sm-structural-sl-enabled');
+  const box = document.getElementById('cfg-sm-structural-sl-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmStructuralSlInput = toggleSmStructuralSlInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

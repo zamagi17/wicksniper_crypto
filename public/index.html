@@ -568,9 +568,9 @@
           </div>
 
           <div class="form-group">
-            <label>Hard Stop Loss (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
-            <input type="number" id="cfg-sm-sl-pct" min="1.0" max="30" step="0.1" class="form-control" placeholder="3.0">
-            <small class="form-hint">Proteksi batas rugi ketat (Standar: 3.0%).</small>
+            <label>Hard Stop Loss Cadangan (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-sl-pct" min="0.8" max="30" step="0.1" class="form-control" placeholder="1.2">
+            <small class="form-hint">Batas maksimal rugi jika modal paus belum terpetakan (Standar: 1.2%).</small>
           </div>
 
           <div class="form-group">
@@ -633,6 +633,20 @@
                 <label style="font-size: 11px; margin-bottom: 2px;">Maksimal Toleransi Jarak Modal Paus (%)</label>
                 <input type="number" id="cfg-sm-whale-max-dist" min="0.5" max="10.0" step="0.1" class="form-control" placeholder="1.5" style="padding: 4px 8px;">
                 <small class="form-hint">Dilarang entry jika harga koin sudah terbang/anjlok melebihi batas ini dari harga modal paus (Standar: 1.5%).</small>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="grid-column: span 2; background: rgba(52, 199, 89, 0.05); border: 1px solid rgba(52, 199, 89, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #34c759; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-structural-sl-enabled" style="width: 16px; height: 16px; accent-color: #34c759;" checked onchange="toggleSmStructuralSlInput()">
+              <span>🎯 Dynamic Structural SL (Kunci SL di Balik Modal Paus + Buffer) <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-structural-sl-box" style="display: flex; gap: 14px; margin-top: 8px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Buffer Jarak di Balik Modal Paus (%)</label>
+                <input type="number" id="cfg-sm-structural-sl-buffer" min="0.1" max="2.0" step="0.1" class="form-control" placeholder="0.3" style="padding: 4px 8px;">
+                <small class="form-hint">SL ditempatkan tepat +0.3% di atas modal Short, atau -0.3% di bawah modal Long (Standar: 0.3%).</small>
               </div>
             </div>
           </div>

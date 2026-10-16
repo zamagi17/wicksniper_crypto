@@ -145,6 +145,8 @@ export interface SmartMoneyConfig {
   trailingTpEnabled?: boolean; // Trailing Take Profit
   trailingCallbackPct?: number;// Trailing callback (%)
   stopLossPct?: number;        // Hard Stop Loss (%)
+  structuralSlEnabled?: boolean; // Dynamic Stop Loss di atas/bawah modal paus
+  structuralSlBufferPct?: number; // Buffer toleransi SL terhadap modal paus (%, default 0.3%)
   cooldownMinutes: number;     // Cooldown antar trade simbol yang sama
   maxConcurrentPositions?: number; // Maksimal koin/posisi aktif bersamaan untuk Smart Money
   scanIntervalSeconds?: number;// Interval pengecekan rasio pasar

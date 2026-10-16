@@ -161,7 +161,9 @@ export class WickSniperEngine {
       takeProfitPct: 1.5,
       trailingTpEnabled: true,
       trailingCallbackPct: 0.3,
-      stopLossPct: 3.0,
+      stopLossPct: 1.2,
+      structuralSlEnabled: true,
+      structuralSlBufferPct: 0.3,
       cooldownMinutes: 30,
       maxConcurrentPositions: 3,
       scanIntervalSeconds: 30,
@@ -2233,10 +2235,24 @@ export class WickSniperEngine {
 
       if (!pos.partialTpDone) {
         if (pos.strategyType === 'SMART_MONEY') {
-          const smSl = this.config.smartMoney?.stopLossPct || 3.0;
-          pos.hardSlPrice = pos.side === 'LONG'
-            ? pos.avgEntryPrice * (1 - smSl / 100)
-            : pos.avgEntryPrice * (1 + smSl / 100);
+          const smCfg = this.config.smartMoney;
+          const fallbackSl = smCfg?.stopLossPct || 1.2;
+          const bufferPct = (smCfg?.structuralSlBufferPct ?? 0.3) / 100;
+          const whaleEntry = pos.smartMoneyFlowStatus?.whaleAvgEntry;
+
+          if (smCfg?.structuralSlEnabled !== false && whaleEntry && whaleEntry > 0) {
+            if (pos.side === 'SHORT') {
+              const structSl = whaleEntry * (1 + bufferPct);
+              pos.hardSlPrice = Math.max(pos.avgEntryPrice * 1.008, Math.min(structSl, pos.avgEntryPrice * (1 + Math.max(1.5, fallbackSl) / 100)));
+            } else {
+              const structSl = whaleEntry * (1 - bufferPct);
+              pos.hardSlPrice = Math.min(pos.avgEntryPrice * 0.992, Math.max(structSl, pos.avgEntryPrice * (1 - Math.max(1.5, fallbackSl) / 100)));
+            }
+          } else {
+            pos.hardSlPrice = pos.side === 'LONG'
+              ? pos.avgEntryPrice * (1 - fallbackSl / 100)
+              : pos.avgEntryPrice * (1 + fallbackSl / 100);
+          }
         } else {
           pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
         }
@@ -5105,13 +5121,41 @@ export class WickSniperEngine {
     const actualMargin = (qty * currentPrice) / leverage;
 
     const tpPct = smCfg.takeProfitPct || 1.5;
-    const slPct = smCfg.stopLossPct || 3.0;
+    const fallbackSlPct = smCfg.stopLossPct || 1.2;
     const tpPrice = isShort
       ? parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - tpPct / 100)))
       : parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + tpPct / 100)));
-    const slPrice = isShort
-      ? parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + slPct / 100)))
-      : parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - slPct / 100)));
+
+    let slPriceRaw: number;
+    let slLogDesc = '';
+    const bufferPct = (smCfg.structuralSlBufferPct ?? 0.3) / 100;
+
+    if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
+      if (isShort) {
+        // SHORT: SL ditaruh tepat di atas modal paus (+ buffer misal 0.3%)
+        const structuralLevel = signal.whaleAvgEntry * (1 + bufferPct);
+        const minSl = currentPrice * 1.008; // Minimal 0.8% dari entry agar tidak tersenggol spread
+        const maxSl = currentPrice * (1 + Math.max(1.5, fallbackSlPct) / 100); // Maks batas atas
+        slPriceRaw = Math.max(minSl, Math.min(structuralLevel, maxSl));
+        const actualSlPct = ((slPriceRaw - currentPrice) / currentPrice) * 100;
+        slLogDesc = `Structural (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} +${(bufferPct * 100).toFixed(1)}% buffer ➜ SL: +${actualSlPct.toFixed(2)}%)`;
+      } else {
+        // LONG: SL ditaruh tepat di bawah modal paus (- buffer misal 0.3%)
+        const structuralLevel = signal.whaleAvgEntry * (1 - bufferPct);
+        const minSl = currentPrice * 0.992; // Minimal 0.8% dari entry
+        const maxSl = currentPrice * (1 - Math.max(1.5, fallbackSlPct) / 100); // Maks batas bawah
+        slPriceRaw = Math.min(minSl, Math.max(structuralLevel, maxSl));
+        const actualSlPct = ((currentPrice - slPriceRaw) / currentPrice) * 100;
+        slLogDesc = `Structural (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} -${(bufferPct * 100).toFixed(1)}% buffer ➜ SL: -${actualSlPct.toFixed(2)}%)`;
+      }
+    } else {
+      slPriceRaw = isShort
+        ? currentPrice * (1 + fallbackSlPct / 100)
+        : currentPrice * (1 - fallbackSlPct / 100);
+      slLogDesc = `Fixed SL -${fallbackSlPct}%`;
+    }
+
+    const slPrice = parseFloat(binanceFutures.formatPrice(symbol, slPriceRaw));
 
     if (this.config.tradingMode === 'LIVE') {
       try {
@@ -5202,7 +5246,8 @@ export class WickSniperEngine {
         retailLongRatio: signal.retailLongRatio,
         retailShortRatio: signal.retailShortRatio,
         takeProfitPct: tpPct,
-        stopLossPct: slPct,
+        stopLossPct: parseFloat((Math.abs((slPrice - currentPrice) / currentPrice) * 100).toFixed(2)),
+        slDescription: slLogDesc,
         tradingMode: this.config.tradingMode,
         marginUsdt: actualMargin,
         leverage,
@@ -5228,13 +5273,14 @@ export class WickSniperEngine {
     await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
 
     const volUsdt = (qty * currentPrice).toFixed(2);
+    const actualEffectiveSlPct = Math.abs(((slPrice - currentPrice) / currentPrice) * 100).toFixed(2);
     logger.log(
       'SUCCESS',
-      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Layers: ${numLayers}x | Margin Modal: $${actualMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${slPct}%)`,
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(currentPrice)} | Layers: ${numLayers}x | Margin Modal: $${actualMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(tpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(slPrice)} (-${actualEffectiveSlPct}%, ${slLogDesc})`,
       symbol
     );
 
-    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, 0, tpPct, slPct);
+    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, 0, tpPct, parseFloat(actualEffectiveSlPct));
 
     this.broadcastStatus();
   }
