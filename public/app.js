@@ -750,10 +750,16 @@ function renderStatus(status) {
       cooldownStrip.style.display = 'flex';
       cooldownTags.innerHTML = activeCooldowns.map(c => {
         const remainingSec = Math.max(0, Math.round((c.until - now) / 1000));
-        const mins = Math.floor(remainingSec / 60);
+        const hours = Math.floor(remainingSec / 3600);
+        const mins = Math.floor((remainingSec % 3600) / 60);
         const secs = remainingSec % 60;
-        const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-        return `<span style="padding: 2px 8px; background: rgba(255, 170, 0, 0.18); border: 1px solid rgba(255, 170, 0, 0.35); border-radius: 4px; font-weight: 700; color: #ffb84d;">${c.symbol} (${timeStr})</span>`;
+        const timeStr = hours > 0
+          ? `${hours}j ${String(mins).padStart(2, '0')}m`
+          : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const titleText = hours > 0
+          ? `Sisa jeda cooldown: ${hours} jam ${mins} menit`
+          : `Sisa jeda cooldown: ${mins} menit ${secs} detik`;
+        return `<span style="padding: 2px 8px; background: rgba(255, 170, 0, 0.18); border: 1px solid rgba(255, 170, 0, 0.35); border-radius: 4px; font-weight: 700; color: #ffb84d;" title="${titleText}">${c.symbol} (${timeStr})</span>`;
       }).join('');
     } else {
       cooldownStrip.style.display = 'none';

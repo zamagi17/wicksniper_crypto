@@ -541,6 +541,7 @@ export class WickSniperEngine {
         if (expiry > now) {
           const remainingMinutes = Math.ceil((expiry - now) / 60000);
           this.scanner.setCooldown(t.symbol, remainingMinutes);
+          this.smartMoneyScanner.setCooldown(t.symbol, remainingMinutes);
           logger.log(
             'INFO',
             `⏳ [COOLDOWN DIPULIHKAN] ${t.symbol} masih dalam cooldown (${remainingMinutes}m tersisa sampai ${new Date(expiry).toLocaleTimeString('id-ID')}).`,
@@ -2236,30 +2237,7 @@ export class WickSniperEngine {
         pos.isBepDefenseActive = false;
       }
 
-      if (!pos.partialTpDone) {
-        if (pos.strategyType === 'SMART_MONEY') {
-          const smCfg = this.config.smartMoney;
-          const fallbackSl = smCfg?.stopLossPct || 1.2;
-          const bufferPct = (smCfg?.structuralSlBufferPct ?? 0.3) / 100;
-          const whaleEntry = pos.smartMoneyFlowStatus?.whaleAvgEntry;
-
-          if (smCfg?.structuralSlEnabled !== false && whaleEntry && whaleEntry > 0) {
-            if (pos.side === 'SHORT') {
-              const structSl = whaleEntry * (1 + bufferPct);
-              pos.hardSlPrice = Math.max(pos.avgEntryPrice * 1.008, Math.min(structSl, pos.avgEntryPrice * (1 + Math.max(1.5, fallbackSl) / 100)));
-            } else {
-              const structSl = whaleEntry * (1 - bufferPct);
-              pos.hardSlPrice = Math.min(pos.avgEntryPrice * 0.992, Math.max(structSl, pos.avgEntryPrice * (1 - Math.max(1.5, fallbackSl) / 100)));
-            }
-          } else {
-            pos.hardSlPrice = pos.side === 'LONG'
-              ? pos.avgEntryPrice * (1 - fallbackSl / 100)
-              : pos.avgEntryPrice * (1 + fallbackSl / 100);
-          }
-        } else {
-          pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
-        }
-      }
+      this.recalculatePositionSl(pos);
 
       if (this.config.exit.atrDynamicSlTpEnabled) {
         void this.applyAtrTargetsToPosition(pos);
@@ -2279,6 +2257,41 @@ export class WickSniperEngine {
       if (this.config.tradingMode === 'LIVE') {
         this.syncLiveTakeProfitOrder(pos).catch(() => { });
       }
+    }
+  }
+
+  private recalculatePositionSl(pos: ActivePosition) {
+    if (pos.partialTpDone) {
+      const effectiveBufferPct = this.config.exit.bepBufferPct ?? 0.08;
+      pos.hardSlPrice = pos.breakEvenPrice && pos.breakEvenPrice > 0
+        ? pos.breakEvenPrice
+        : (pos.side === 'LONG' ? pos.avgEntryPrice * (1 + effectiveBufferPct / 100) : pos.avgEntryPrice * (1 - effectiveBufferPct / 100));
+      return;
+    }
+
+    if (pos.strategyType === 'SMART_MONEY') {
+      const smCfg = this.config.smartMoney;
+      const fallbackSl = smCfg?.stopLossPct || 1.2;
+      const bufferPct = (smCfg?.structuralSlBufferPct ?? 0.3) / 100;
+      const whaleEntry = pos.smartMoneyFlowStatus?.whaleAvgEntry;
+
+      if (smCfg?.structuralSlEnabled !== false && whaleEntry && whaleEntry > 0) {
+        if (pos.side === 'SHORT') {
+          const structSl = whaleEntry * (1 + bufferPct);
+          pos.hardSlPrice = Math.max(pos.avgEntryPrice * 1.008, Math.min(structSl, pos.avgEntryPrice * (1 + Math.max(1.5, fallbackSl) / 100)));
+        } else {
+          const structSl = whaleEntry * (1 - bufferPct);
+          pos.hardSlPrice = Math.min(pos.avgEntryPrice * 0.992, Math.max(structSl, pos.avgEntryPrice * (1 - Math.max(1.5, fallbackSl) / 100)));
+        }
+      } else {
+        pos.hardSlPrice = pos.side === 'LONG'
+          ? pos.avgEntryPrice * (1 - fallbackSl / 100)
+          : pos.avgEntryPrice * (1 + fallbackSl / 100);
+      }
+    } else {
+      pos.hardSlPrice = pos.side === 'LONG'
+        ? pos.avgEntryPrice * (1 - this.config.exit.hardStopLossPct / 100)
+        : pos.avgEntryPrice * (1 + this.config.exit.hardStopLossPct / 100);
     }
   }
 
@@ -2586,9 +2599,7 @@ export class WickSniperEngine {
             pos.isBepDefenseActive = false;
           }
 
-          if (!pos.partialTpDone) {
-            pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
-          }
+          this.recalculatePositionSl(pos);
           pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
 
           this.updateTrailingSL(pos);
@@ -3574,17 +3585,22 @@ export class WickSniperEngine {
         this.handleAutoTunerPostTrade().catch(() => {});
       }
 
+      const isSmTrade = pos.strategyType === 'SMART_MONEY' || !!pos.smartMoneyFlowStatus || this.config.triggerStrategy === 'SMART_MONEY';
+      const isSpecialExit = trade.exitReason === 'HARD_STOP_LOSS' || trade.exitReason === 'EARLY_MOMENTUM_EXIT' || trade.exitReason === 'BEP_DEFENSE';
       const cooldownMinutes =
-        pos.side === 'LONG'
-          ? (this.config.momentumLong?.cooldownMinutes || 15)
-          : (trade.exitReason === 'EARLY_MOMENTUM_EXIT'
-              ? this.config.exit.earlyExitCooldownMinutes || 60
-              : trade.exitReason === 'HARD_STOP_LOSS'
-                ? this.config.exit.hardStopCooldownMinutes || 180
-                : trade.exitReason === 'BEP_DEFENSE'
-                  ? this.config.exit.bepCooldownMinutes || 15
-                  : this.config.scanner.cooldownMinutes || 10);
+        isSmTrade && !isSpecialExit
+          ? (this.config.smartMoney?.cooldownMinutes || 30)
+          : pos.side === 'LONG'
+            ? (this.config.momentumLong?.cooldownMinutes || 15)
+            : (trade.exitReason === 'EARLY_MOMENTUM_EXIT'
+                ? this.config.exit.earlyExitCooldownMinutes || 60
+                : trade.exitReason === 'HARD_STOP_LOSS'
+                  ? this.config.exit.hardStopCooldownMinutes || 180
+                  : trade.exitReason === 'BEP_DEFENSE'
+                    ? this.config.exit.bepCooldownMinutes || 15
+                    : this.config.scanner.cooldownMinutes || 10);
       this.scanner.setCooldown(pos.symbol, cooldownMinutes);
+      this.smartMoneyScanner.setCooldown(pos.symbol, cooldownMinutes);
       logger.log(
         'INFO',
         `⏳ [COOLDOWN AKTIF] ${pos.symbol} diistirahatkan selama ${cooldownMinutes} menit (sampai ${new Date(Date.now() + cooldownMinutes * 60000).toLocaleTimeString('id-ID')}).`,
@@ -4141,12 +4157,7 @@ export class WickSniperEngine {
                   } else if (!tpCalc.isBepActive) {
                     pos.isBepDefenseActive = false;
                   }
-                  if (!pos.partialTpDone) {
-                    pos.hardSlPrice = pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
-                  } else {
-                    const effectiveBufferPct = this.config.exit.bepBufferPct ?? 0.08;
-                    pos.hardSlPrice = pos.breakEvenPrice && pos.breakEvenPrice > 0 ? pos.breakEvenPrice : pos.avgEntryPrice * (1 - effectiveBufferPct / 100);
-                  }
+                  this.recalculatePositionSl(pos);
                   pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
 
                   // Tandai layer yang terisi secara riil di Binance
@@ -4441,7 +4452,7 @@ export class WickSniperEngine {
       activePositions: Array.from(this.activePositions.values()),
       recentSpikes: this.scanner.getRecentSpikes(),
       recentTrades: this.closedTrades.slice(0, 20),
-      cooldownCoins: this.scanner.getCooldowns(),
+      cooldownCoins: this.getMergedCooldowns(),
       monitoredCoinsCount: this.scanner.getTotalMonitoredSymbols(),
       ticksPerSecond: this.scanner.getTicksPerSecond(),
       marketDataAgeMs: this.scanner.getDataAgeMs(),
@@ -4451,6 +4462,17 @@ export class WickSniperEngine {
       orderCount10s: binanceFutures.getOrderCount10s(),
       wsConnected: this.isRunning && (this.config.scanner?.dataSource === 'POLLING' || binanceFutures.isConnected()),
     };
+  }
+
+  private getMergedCooldowns(): { symbol: string; until: number }[] {
+    const map = new Map<string, number>();
+    for (const c of this.scanner.getCooldowns()) {
+      map.set(c.symbol, Math.max(map.get(c.symbol) || 0, c.until));
+    }
+    for (const c of this.smartMoneyScanner.getCooldowns()) {
+      map.set(c.symbol, Math.max(map.get(c.symbol) || 0, c.until));
+    }
+    return Array.from(map.entries()).map(([symbol, until]) => ({ symbol, until }));
   }
 
   public onStatus(callback: (status: EngineStatus) => void) {
@@ -5046,7 +5068,7 @@ export class WickSniperEngine {
     if (this.config.smartMoney?.enabled === false) return;
 
     const symbol = signal.symbol;
-    if (this.smartMoneyScanner.isCoolingDown(symbol)) return;
+    if (this.smartMoneyScanner.isCoolingDown(symbol) || this.scanner.isCoolingDown(symbol)) return;
     if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) return;
 
     const maxConcurrent = this.config.smartMoney?.maxConcurrentPositions || this.config.grid?.maxConcurrentCoins || 3;

@@ -75,6 +75,19 @@ export class SmartMoneyScanner {
     this.cooldowns.set(symbol, Date.now() + ms);
   }
 
+  public getCooldowns(): { symbol: string; until: number }[] {
+    const now = Date.now();
+    const result: { symbol: string; until: number }[] = [];
+    for (const [sym, until] of this.cooldowns.entries()) {
+      if (until > now) {
+        result.push({ symbol: sym, until });
+      } else {
+        this.cooldowns.delete(sym);
+      }
+    }
+    return result;
+  }
+
   public getTrackedMetrics(): any[] {
     return Array.from(this.trackedMetrics.values());
   }
