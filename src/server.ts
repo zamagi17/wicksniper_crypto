@@ -353,9 +353,10 @@ app.get('/api/trades', async (req, res) => {
   const symbol = req.query.symbol ? String(req.query.symbol).trim() : undefined;
   const outcome = req.query.outcome as 'ALL' | 'WIN' | 'LOSS' | undefined;
   const mode = req.query.mode as 'ALL' | 'LIVE' | 'PAPER' | undefined;
+  const strategy = req.query.strategy as 'ALL' | 'SMART_MONEY' | 'WICK_SNIPER' | undefined;
 
   if (db.isConnected) {
-    const result = await db.queryTrades({ page, limit, symbol, outcome, mode });
+    const result = await db.queryTrades({ page, limit, symbol, outcome, mode, strategy });
     engine.syncTradesFromDb().catch(() => {});
     return res.json({ success: true, ...result });
   }
@@ -374,6 +375,11 @@ app.get('/api/trades', async (req, res) => {
     list = list.filter((t) => !t.isPaper);
   } else if (mode === 'PAPER') {
     list = list.filter((t) => !!t.isPaper);
+  }
+  if (strategy === 'SMART_MONEY') {
+    list = list.filter((t) => t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio);
+  } else if (strategy === 'WICK_SNIPER') {
+    list = list.filter((t) => (t.strategyType !== 'SMART_MONEY' && t.paramsSnapshot?.strategy !== 'SMART_MONEY' && !t.smartMoneyFlowStatus && !t.paramsSnapshot?.whaleAvgEntry && !t.paramsSnapshot?.whaleShortRatio && !t.paramsSnapshot?.whaleLongRatio));
   }
 
   const total = list.length;

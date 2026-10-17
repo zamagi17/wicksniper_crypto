@@ -2018,7 +2018,10 @@ export class WickSniperEngine {
               continue;
             }
 
-            if (this.config.exit.trailingTpEnabled) {
+            const trailingAllowed = isSmPos
+              ? (this.config.smartMoney?.trailingTpEnabled !== false)
+              : this.config.exit.trailingTpEnabled;
+            if (trailingAllowed) {
               pos.trailingTpActive = true;
               pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
               continue;
@@ -2042,7 +2045,10 @@ export class WickSniperEngine {
 
         // Batas Harga Maksimum Aman (Profit Floor):
         // Wajib minimal 0.6% di bawah avgEntryPrice (menutupi fee roundtrip taker + buffer slippage pantulan wick)
-        const minRequiredProfitPct = Math.max(0.6, (this.config.exit.trailingCallbackPct || 0.4) * 1.5);
+        const effectiveCallbackPct = isSmShort
+          ? (this.config.smartMoney?.trailingCallbackPct ?? 0.3)
+          : (this.config.exit.trailingCallbackPct || 0.4);
+        const minRequiredProfitPct = Math.max(0.6, effectiveCallbackPct * 1.5);
         const safeTrailingMaxPrice = pos.avgEntryPrice * (1 - minRequiredProfitPct / 100);
 
         // PROTEKSI 1: Jika pantulan harga memantul naik mendekati BEP (di atas batas aman), DILARANG tutup rugi!
@@ -2072,9 +2078,7 @@ export class WickSniperEngine {
         }
 
         // PROTEKSI 2: Hitung callback dari titik terendah riil
-        const callbackPct = isSmShort
-          ? (this.config.smartMoney?.trailingCallbackPct || 0.3)
-          : (this.config.exit.trailingCallbackPct || 0.4);
+        const callbackPct = effectiveCallbackPct;
         const bouncePct = ((currentPrice - pos.lowestPrice) / pos.lowestPrice) * 100;
 
         if (bouncePct >= callbackPct && currentPrice <= safeTrailingMaxPrice) {
@@ -2168,15 +2172,22 @@ export class WickSniperEngine {
 
     if (isBep) {
       // JAMINAN PASTI NET PROFIT >= 0 (TIDAK BOLEH MINUS FEE):
-      // Untuk posisi SHORT, harga exit BUY harus turun minimal sebesar biaya komisi round-trip Binance
-      // (Maker fee 0.02% entry + 0.02% exit = 0.04% plus safety buffer = 0.08% s/d 0.10%).
+      // Untuk posisi SHORT, harga exit BUY harus turun minimal sebesar komisi round-trip.
+      // Untuk posisi LONG, harga exit SELL harus naik minimal sebesar komisi round-trip.
       const effectiveBufferPct = Math.max(0.08, bepBufferPct || 0.10);
-      const safeBufferPrice = pos.avgEntryPrice * (1 - effectiveBufferPct / 100);
+      const isLong = pos.side === 'LONG';
+      const safeBufferPrice = isLong
+        ? pos.avgEntryPrice * (1 + effectiveBufferPct / 100)
+        : pos.avgEntryPrice * (1 - effectiveBufferPct / 100);
 
-      // Jika Binance menyediakan breakEvenPrice riil, pastikan tidak lebih tinggi dari safeBufferPrice
+      // Jika Binance menyediakan breakEvenPrice riil, pastikan tidak merugikan terhadap safeBufferPrice
       let bepTarget = safeBufferPrice;
-      if (pos.breakEvenPrice && pos.breakEvenPrice > 0 && pos.breakEvenPrice < pos.avgEntryPrice) {
-        bepTarget = Math.min(safeBufferPrice, pos.breakEvenPrice);
+      if (pos.breakEvenPrice && pos.breakEvenPrice > 0) {
+        if (isLong && pos.breakEvenPrice > pos.avgEntryPrice) {
+          bepTarget = Math.max(safeBufferPrice, pos.breakEvenPrice);
+        } else if (!isLong && pos.breakEvenPrice < pos.avgEntryPrice) {
+          bepTarget = Math.min(safeBufferPrice, pos.breakEvenPrice);
+        }
       }
 
       return { targetTpPrice: bepTarget, targetTp2Price: bepTarget, isBepActive: true, bepReason: reason };
@@ -2455,7 +2466,8 @@ export class WickSniperEngine {
         layerSide,
         nextQueuedLayer.qty,
         nextQueuedLayer.price,
-        false
+        false,
+        pos.side === 'LONG' ? 'LONG' : 'SHORT'
       );
 
       if (res?.orderId) {
@@ -2832,11 +2844,14 @@ export class WickSniperEngine {
         );
         return;
       }
+      const effectiveTpPct = pos.strategyType === 'SMART_MONEY'
+        ? (this.config.smartMoney?.takeProfitPct || 1.5)
+        : exitCfg.takeProfitPct;
       const tpOrderPrice = atrMode && pos.targetTpPrice
         ? pos.targetTpPrice
         : (isLong
-            ? pos.avgEntryPrice * (1 + (pos.strategyType === 'SMART_MONEY' ? (this.config.smartMoney?.takeProfitPct || 1.5) : exitCfg.takeProfitPct) / 100)
-            : pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100));
+            ? pos.avgEntryPrice * (1 + effectiveTpPct / 100)
+            : pos.avgEntryPrice * (1 - effectiveTpPct / 100));
       pos.targetTpPrice = tpOrderPrice;
       const tpStartTime = Date.now();
       const tpRes = await binanceFutures.placeLimitOrder(
@@ -2844,7 +2859,8 @@ export class WickSniperEngine {
         tpClosingSide,
         pos.totalQty,
         tpOrderPrice,
-        true
+        true,
+        pos.side === 'LONG' ? 'LONG' : 'SHORT'
       );
       const tpLatencyMs = Date.now() - tpStartTime;
 
@@ -3551,6 +3567,11 @@ export class WickSniperEngine {
           ...(pos.smartMoneyFlowStatus ? { smartMoneyFlowStatus: pos.smartMoneyFlowStatus } : {}),
           ...(pos.slDescription ? { slDescription: pos.slDescription } : {}),
           ...(pos.marketSnapshot ? { marketSnapshot: pos.marketSnapshot } : {}),
+          side: pos.side,
+          strategy: pos.strategyType || (pos.smartMoneyFlowStatus ? 'SMART_MONEY' : 'WICK_SNIPER'),
+          targetTpPrice: pos.targetTpPrice,
+          targetTp2Price: pos.targetTp2Price,
+          hardSlPrice: pos.hardSlPrice,
         },
         marketSnapshot: pos.marketSnapshot,
         maePct: pos.maxAdversePnlPct,
@@ -4132,7 +4153,7 @@ export class WickSniperEngine {
             const liveQty = Math.abs(realPos.positionAmt);
             if (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6) {
               const oldQty = pos.totalQty;
-              if (this.config.exit.partialTpEnabled && !pos.partialTpDone && liveQty < oldQty) {
+              if (pos.strategyType !== 'SMART_MONEY' && this.config.exit.partialTpEnabled && !pos.partialTpDone && liveQty < oldQty) {
                 // TP1 terisi di Binance oleh matching engine (100% MAKER)!
                 await this.handleLivePartialTpHit(pos, realPos);
               } else {
@@ -4247,8 +4268,9 @@ export class WickSniperEngine {
           const leverage = livePos.leverage || this.config.leverage || 10;
           const totalQty = Math.abs(livePos.positionAmt);
           const entryPrice = livePos.entryPrice;
-          const tpPct = isLiveLong ? (smCfg?.takeProfitPct || 1.5) : exitCfg.takeProfitPct;
-          const slPct = isLiveLong ? (smCfg?.stopLossPct || 1.2) : exitCfg.hardStopLossPct;
+          const isSm = this.config.triggerStrategy === 'SMART_MONEY' || isLiveLong;
+          const tpPct = isSm ? (smCfg?.takeProfitPct || 1.5) : exitCfg.takeProfitPct;
+          const slPct = isSm ? (smCfg?.stopLossPct || 1.2) : exitCfg.hardStopLossPct;
           const targetTpPrice = isLiveLong
             ? entryPrice * (1 + tpPct / 100)
             : entryPrice * (1 - tpPct / 100);
@@ -4260,7 +4282,7 @@ export class WickSniperEngine {
             id: `adopt_${livePos.symbol}_${Date.now()}`,
             symbol: livePos.symbol,
             side: isLiveLong ? 'LONG' : 'SHORT',
-            strategyType: isLiveLong ? 'SMART_MONEY' : 'WICK_SNIPER',
+            strategyType: isSm ? 'SMART_MONEY' : 'WICK_SNIPER',
             leverage,
             totalQty,
             avgEntryPrice: entryPrice,
@@ -5413,13 +5435,15 @@ export class WickSniperEngine {
 
     const volUsdt = (realQty * realEntryPrice).toFixed(2);
     const actualEffectiveSlPct = Math.abs(((effectiveSlPrice - realEntryPrice) / realEntryPrice) * 100).toFixed(2);
+    const tpSign = signal.side === 'LONG' ? '+' : '-';
+    const slSign = signal.side === 'LONG' ? '-' : '+';
     logger.log(
       'SUCCESS',
-      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(realEntryPrice)} | Layers: ${numLayers}x | Margin Modal: $${effectiveMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(effectiveTpPrice)} (+${tpPct}%) | SL: $${formatCryptoPrice(effectiveSlPrice)} (-${actualEffectiveSlPct}%, ${slLogDesc})`,
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(realEntryPrice)} | Layers: ${numLayers}x | Margin Modal: $${effectiveMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(effectiveTpPrice)} (${tpSign}${tpPct}%) | SL: $${formatCryptoPrice(effectiveSlPrice)} (${slSign}${actualEffectiveSlPct}%, ${slLogDesc})`,
       symbol
     );
 
-    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, 0, tpPct, parseFloat(actualEffectiveSlPct));
+    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, spacingPct, tpPct, parseFloat(actualEffectiveSlPct));
 
     this.broadcastStatus();
   }
@@ -5498,6 +5522,19 @@ export class WickSniperEngine {
           detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : ''),
           updatedAt: now,
         };
+
+        if (reversalDetected) {
+          telegram.notifyWhaleReversal(
+            pos.symbol,
+            pos.side,
+            oppSideName,
+            oppSideRatio * 100,
+            pos.currentPrice,
+            pos.avgEntryPrice,
+            pos.unrealizedPnl || 0,
+            pos.pnlPct || 0
+          );
+        }
       } catch (err: any) {
         // Silent fail untuk analisa background
       }

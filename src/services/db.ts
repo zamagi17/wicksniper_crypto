@@ -348,6 +348,9 @@ export class DatabaseService {
           strategyType: parsedSnap?.strategy || (parsedSnap?.smartMoneyFlowStatus ? 'SMART_MONEY' : undefined),
           smartMoneyFlowStatus: parsedSnap?.smartMoneyFlowStatus || null,
           slDescription: parsedSnap?.slDescription || null,
+          targetTpPrice: parsedSnap?.targetTpPrice || undefined,
+          targetTp2Price: parsedSnap?.targetTp2Price || undefined,
+          hardSlPrice: parsedSnap?.hardSlPrice || undefined,
           paramsSnapshot: parsedSnap,
           marketSnapshot: parsedSnap?.marketSnapshot || null,
           layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
@@ -391,6 +394,7 @@ export class DatabaseService {
       );
       if (!res.rows || res.rows.length === 0) return null;
       const r = res.rows[0];
+      const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
       return {
         id: r.id,
         symbol: r.symbol,
@@ -409,8 +413,14 @@ export class DatabaseService {
         closedAt: r.closedAt,
         timestamp: parseInt(r.timestamp, 10),
         layersFilled: r.layersFilled || undefined,
-        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
-        marketSnapshot: (typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot)?.marketSnapshot || null,
+        strategyType: parsedSnap?.strategy || (parsedSnap?.smartMoneyFlowStatus ? 'SMART_MONEY' : undefined),
+        smartMoneyFlowStatus: parsedSnap?.smartMoneyFlowStatus || null,
+        slDescription: parsedSnap?.slDescription || null,
+        targetTpPrice: parsedSnap?.targetTpPrice || undefined,
+        targetTp2Price: parsedSnap?.targetTp2Price || undefined,
+        hardSlPrice: parsedSnap?.hardSlPrice || undefined,
+        paramsSnapshot: parsedSnap,
+        marketSnapshot: parsedSnap?.marketSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
         postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
       };
@@ -569,6 +579,7 @@ export class DatabaseService {
     symbol?: string;
     outcome?: 'ALL' | 'WIN' | 'LOSS';
     mode?: 'ALL' | 'LIVE' | 'PAPER';
+    strategy?: 'ALL' | 'SMART_MONEY' | 'WICK_SNIPER';
   }): Promise<{ trades: ClosedTrade[]; total: number; page: number; totalPages: number }> {
     const page = Math.max(1, parseInt(String(options.page || 1), 10));
     const limit = Math.min(100, Math.max(5, parseInt(String(options.limit || 20), 10)));
@@ -600,6 +611,12 @@ export class DatabaseService {
         conditions.push(`is_paper = TRUE`);
       }
 
+      if (options.strategy === 'SMART_MONEY') {
+        conditions.push(`(params_snapshot->>'strategy' = 'SMART_MONEY' OR params_snapshot->>'whaleAvgEntry' IS NOT NULL OR params_snapshot->>'whaleShortRatio' IS NOT NULL OR params_snapshot->>'whaleLongRatio' IS NOT NULL OR params_snapshot->'smartMoneyFlowStatus' IS NOT NULL)`);
+      } else if (options.strategy === 'WICK_SNIPER') {
+        conditions.push(`((params_snapshot->>'strategy' IS NULL OR params_snapshot->>'strategy' != 'SMART_MONEY') AND params_snapshot->>'whaleAvgEntry' IS NULL AND params_snapshot->>'whaleShortRatio' IS NULL AND params_snapshot->>'whaleLongRatio' IS NULL AND params_snapshot->'smartMoneyFlowStatus' IS NULL)`);
+      }
+
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       const countRes = await this.pool.query(
@@ -627,29 +644,38 @@ export class DatabaseService {
         queryValues
       );
 
-      const trades: ClosedTrade[] = res.rows.map((r: any) => ({
-        id: r.id,
-        symbol: r.symbol,
-        side: r.side,
-        entryPrice: parseFloat(r.entryPrice),
-        exitPrice: parseFloat(r.exitPrice),
-        qty: parseFloat(r.qty),
-        marginUsed: parseFloat(r.marginUsed),
-        realizedPnl: parseFloat(r.realizedPnl),
-        grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
-        fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
-        pnlPct: parseFloat(r.pnlPct),
-        durationSeconds: parseInt(r.durationSeconds, 10),
-        exitReason: r.exitReason,
-        isPaper: r.isPaper,
-        closedAt: r.closedAt,
-        timestamp: parseInt(r.timestamp, 10),
-        layersFilled: r.layersFilled || undefined,
-        paramsSnapshot: typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null,
-        marketSnapshot: (typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot)?.marketSnapshot || null,
-        layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
-        postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
-      }));
+      const trades: ClosedTrade[] = res.rows.map((r: any) => {
+        const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
+        return {
+          id: r.id,
+          symbol: r.symbol,
+          side: r.side,
+          entryPrice: parseFloat(r.entryPrice),
+          exitPrice: parseFloat(r.exitPrice),
+          qty: parseFloat(r.qty),
+          marginUsed: parseFloat(r.marginUsed),
+          realizedPnl: parseFloat(r.realizedPnl),
+          grossPnl: r.grossPnl !== null && r.grossPnl !== undefined ? parseFloat(r.grossPnl) : undefined,
+          fee: r.fee !== null && r.fee !== undefined ? parseFloat(r.fee) : undefined,
+          pnlPct: parseFloat(r.pnlPct),
+          durationSeconds: parseInt(r.durationSeconds, 10),
+          exitReason: r.exitReason,
+          isPaper: r.isPaper,
+          closedAt: r.closedAt,
+          timestamp: parseInt(r.timestamp, 10),
+          layersFilled: r.layersFilled || undefined,
+          strategyType: parsedSnap?.strategy || (parsedSnap?.smartMoneyFlowStatus ? 'SMART_MONEY' : undefined),
+          smartMoneyFlowStatus: parsedSnap?.smartMoneyFlowStatus || null,
+          slDescription: parsedSnap?.slDescription || null,
+          targetTpPrice: parsedSnap?.targetTpPrice || undefined,
+          targetTp2Price: parsedSnap?.targetTp2Price || undefined,
+          hardSlPrice: parsedSnap?.hardSlPrice || undefined,
+          paramsSnapshot: parsedSnap,
+          marketSnapshot: parsedSnap?.marketSnapshot || null,
+          layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
+          postExit30m: typeof r.postExit30m === 'string' ? JSON.parse(r.postExit30m) : r.postExit30m || null,
+        };
+      });
 
       return { trades, total, page, totalPages };
     } catch (e: any) {

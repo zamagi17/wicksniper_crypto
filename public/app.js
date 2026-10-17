@@ -1070,9 +1070,11 @@ async function fetchPaginatedTrades(page = 1) {
   const symbol = (document.getElementById('trades-filter-symbol')?.value || '').trim();
   const outcome = document.getElementById('trades-filter-outcome')?.value || 'ALL';
   const mode = document.getElementById('trades-filter-mode')?.value || 'ALL';
+  const strategy = document.getElementById('trades-filter-strategy')?.value || 'ALL';
   tradesState.symbol = symbol;
   tradesState.outcome = outcome;
   tradesState.mode = mode;
+  tradesState.strategy = strategy;
 
   try {
     const params = new URLSearchParams({
@@ -1082,6 +1084,7 @@ async function fetchPaginatedTrades(page = 1) {
     if (symbol) params.append('symbol', symbol);
     if (outcome !== 'ALL') params.append('outcome', outcome);
     if (mode !== 'ALL') params.append('mode', mode);
+    if (strategy !== 'ALL') params.append('strategy', strategy);
 
     const res = await fetch(`/api/trades?${params.toString()}`);
     const data = await res.json();
@@ -1127,9 +1130,11 @@ function resetTradesFilter() {
   const symEl = document.getElementById('trades-filter-symbol');
   const outEl = document.getElementById('trades-filter-outcome');
   const modEl = document.getElementById('trades-filter-mode');
+  const stratEl = document.getElementById('trades-filter-strategy');
   if (symEl) symEl.value = '';
   if (outEl) outEl.value = 'ALL';
   if (modEl) modEl.value = 'ALL';
+  if (stratEl) stratEl.value = 'ALL';
   fetchPaginatedTrades(1);
 }
 
@@ -1579,17 +1584,17 @@ function openSpikeSimModal(spikeId) {
     <div class="td-section-title">⏱️ Ekstrem Pergerakan Harga Pasca-Penolakan</div>
     <div class="td-post-exit-grid">
       <div class="td-pe-stat">
-        <div class="pe-label">Puncak Tertinggi (MAE / Pompa)</div>
-        <div class="pe-val" style="color: ${highDiff > 0 ? 'var(--color-gold)' : 'var(--text-main)'};">
+        <div class="pe-label">${isLong ? 'Puncak Tertinggi (MFE / Kenaikan)' : 'Puncak Tertinggi (MAE / Pompa)'}</div>
+        <div class="pe-val" style="color: ${isLong ? (highDiff > 0 ? 'var(--color-green)' : 'var(--text-main)') : (highDiff > 0 ? 'var(--color-gold)' : 'var(--text-main)')};">
           $${formatCryptoPrice(high)}
-          <small class="pe-diff" style="color: ${highDiff > 0 ? 'var(--color-red)' : 'var(--text-muted)'};">(${highSign}${highDiff.toFixed(2)}%)</small>
+          <small class="pe-diff" style="color: ${isLong ? (highDiff > 0 ? 'var(--color-green)' : 'var(--text-muted)') : (highDiff > 0 ? 'var(--color-red)' : 'var(--text-muted)')};">(${highSign}${highDiff.toFixed(2)}%)</small>
         </div>
       </div>
       <div class="td-pe-stat">
-        <div class="pe-label">Penurunan Terdalam (MFE / Reversal)</div>
-        <div class="pe-val" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-main)'};">
+        <div class="pe-label">${isLong ? 'Penurunan Terdalam (MAE / Koreksi)' : 'Penurunan Terdalam (MFE / Reversal)'}</div>
+        <div class="pe-val" style="color: ${isLong ? (lowDiff < 0 ? 'var(--color-red)' : 'var(--text-main)') : (lowDiff < 0 ? 'var(--color-green)' : 'var(--text-main)')};">
           $${formatCryptoPrice(low)}
-          <small class="pe-diff" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-muted)'};">(${lowSign}${lowDiff.toFixed(2)}%)</small>
+          <small class="pe-diff" style="color: ${isLong ? (lowDiff < 0 ? 'var(--color-red)' : 'var(--text-muted)') : (lowDiff < 0 ? 'var(--color-green)' : 'var(--text-muted)')};">(${lowSign}${lowDiff.toFixed(2)}%)</small>
         </div>
       </div>
       <div class="td-pe-stat">
@@ -1631,7 +1636,7 @@ function renderClosedTradesTable(trades) {
       const isWin = realizedPnl >= 0;
       const pnlColor = isWin ? 'text-green' : 'text-red';
       const sign = isWin ? '+' : '';
-      const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio;
+      const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio;
       const stratBadge = isSmTrade
         ? `<span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Smart Money (Whale Flow)">🐋 SM</span>`
         : '';
@@ -1648,10 +1653,12 @@ function renderClosedTradesTable(trades) {
 
       const safeTradeId = t.id ? String(t.id).replace(/'/g, "\\'") : '';
 
+      const rowSide = (t.side || t.paramsSnapshot?.side || 'SHORT').toUpperCase();
+
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
-          <td><b>${t.symbol}</b> <span class="badge-side ${t.side === 'LONG' ? 'long' : 'short'}">${t.side || 'SHORT'}</span> ${stratBadge} ${layerBadge}</td>
+          <td><b>${t.symbol}</b> <span class="badge-side ${rowSide === 'LONG' ? 'long' : 'short'}">${rowSide}</span> ${stratBadge} ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
           <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
@@ -1680,11 +1687,17 @@ function renderClosedTradesTable(trades) {
 
 function renderPostExitSnapshotHtml(t) {
   const snap = t.postExit30m;
+  const tradeSide = (t.side || t.paramsSnapshot?.side || 'SHORT').toUpperCase();
+  const isLong = tradeSide === 'LONG';
+
   if (!snap) {
     return `
       <div class="td-post-exit-box">
         <div class="td-post-exit-header">
-          <div class="td-post-exit-title">⏱️ Snapshot Harga Pasca-Exit (Jendela 30 Menit)</div>
+          <div class="td-post-exit-title">
+            ⏱️ Snapshot Harga Pasca-Exit (Jendela 30 Menit)
+            <span class="badge-side ${isLong ? 'long' : 'short'}" style="font-size: 10px; margin-left: 6px;">${tradeSide}</span>
+          </div>
           <span class="badge-post-status tracking">⏳ Mengambil Data Binance...</span>
         </div>
         <div style="font-size: 11px; color: var(--text-muted); font-style: italic;">
@@ -1705,35 +1718,68 @@ function renderPostExitSnapshotHtml(t) {
   const lowSign = lowDiff >= 0 ? '+' : '';
 
   let insightText = '';
-  if (lowDiff <= -1.0) {
-    insightText = `📉 <b>MFE (Favorable)</b>: Pasca-exit, harga sempat turun hingga <b>${lowSign}${lowDiff.toFixed(2)}%</b> ($${formatCryptoPrice(low)}). Terdapat peluang profit lebih jika TP diperlebar.`;
-  } else if (highDiff >= 1.5) {
-    insightText = `🛡️ <b>MAE (Adverse)</b>: Pasca-exit, harga sempat melonjak <b>${highSign}${highDiff.toFixed(2)}%</b> ($${formatCryptoPrice(high)}). Keputusan exit berhasil menyelamatkan modal dari floating loss lebih dalam!`;
+  if (isLong) {
+    if (highDiff >= 1.0 && lowDiff <= -1.5) {
+      insightText = `⚡ <b>Volatilitas Dua Arah</b>: Pasca-exit, harga sempat melambung <b>${highSign}${highDiff.toFixed(2)}%</b> ($${formatCryptoPrice(high)}) lalu anjlok hingga <b>${lowSign}${lowDiff.toFixed(2)}%</b> ($${formatCryptoPrice(low)}). Keputusan exit berhasil mengamankan profit sebelum dump!`;
+    } else if (highDiff >= 1.0) {
+      insightText = `📈 <b>MFE (Favorable)</b>: Pasca-exit, harga sempat melonjak hingga <b>${highSign}${highDiff.toFixed(2)}%</b> ($${formatCryptoPrice(high)}). Terdapat peluang profit lebih jika TP diperlebar.`;
+    } else if (lowDiff <= -1.5) {
+      insightText = `🛡️ <b>MAE (Adverse)</b>: Pasca-exit, harga sempat anjlok hingga <b>${lowSign}${lowDiff.toFixed(2)}%</b> ($${formatCryptoPrice(low)}). Keputusan exit berhasil menyelamatkan modal dari floating loss lebih dalam!`;
+    } else {
+      insightText = `⚖️ Pasca-exit, harga bergerak dalam rentang wajar (High: ${highSign}${highDiff.toFixed(2)}%, Low: ${lowSign}${lowDiff.toFixed(2)}%) di sekitar harga exit.`;
+    }
   } else {
-    insightText = `⚖️ Pasca-exit, harga bergerak dalam rentang wajar (High: ${highSign}${highDiff.toFixed(2)}%, Low: ${lowSign}${lowDiff.toFixed(2)}%) di sekitar harga exit.`;
+    if (lowDiff <= -1.0 && highDiff >= 1.5) {
+      insightText = `⚡ <b>Volatilitas Dua Arah</b>: Pasca-exit, harga sempat turun <b>${lowSign}${lowDiff.toFixed(2)}%</b> ($${formatCryptoPrice(low)}) lalu melonjak hingga <b>${highSign}${highDiff.toFixed(2)}%</b> ($${formatCryptoPrice(high)}). Keputusan exit berhasil mengamankan modal sebelum pompa berikutnya!`;
+    } else if (lowDiff <= -1.0) {
+      insightText = `📉 <b>MFE (Favorable)</b>: Pasca-exit, harga sempat turun hingga <b>${lowSign}${lowDiff.toFixed(2)}%</b> ($${formatCryptoPrice(low)}). Terdapat peluang profit lebih jika TP diperlebar.`;
+    } else if (highDiff >= 1.5) {
+      insightText = `🛡️ <b>MAE (Adverse)</b>: Pasca-exit, harga sempat melonjak <b>${highSign}${highDiff.toFixed(2)}%</b> ($${formatCryptoPrice(high)}). Keputusan exit berhasil menyelamatkan modal dari floating loss lebih dalam!`;
+    } else {
+      insightText = `⚖️ Pasca-exit, harga bergerak dalam rentang wajar (High: ${highSign}${highDiff.toFixed(2)}%, Low: ${lowSign}${lowDiff.toFixed(2)}%) di sekitar harga exit.`;
+    }
   }
+
+  const highStatLabel = isLong ? 'Harga Tertinggi (Peak High • Favorable MFE)' : 'Harga Tertinggi (Peak High • Adverse MAE)';
+  const highStatValColor = isLong
+    ? (highDiff > 0 ? 'var(--color-green)' : 'var(--text-main)')
+    : (highDiff > 0 ? 'var(--color-gold)' : 'var(--text-main)');
+  const highStatDiffColor = isLong
+    ? (highDiff > 0 ? 'var(--color-green)' : 'var(--text-muted)')
+    : (highDiff > 0 ? 'var(--color-red)' : 'var(--text-muted)');
+
+  const lowStatLabel = isLong ? 'Harga Terendah (Deep Low • Adverse MAE)' : 'Harga Terendah (Deep Low • Favorable MFE)';
+  const lowStatValColor = isLong
+    ? (lowDiff < 0 ? 'var(--color-red)' : 'var(--text-main)')
+    : (lowDiff < 0 ? 'var(--color-green)' : 'var(--text-main)');
+  const lowStatDiffColor = isLong
+    ? (lowDiff < 0 ? 'var(--color-red)' : 'var(--text-muted)')
+    : (lowDiff < 0 ? 'var(--color-green)' : 'var(--text-muted)');
 
   return `
     <div class="td-post-exit-box">
       <div class="td-post-exit-header">
-        <div class="td-post-exit-title">⏱️ Snapshot Harga Pasca-Exit (Jendela 30 Menit)</div>
+        <div class="td-post-exit-title">
+          ⏱️ Snapshot Harga Pasca-Exit (Jendela 30 Menit)
+          <span class="badge-side ${isLong ? 'long' : 'short'}" style="font-size: 10px; margin-left: 6px;">${tradeSide}</span>
+        </div>
         <span class="badge-post-status ${isComplete ? 'complete' : 'tracking'}">
           ${isComplete ? '✅ Pemantauan 30m Selesai' : `⏳ Sedang Berjalan (${minutes} / 30 Menit)`}
         </span>
       </div>
       <div class="td-post-exit-grid">
         <div class="td-pe-stat">
-          <div class="pe-label">Harga Tertinggi (Peak High)</div>
-          <div class="pe-val" style="color: ${highDiff > 0 ? 'var(--color-gold)' : 'var(--text-main)'};">
+          <div class="pe-label">${highStatLabel}</div>
+          <div class="pe-val" style="color: ${highStatValColor};">
             $${formatCryptoPrice(high)}
-            <small class="pe-diff" style="color: ${highDiff > 0 ? 'var(--color-red)' : 'var(--text-muted)'};">(${highSign}${highDiff.toFixed(2)}%)</small>
+            <small class="pe-diff" style="color: ${highStatDiffColor};">(${highSign}${highDiff.toFixed(2)}%)</small>
           </div>
         </div>
         <div class="td-pe-stat">
-          <div class="pe-label">Harga Terendah (Deep Low)</div>
-          <div class="pe-val" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-main)'};">
+          <div class="pe-label">${lowStatLabel}</div>
+          <div class="pe-val" style="color: ${lowStatValColor};">
             $${formatCryptoPrice(low)}
-            <small class="pe-diff" style="color: ${lowDiff < 0 ? 'var(--color-green)' : 'var(--text-muted)'};">(${lowSign}${lowDiff.toFixed(2)}%)</small>
+            <small class="pe-diff" style="color: ${lowStatDiffColor};">(${lowSign}${lowDiff.toFixed(2)}%)</small>
           </div>
         </div>
         <div class="td-pe-stat">
@@ -1780,12 +1826,13 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       try { snap = JSON.parse(snap); } catch (_) { snap = null; }
     }
 
-    const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio;
+    const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio || !!snap?.whaleLongRatio || !!snap?.whaleAvgEntry;
     const stratName = isSm ? '🐋 Smart Money' : t.strategyType === 'MOMENTUM_LONG' ? '🚀 Momentum Long' : '⚡ Wick Sniper';
 
     // Header Title & Badge
+    const detailSide = (t.side || snap?.side || 'SHORT').toUpperCase();
     const titleEl = document.getElementById('td-title');
-    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${t.side || 'SHORT'} [${stratName}] (${t.isPaper ? 'Paper' : 'Live'})`;
+    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${detailSide} [${stratName}] (${t.isPaper ? 'Paper' : 'Live'})`;
     const badge = document.getElementById('td-pnl-badge');
     if (badge) {
       badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
@@ -1989,19 +2036,53 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     // Siapkan baris perbandingan parameter terlebih dahulu untuk menghitung diffCount
     const compareRowsHtml = `
       ${renderGroupHeader('🧱 Grid & Martingale')}
-      ${renderCompareRow('Modal Per Layer (L0)', snap.marginPerLayerUsdt, currGrid.marginPerLayerUsdt, ' USDT')}
-      ${renderCompareRow('Jumlah Layer Jaring', snap.totalLayers, currGrid.totalLayers, ' Lapis')}
-      ${renderCompareRow('Jarak Antar Jaring (Spacing)', snap.layerSpacingPct, currGrid.layerSpacingPct, '%')}
+      ${renderCompareRow(
+        isSm ? 'Modal Awal (Margin USDT)' : 'Modal Per Layer (L0)',
+        isSm ? (snap.marginUsdt ?? snap.marginPerLayerUsdt) : snap.marginPerLayerUsdt,
+        isSm ? (curr.smartMoney?.marginUsdt ?? currGrid.marginPerLayerUsdt) : currGrid.marginPerLayerUsdt,
+        ' USDT'
+      )}
+      ${renderCompareRow(
+        isSm ? 'Jumlah Layer (Smart Entry)' : 'Jumlah Layer Jaring',
+        isSm ? (snap.entryLayers ?? snap.totalLayers) : snap.totalLayers,
+        isSm ? (curr.smartMoney?.entryLayers || 1) : currGrid.totalLayers,
+        isSm ? 'x Entry' : ' Lapis'
+      )}
+      ${renderCompareRow(
+        'Jarak Antar Jaring (Spacing)',
+        snap.layerSpacingPct,
+        isSm ? (curr.smartMoney?.layerSpacingPct ?? 0.8) : currGrid.layerSpacingPct,
+        '%'
+      )}
       ${renderCompareRow('Pengali Martingale', snap.martingaleMultiplier, currGrid.martingaleMultiplier, 'x')}
       ${renderCompareRow('Maks Margin Per Koin', snap.maxTotalMarginPerCoin, currGrid.maxTotalMarginPerCoin, ' USDT')}
-      ${renderCompareRow('Maks Koin Bersamaan', snap.maxConcurrentCoins, currGrid.maxConcurrentCoins, ' Koin')}
+      ${renderCompareRow('Maks Koin Bersamaan', snap.maxConcurrentCoins, isSm ? (curr.smartMoney?.maxConcurrentPositions || currGrid.maxConcurrentCoins) : currGrid.maxConcurrentCoins, ' Koin')}
 
       ${renderGroupHeader('🎯 Exit & Take Profit / Stop Loss')}
-      ${renderCompareRow('Target Take Profit', snap.takeProfitPct, currExit.takeProfitPct, '%')}
-      ${renderCompareRow('Hard Stop Loss', snap.hardStopLossPct, currExit.hardStopLossPct, '%')}
+      ${renderCompareRow(
+        'Target Take Profit',
+        snap.takeProfitPct,
+        isSm ? (curr.smartMoney?.takeProfitPct || 1.5) : currExit.takeProfitPct,
+        '%'
+      )}
+      ${renderCompareRow(
+        'Hard Stop Loss',
+        snap.hardStopLossPct ?? snap.stopLossPct,
+        isSm ? (curr.smartMoney?.stopLossPct || 3.0) : currExit.hardStopLossPct,
+        '%'
+      )}
       ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes, currExit.maxHoldMinutes, ' Menit')}
-      ${renderCompareRow('Trailing TP (Callback)', snap.trailingTpEnabled, currExit.trailingTpEnabled)}
-      ${renderCompareRow('Jarak Callback Trailing TP', snap.trailingCallbackPct, currExit.trailingCallbackPct, '%')}
+      ${renderCompareRow(
+        'Trailing TP (Callback)',
+        snap.trailingTpEnabled,
+        isSm ? (curr.smartMoney?.trailingTpEnabled !== false) : currExit.trailingTpEnabled
+      )}
+      ${renderCompareRow(
+        'Jarak Callback Trailing TP',
+        snap.trailingCallbackPct,
+        isSm ? (curr.smartMoney?.trailingCallbackPct ?? 0.3) : currExit.trailingCallbackPct,
+        '%'
+      )}
       ${renderCompareRow('Stage 1 Partial TP', snap.partialTpEnabled, currExit.partialTpEnabled)}
       ${renderCompareRow('Porsi Pencairan TP 1', snap.partialTpRatio, currExit.partialTpRatio, '', formatRatioPct)}
       ${renderCompareRow('Target TP Tahap 2', snap.takeProfit2Pct, currExit.takeProfit2Pct, '%')}
@@ -2219,7 +2300,9 @@ function openTradeDetailModal(tradeId, tradeIndex) {
         <!-- SMART MONEY & WHALE FLOW SAAT ENTRY -->
         ${(() => {
           const sm = t.smartMoneyFlowStatus || snap?.smartMoneyFlowStatus || null;
-          const isSmTrade = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!sm || snap?.whaleAvgEntry !== undefined || snap?.whaleShortRatio !== undefined;
+          const tradeSide = (t.side || snap?.side || 'SHORT').toUpperCase();
+          const isTradeLong = tradeSide === 'LONG';
+          const isSmTrade = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!sm || snap?.whaleAvgEntry !== undefined || snap?.whaleShortRatio !== undefined || snap?.whaleLongRatio !== undefined;
           if (!isSmTrade) return '';
 
           const whaleShortRatio = snap?.whaleShortRatio ?? sm?.whaleShortRatio;
@@ -2229,14 +2312,14 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           const whaleWin = snap?.whaleWinratePct ?? sm?.whaleWinratePct;
           const whaleProfit = snap?.whaleProfitWhales ?? sm?.whaleProfitWhales;
           const whaleTotal = snap?.whaleTotalWhales ?? sm?.whaleTotalWhales;
-          const whalePositions = snap?.whalePositionsUsdt ?? sm?.whalePositionsUsdt ?? (t.side === 'LONG' ? sm?.longWhalePositionsUsdt : sm?.shortWhalePositionsUsdt);
+          const whalePositions = snap?.whalePositionsUsdt ?? sm?.whalePositionsUsdt ?? (isTradeLong ? sm?.longWhalePositionsUsdt : sm?.shortWhalePositionsUsdt);
           const retailLong = snap?.retailLongRatio ?? sm?.retailLongRatio;
           const retailShort = snap?.retailShortRatio ?? sm?.retailShortRatio;
           const slDesc = snap?.slDescription || t.slDescription;
           const signalReason = snap?.signalReason;
 
-          const sameSideRatio = t.side === 'LONG' ? whaleLongRatio : whaleShortRatio;
-          const oppSideRatio = t.side === 'LONG' ? whaleShortRatio : whaleLongRatio;
+          const sameSideRatio = isTradeLong ? whaleLongRatio : whaleShortRatio;
+          const oppSideRatio = isTradeLong ? whaleShortRatio : whaleLongRatio;
 
           const distColor = whaleDist !== undefined ? (Math.abs(whaleDist) <= 0.8 ? 'text-green' : Math.abs(whaleDist) <= 1.5 ? 'text-yellow' : 'text-red') : '';
           const distSign = (whaleDist || 0) > 0 ? '+' : '';
@@ -2247,7 +2330,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
             <div class="td-kpi-grid">
               ${sameSideRatio !== undefined ? `
               <div class="td-kpi-card">
-                <div class="td-kpi-label">🐋 Dominasi Paus ${t.side || 'SHORT'}</div>
+                <div class="td-kpi-label">🐋 Dominasi Paus ${tradeSide}</div>
                 <div class="td-kpi-val text-cyan"><b>${(Number(sameSideRatio) * 100).toFixed(1)}%</b> <small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(Lawan: ${(Number(oppSideRatio || 0) * 100).toFixed(1)}%)</small></div>
               </div>` : ''}
 
@@ -2299,17 +2382,26 @@ function openTradeDetailModal(tradeId, tradeIndex) {
         <!-- TP / SL INFO -->
         ${(() => {
           const snapData = snap || {};
+          const tradeSide = (t.side || snapData.side || 'SHORT').toUpperCase();
+          const isTradeLong = tradeSide === 'LONG';
           const entryP = Number(t.entryPrice || 0);
+
+          const snapTpPct = snapData.takeProfitPct;
+          const snapSlPct = snapData.hardStopLossPct ?? snapData.stopLossPct;
+
           // Use stored prices, or compute from entry + snapshot %
-          const tpPrice = t.targetTpPrice || (entryP && snapData.takeProfitPct ? entryP * (1 - snapData.takeProfitPct / 100) : 0);
-          const tp2Pct = snapData.takeProfit2Pct || (snapData.takeProfitPct ? snapData.takeProfitPct * 2 : 0);
-          const tp2Price = t.targetTp2Price || (entryP && tp2Pct ? entryP * (1 - tp2Pct / 100) : 0);
-          const slPrice = t.hardSlPrice || (entryP && snapData.hardStopLossPct ? entryP * (1 + snapData.hardStopLossPct / 100) : 0);
+          const tpPrice = t.targetTpPrice || (entryP && snapTpPct ? (isTradeLong ? entryP * (1 + snapTpPct / 100) : entryP * (1 - snapTpPct / 100)) : 0);
+          const tp2Pct = snapData.takeProfit2Pct || (snapTpPct ? snapTpPct * 2 : 0);
+          const tp2Price = t.targetTp2Price || (entryP && tp2Pct ? (isTradeLong ? entryP * (1 + tp2Pct / 100) : entryP * (1 - tp2Pct / 100)) : 0);
+          const slPrice = t.hardSlPrice || (entryP && snapSlPct ? (isTradeLong ? entryP * (1 - snapSlPct / 100) : entryP * (1 + snapSlPct / 100)) : 0);
           const hasTpSl = tpPrice || slPrice;
           const isPartialTpOn = snapData.partialTpEnabled || t.partialTpDone;
           const tpRatio = snapData.partialTpRatio || 0.7;
 
           if (!hasTpSl) return '';
+
+          const tpSign = isTradeLong ? '+' : '−';
+          const slSign = isTradeLong ? '−' : '+';
 
           let tpHtml = '';
           if (tpPrice) {
@@ -2319,17 +2411,17 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               tpHtml = `
                 <div class="td-kpi-card" style="flex: 1;">
                   <div class="td-kpi-label">🎯 TP 1 (Stage 1 — ${tp1Pct}% Posisi)</div>
-                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tpPrice)} <small style="opacity:0.7; font-weight:400;">(−${snapData.takeProfitPct || '?'}%)</small></div>
+                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tpPrice)} <small style="opacity:0.7; font-weight:400;">(${tpSign}${snapTpPct || '?'}%)</small></div>
                 </div>
                 <div class="td-kpi-card" style="flex: 1;">
                   <div class="td-kpi-label">🎯 TP 2 (Stage 2 — ${tp2Pct}% Sisa)</div>
-                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tp2Price)} <small style="opacity:0.7; font-weight:400;">(−${snapData.takeProfit2Pct || (snapData.takeProfitPct ? snapData.takeProfitPct * 2 : '?')}%)</small></div>
+                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tp2Price)} <small style="opacity:0.7; font-weight:400;">(${tpSign}${snapData.takeProfit2Pct || (snapTpPct ? snapTpPct * 2 : '?')}%)</small></div>
                 </div>`;
             } else {
               tpHtml = `
                 <div class="td-kpi-card" style="flex: 1;">
                   <div class="td-kpi-label">🎯 Target Take Profit</div>
-                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tpPrice)} <small style="opacity:0.7; font-weight:400;">(−${snapData.takeProfitPct || '?'}%)</small></div>
+                  <div class="td-kpi-val text-green">$${formatCryptoPrice(tpPrice)} <small style="opacity:0.7; font-weight:400;">(${tpSign}${snapTpPct || '?'}%)</small></div>
                 </div>`;
             }
           }
@@ -2339,7 +2431,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
             slHtml = `
               <div class="td-kpi-card" style="flex: 1;">
                 <div class="td-kpi-label">🛑 Hard Stop Loss</div>
-                <div class="td-kpi-val text-red">$${formatCryptoPrice(slPrice)} <small style="opacity:0.7; font-weight:400;">(+${snapData.hardStopLossPct || '?'}%)</small></div>
+                <div class="td-kpi-val text-red">$${formatCryptoPrice(slPrice)} <small style="opacity:0.7; font-weight:400;">(${slSign}${snapSlPct || '?'}%)</small></div>
               </div>`;
           }
 

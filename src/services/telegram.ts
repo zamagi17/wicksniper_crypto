@@ -145,13 +145,41 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
     const tpSign = isLong ? '+' : '-';
     const slSign = isLong ? '-' : '+';
     const isSmartMoney = pos.strategyType === 'SMART_MONEY';
-    const triggerLine = isSmartMoney
-      ? `🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b>`
-      : `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
+
+    let triggerLine = '';
+    if (isSmartMoney) {
+      const snap: any = pos.paramsSnapshot || {};
+      const smFlow: any = pos.smartMoneyFlowStatus || {};
+      const wLong = (smFlow.whaleLongRatio ?? snap.whaleLongRatio ?? 0) * 100;
+      const wShort = (smFlow.whaleShortRatio ?? snap.whaleShortRatio ?? 0) * 100;
+      const rLong = (smFlow.retailLongRatio ?? snap.retailLongRatio ?? 0) * 100;
+      const rShort = (smFlow.retailShortRatio ?? snap.retailShortRatio ?? 0) * 100;
+      const whaleEntry = smFlow.whaleAvgEntry ?? snap.whaleAvgEntry;
+      const whaleDist = smFlow.whaleDistancePct ?? snap.whaleDistancePct;
+      const whaleWin = smFlow.whaleWinratePct ?? snap.whaleWinratePct;
+      const distSign = (whaleDist || 0) >= 0 ? '+' : '';
+
+      triggerLine = `🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b>`;
+      if (wLong > 0 || wShort > 0) {
+        triggerLine += `\n🌊 <b>Dominasi Paus:</b> <b>${wLong.toFixed(0)}% L / ${wShort.toFixed(0)}% S</b> (Ritel: ${rLong.toFixed(0)}% L / ${rShort.toFixed(0)}% S)`;
+      }
+      if (whaleEntry && whaleEntry > 0) {
+        triggerLine += `\n💼 <b>Modal Paus:</b> <code>$${formatCryptoPrice(whaleEntry)}</code> (${distSign}${(whaleDist || 0).toFixed(1)}%)`;
+      }
+      if (whaleWin !== undefined) {
+        triggerLine += `\n🩺 <b>Kesehatan Paus:</b> <b>${whaleWin.toFixed(0)}% Laba</b>`;
+      }
+    } else {
+      triggerLine = `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
+    }
+
     const layersLine = isSmartMoney
       ? `🎯 <b>Model Entry:</b> ${pos.layers.length > 1 ? `${pos.layers.length} Layer (Jarak ${spacingPct}%)` : '1 Single Sniper Entry'}`
       : `🕸️ <b>Jaring Terpasang:</b> ${pos.layers.length} Layer (Jarak ${spacingPct}%)`;
     const marginLine = `💰 <b>Modal Margin:</b> $${pos.totalMarginUsed.toFixed(2)} USDT (Vol Order: $${vol0Usdt.toFixed(2)} USDT @ ${pos.leverage}x)`;
+    const slLine = pos.slDescription
+      ? `🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}% • ${pos.slDescription})`
+      : `🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}%)`;
 
     const msg =
 `🚀 <b>[ORDER BARU DITERBITKAN]</b> 🎯
@@ -163,7 +191,7 @@ ${triggerLine}
 ${layersLine}
 ${marginLine}
 🎯 <b>Target TP:</b> <code>$${formatCryptoPrice(pos.targetTpPrice)}</code> (${tpSign}${tpPct}%)
-🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}%)
+${slLine}
 ⚙️ <b>Mode:</b> ${modeTag}`;
 
     this.sendMessage(msg).catch(() => {});
@@ -215,10 +243,13 @@ ${marginLine}
       ? `\n📊 <b>Gross PnL:</b> ${trade.grossPnl >= 0 ? '+' : ''}$${trade.grossPnl.toFixed(2)} USDT`
       : '';
 
+    const isSm = trade.strategyType === 'SMART_MONEY' || trade.paramsSnapshot?.strategy === 'SMART_MONEY';
+    const stratLine = isSm ? `\n🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b>` : '';
+
     const msg =
 `${emoji} <b>[${title}]</b> ${emoji}
 
-🪙 <b>Koin:</b> <code>${trade.symbol}</code> ${trade.side || 'SHORT'}
+🪙 <b>Koin:</b> <code>${trade.symbol}</code> <b>${trade.side || 'SHORT'}</b>${stratLine}
 🏁 <b>Alasan Exit:</b> ${reasonLabel}
 💵 <b>Harga:</b> <code>$${formatCryptoPrice(trade.entryPrice)}</code> ➜ <code>$${formatCryptoPrice(trade.exitPrice)}</code>
 ⏱️ <b>Durasi Trade:</b> ${durationStr}
@@ -269,6 +300,46 @@ ${marginLine}
 💰 <b>Saldo Bebas (Available):</b> <b>${balanceStr}</b>${reqStr}${reasonStr}
 
 ⚠️ <i>Perhatian: Sebagian/seluruh jaring limit tidak terpasang di Binance! Cek saldo wallet Futures Anda untuk menghindari posisi berjalan tanpa jaring pengaman.</i>`;
+
+    this.sendMessage(msg).catch(() => {});
+  }
+
+  /**
+   * Notifikasi Perubahan Arah Dominasi Paus (Whale Reversal Alert) saat posisi sedang terbuka
+   */
+  public async notifyWhaleReversal(
+    symbol: string,
+    currentSide: 'LONG' | 'SHORT',
+    newDominantSide: 'LONG' | 'SHORT',
+    newDominantRatioPct: number,
+    currentPrice: number,
+    avgEntryPrice: number,
+    unrealizedPnl: number,
+    pnlPct: number
+  ) {
+    if (this.config.notifyOnEmergency === false) return;
+    const key = `WHALE_REV_${symbol}`;
+    const now = Date.now();
+    const last = this.emergencyAlertCooldown.get(key) || 0;
+    if (now - last < 5 * 60 * 1000) return; // Maks 1x per 5 menit per simbol agar tidak spam
+    this.emergencyAlertCooldown.set(key, now);
+
+    const pnlSign = unrealizedPnl >= 0 ? '+' : '';
+    const pnlEmoji = unrealizedPnl >= 0 ? '🟢' : '🔴';
+
+    const msg =
+`⚠️ <b>[PERINGATAN: ALIRAN PAUS BERBALIK ARAH]</b> 🐋
+
+🪙 <b>Koin:</b> <code>${symbol}</code>
+📊 <b>Posisi Terbuka:</b> <b>${currentSide}</b> @ <code>$${formatCryptoPrice(avgEntryPrice)}</code>
+💵 <b>Harga Terkini:</b> <code>$${formatCryptoPrice(currentPrice)}</code>
+${pnlEmoji} <b>Floating PnL:</b> <b>${pnlSign}$${unrealizedPnl.toFixed(2)} USDT (${pnlSign}${pnlPct.toFixed(2)}%)</b>
+
+🔄 <b>Perubahan Aliran Dana:</b>
+Dominasi Paus kini berbalik menjadi <b>${newDominantSide} (${newDominantRatioPct.toFixed(1)}%)</b> • <i>Arah Berlawanan</i>.
+
+🛡️ <i>Catatan: Posisi tetap aktif terjaga oleh sistem Stop Loss & Take Profit. Waspadai pembalikan tren.</i>
+⏱️ <i>Waktu: ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</i>`;
 
     this.sendMessage(msg).catch(() => {});
   }

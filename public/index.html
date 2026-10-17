@@ -334,6 +334,11 @@
               <option value="LIVE">Live Trading</option>
               <option value="PAPER">Paper Trading</option>
             </select>
+            <select id="trades-filter-strategy" class="panel-filter-select" onchange="handleTradesFilterChange()">
+              <option value="ALL">Semua Strategi</option>
+              <option value="SMART_MONEY">🐋 Smart Money</option>
+              <option value="WICK_SNIPER">⚡ Wick Sniper</option>
+            </select>
             <button type="button" class="btn btn-xs" onclick="resetTradesFilter()">Reset</button>
           </div>
 

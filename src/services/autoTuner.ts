@@ -158,8 +158,8 @@ export class AutoTunerService {
       const evalDays = tunerCfg.evalPeriodDays || 7;
       const cutoffTime = Date.now() - evalDays * 24 * 60 * 60 * 1000;
 
-      // Filter trade dalam periode evaluasi
-      const relevantTrades = trades.filter((t) => t.timestamp >= cutoffTime);
+      // Filter trade dalam periode evaluasi (khusus strategi Wick Sniper agar tidak tercampur Smart Money)
+      const relevantTrades = trades.filter((t) => t.timestamp >= cutoffTime && (!t.strategyType || t.strategyType === 'WICK_SNIPER'));
 
       if (relevantTrades.length < minSample) {
         const msg = `Riwayat trade belum mencukupi (Tersedia ${relevantTrades.length}/${minSample} trade dalam ${evalDays} hari terakhir).`;

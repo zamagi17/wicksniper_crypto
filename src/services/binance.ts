@@ -962,7 +962,8 @@ export class BinanceFuturesClient {
     side: 'BUY' | 'SELL',
     qty: number,
     price: number,
-    reduceOnly: boolean = false
+    reduceOnly: boolean = false,
+    positionSide?: 'LONG' | 'SHORT' | 'BOTH'
   ): Promise<any> {
     if (!this.apiKey || !this.apiSecret) return null;
     try {
@@ -978,8 +979,17 @@ export class BinanceFuturesClient {
         price: formattedPrice,
       };
 
-      if (this.isDualSidePosition) {
-        params.positionSide = side === 'BUY' ? 'SHORT' : 'LONG';
+      if (positionSide) {
+        params.positionSide = positionSide;
+        if (!this.isDualSidePosition && reduceOnly) {
+          params.reduceOnly = 'true';
+        }
+      } else if (this.isDualSidePosition) {
+        // Pada Hedge Mode: jika reduceOnly, BUY menutup SHORT, SELL menutup LONG.
+        // Jika bukan reduceOnly (grid/entry), BUY membuka/menambah LONG, SELL membuka/menambah SHORT.
+        params.positionSide = reduceOnly
+          ? (side === 'BUY' ? 'SHORT' : 'LONG')
+          : (side === 'BUY' ? 'LONG' : 'SHORT');
       } else {
         params.positionSide = 'BOTH';
         if (reduceOnly) {
@@ -1011,7 +1021,9 @@ export class BinanceFuturesClient {
             price: this.formatPrice(symbol, price),
           };
           if (this.isDualSidePosition) {
-            retryParams.positionSide = side === 'BUY' ? 'SHORT' : 'LONG';
+            retryParams.positionSide = reduceOnly
+              ? (side === 'BUY' ? 'SHORT' : 'LONG')
+              : (side === 'BUY' ? 'LONG' : 'SHORT');
           } else {
             retryParams.positionSide = 'BOTH';
             if (reduceOnly) retryParams.reduceOnly = 'true';
