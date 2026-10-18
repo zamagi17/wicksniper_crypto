@@ -367,6 +367,33 @@ export class SmartMoneyScanner {
           }
         }
 
+        // Filter ATR Volatilitas: Cegah koin mati gaya (sideways) & koin volatilitas liar tak terkendali
+        let atrData: { atr: number; atrPct: number; currentPrice: number } | undefined;
+        if (this.config.atrFilterEnabled !== false) {
+          const tf = this.config.atrTimeframe || '15m';
+          const period = this.config.atrPeriod || 14;
+          atrData = await binanceFutures.getSymbolAtr(symbol, tf, period);
+          if (atrData && atrData.atrPct !== undefined) {
+            const minAtr = this.config.minAtrPct ?? 0.8;
+            const maxAtr = this.config.maxAtrPct ?? 3.0;
+            if (atrData.atrPct < minAtr) {
+              logger.log(
+                'INFO',
+                `🐋 [SMART MONEY SKIP] ${symbol} ${detectedSide} dilewati: ATR ${tf} (${atrData.atrPct.toFixed(2)}%) < ${minAtr}% (Koin sedang flat/sideways mati gaya, target TP rawan gagal/lama).`
+              );
+              return;
+            }
+            if (atrData.atrPct > maxAtr) {
+              logger.log(
+                'INFO',
+                `🐋 [SMART MONEY SKIP] ${symbol} ${detectedSide} dilewati: ATR ${tf} (${atrData.atrPct.toFixed(2)}%) > ${maxAtr}% (Volatilitas terlalu liar & berbahaya).`
+              );
+              return;
+            }
+            reason += ` | ATR ${tf}: ${atrData.atrPct.toFixed(2)}% ($${formatCryptoPrice(atrData.atr)})`;
+          }
+        }
+
         const signalId = `sm_${symbol}_${Date.now()}`;
         const signal: SmartMoneySignal = {
           id: signalId,
@@ -385,6 +412,8 @@ export class SmartMoneyScanner {
           whaleWinratePct,
           whaleProfitWhales,
           whaleTotalWhales,
+          atr: atrData?.atr,
+          atrPct: atrData?.atrPct,
           timestamp: Date.now(),
           status: 'PENDING',
           reason,

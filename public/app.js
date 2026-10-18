@@ -3001,6 +3001,9 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-leverage', smCfg.leverage ?? cfg.leverage ?? 5);
   setVal('cfg-sm-max-positions', smCfg.maxConcurrentPositions ?? cfg.grid?.maxConcurrentCoins ?? 3);
   setVal('cfg-sm-cooldown', smCfg.cooldownMinutes ?? 30);
+  setVal('cfg-sm-max-hold-hours', smCfg.maxHoldHours ?? 8);
+  setVal('cfg-sm-entry-order-type', smCfg.entryOrderType || 'LIMIT');
+  setVal('cfg-sm-limit-wait-sec', smCfg.limitWaitSeconds ?? 15);
   setVal('cfg-sm-layers', smCfg.entryLayers ?? 1);
   setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
   const smTrailingCb = document.getElementById('cfg-sm-trailing-tp');
@@ -3024,6 +3027,21 @@ function populateSettingsForm(cfg) {
   const smStructSlCb = document.getElementById('cfg-sm-structural-sl-enabled');
   if (smStructSlCb) smStructSlCb.checked = smCfg.structuralSlEnabled !== false;
   setVal('cfg-sm-structural-sl-buffer', smCfg.structuralSlBufferPct ?? 0.3);
+
+  const smAtrCb = document.getElementById('cfg-sm-atr-filter-enabled');
+  if (smAtrCb) smAtrCb.checked = smCfg.atrFilterEnabled !== false;
+  setVal('cfg-sm-atr-timeframe', smCfg.atrTimeframe || '15m');
+  setVal('cfg-sm-atr-period', smCfg.atrPeriod ?? 14);
+  setVal('cfg-sm-min-atr-pct', smCfg.minAtrPct ?? 0.8);
+  setVal('cfg-sm-max-atr-pct', smCfg.maxAtrPct ?? 3.0);
+  const smAtrDynCb = document.getElementById('cfg-sm-atr-dynamic-sltp');
+  if (smAtrDynCb) smAtrDynCb.checked = smCfg.atrDynamicSlTpEnabled !== false;
+  setVal('cfg-sm-atr-sl-mult', smCfg.atrSlMultiplier ?? 1.2);
+  setVal('cfg-sm-atr-tp-mult', smCfg.atrTpMultiplier ?? 1.8);
+  const smAutoBepCb = document.getElementById('cfg-sm-auto-bep');
+  if (smAutoBepCb) smAutoBepCb.checked = smCfg.autoBepEnabled !== false;
+  setVal('cfg-sm-atr-bep-mult', smCfg.atrBepTriggerMultiplier ?? 1.0);
+
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
   if (typeof toggleSmRsiInput === 'function') toggleSmRsiInput();
@@ -3031,6 +3049,9 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmWhaleDistInput === 'function') toggleSmWhaleDistInput();
   if (typeof toggleSmWhaleHealthInput === 'function') toggleSmWhaleHealthInput();
   if (typeof toggleSmStructuralSlInput === 'function') toggleSmStructuralSlInput();
+  if (typeof toggleSmAtrInput === 'function') toggleSmAtrInput();
+  if (typeof toggleSmAtrDynamicInputs === 'function') toggleSmAtrDynamicInputs();
+  if (typeof toggleSmAutoBepInput === 'function') toggleSmAutoBepInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -3316,6 +3337,9 @@ function getSettingsFormData() {
       leverage: parseInt(getVal('cfg-sm-leverage', '5'), 10) || 5,
       maxConcurrentPositions: parseInt(getVal('cfg-sm-max-positions', '3'), 10) || 3,
       cooldownMinutes: parseInt(getVal('cfg-sm-cooldown', '30'), 10) || 30,
+      maxHoldHours: parseInt(getVal('cfg-sm-max-hold-hours', '8'), 10) ?? 8,
+      entryOrderType: getVal('cfg-sm-entry-order-type', 'LIMIT'),
+      limitWaitSeconds: parseInt(getVal('cfg-sm-limit-wait-sec', '15'), 10) || 15,
       entryLayers: parseInt(getVal('cfg-sm-layers', '1'), 10) || 1,
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
       trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
@@ -3331,6 +3355,16 @@ function getSettingsFormData() {
       whaleHealthFilterEnabled: !!document.getElementById('cfg-sm-whale-health-enabled')?.checked,
       minWhaleWinratePct: parseFloat(getVal('cfg-sm-min-whale-winrate', '50')) || 50,
       maxWhaleAdverseLossPct: parseFloat(getVal('cfg-sm-max-whale-adverse', '0.8')) || 0.8,
+      atrFilterEnabled: !!document.getElementById('cfg-sm-atr-filter-enabled')?.checked,
+      atrTimeframe: getVal('cfg-sm-atr-timeframe', '15m'),
+      atrPeriod: parseInt(getVal('cfg-sm-atr-period', '14'), 10) || 14,
+      minAtrPct: parseFloat(getVal('cfg-sm-min-atr-pct', '0.8')) || 0.8,
+      maxAtrPct: parseFloat(getVal('cfg-sm-max-atr-pct', '3.0')) || 3.0,
+      atrDynamicSlTpEnabled: !!document.getElementById('cfg-sm-atr-dynamic-sltp')?.checked,
+      atrSlMultiplier: parseFloat(getVal('cfg-sm-atr-sl-mult', '1.2')) || 1.2,
+      atrTpMultiplier: parseFloat(getVal('cfg-sm-atr-tp-mult', '1.8')) || 1.8,
+      autoBepEnabled: !!document.getElementById('cfg-sm-auto-bep')?.checked,
+      atrBepTriggerMultiplier: parseFloat(getVal('cfg-sm-atr-bep-mult', '1.0')) || 1.0,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -4057,6 +4091,35 @@ function toggleSmStructuralSlInput() {
   }
 }
 window.toggleSmStructuralSlInput = toggleSmStructuralSlInput;
+
+function toggleSmAtrInput() {
+  const cb = document.getElementById('cfg-sm-atr-filter-enabled');
+  const box = document.getElementById('cfg-sm-atr-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmAtrInput = toggleSmAtrInput;
+
+function toggleSmAtrDynamicInputs() {
+  const cb = document.getElementById('cfg-sm-atr-dynamic-sltp');
+  const row = document.getElementById('cfg-sm-atr-mult-row');
+  if (row) {
+    row.style.opacity = cb && cb.checked ? '1' : '0.4';
+    row.style.pointerEvents = cb && cb.checked ? 'auto' : 'none';
+  }
+}
+window.toggleSmAtrDynamicInputs = toggleSmAtrDynamicInputs;
+
+function toggleSmAutoBepInput() {
+  const cb = document.getElementById('cfg-sm-auto-bep');
+  const row = document.getElementById('cfg-sm-auto-bep-row');
+  if (row) {
+    row.style.opacity = cb && cb.checked ? '1' : '0.4';
+    row.style.pointerEvents = cb && cb.checked ? 'auto' : 'none';
+  }
+}
+window.toggleSmAutoBepInput = toggleSmAutoBepInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

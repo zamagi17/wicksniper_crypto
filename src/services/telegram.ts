@@ -169,6 +169,9 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       if (whaleWin !== undefined) {
         triggerLine += `\n🩺 <b>Kesehatan Paus:</b> <b>${whaleWin.toFixed(0)}% Laba</b>`;
       }
+      if (pos.atrPct) {
+        triggerLine += `\n📊 <b>ATR:</b> <b>${pos.atrPct.toFixed(2)}%</b> ($${formatCryptoPrice(pos.atr || 0)})`;
+      }
     } else {
       triggerLine = `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     }
@@ -267,6 +270,25 @@ ${slLine}
    */
   public async notifyPartialTp(symbol: string, partialPnl: number, remainingQty: number, bepPrice: number, tp2Price: number) {
     // Partial TP notifications are intentionally kept minimal, while the full local audit remains in logger/dashboard.
+  }
+
+  /**
+   * Notifikasi Smart Money Auto-BEP Shift
+   */
+  public async notifyAutoBep(symbol: string, entryPrice: number, bepPrice: number, floatingPnl: number) {
+    if (this.config.notifyOnLayerFill === false && this.config.notifyOnClose === false) return;
+    const pnlSign = floatingPnl >= 0 ? '+' : '';
+    const msg =
+`🛡️ <b>[SMART MONEY AUTO-BEP AKTIF]</b> 🔒
+━━━━━━━━━━━━━━━━━━━━
+🪙 <b>Simbol:</b> <code>#${symbol}</code>
+🎯 <b>Status:</b> <b>Risk-Free Trade (SL Dipindah ke BEP)</b>
+💵 <b>Entry Rata-rata:</b> <code>$${formatCryptoPrice(entryPrice)}</code>
+🛡️ <b>SL Baru (Impas):</b> <code>$${formatCryptoPrice(bepPrice)}</code>
+💰 <b>Floating Cuan:</b> <b>${pnlSign}$${floatingPnl.toFixed(2)} USDT</b>
+━━━━━━━━━━━━━━━━━━━━
+Posisi telah diamankan dari risiko pembalikan arah!`;
+    await this.sendMessage(msg);
   }
 
   /**

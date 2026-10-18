@@ -153,6 +153,19 @@ export interface SmartMoneyConfig {
   cooldownMinutes: number;     // Cooldown antar trade simbol yang sama
   maxConcurrentPositions?: number; // Maksimal koin/posisi aktif bersamaan untuk Smart Money
   scanIntervalSeconds?: number;// Interval pengecekan rasio pasar
+  maxHoldHours?: number;       // Batas waktu hold posisi sebelum timeout paksa exit demi hindari funding fee drain (default: 8 jam, 0 = nonaktif)
+  atrFilterEnabled?: boolean;  // Filter ATR Volatilitas (Anti-Koin Tidur/Sideways & Anti-Ekstrem)
+  atrTimeframe?: '15m' | '1h'; // Timeframe kalkulasi ATR (default: '15m')
+  atrPeriod?: number;          // Periode standar ATR (default: 14)
+  minAtrPct?: number;          // Minimal % ATR terhadap harga (default: 0.8%)
+  maxAtrPct?: number;          // Maksimal % ATR terhadap harga (default: 3.0%)
+  atrDynamicSlTpEnabled?: boolean; // TP/SL Dinamis berbasis ATR
+  atrSlMultiplier?: number;    // Pengali ATR untuk SL (default: 1.2x)
+  atrTpMultiplier?: number;    // Pengali ATR untuk TP (default: 1.8x)
+  autoBepEnabled?: boolean;    // Auto pindah SL ke BEP (impas) saat posisi mencapai target profit awal
+  atrBepTriggerMultiplier?: number; // Pengali ATR untuk memicu Auto-BEP (default: 1.0x)
+  entryOrderType?: 'LIMIT' | 'MARKET'; // Tipe order entry: LIMIT (Maker 0.02% murah) vs MARKET (Taker 0.05%)
+  limitWaitSeconds?: number;   // Batas waktu tunggu fill order limit sebelum dibatalkan (default: 15 detik)
 }
 
 export interface SmartMoneySignal {
@@ -172,6 +185,8 @@ export interface SmartMoneySignal {
   whaleWinratePct?: number;
   whaleProfitWhales?: number;
   whaleTotalWhales?: number;
+  atr?: number;
+  atrPct?: number;
   timestamp: number;
   status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
   reason?: string;
@@ -305,6 +320,10 @@ export interface ActivePosition {
   marketSnapshot?: MarketSnapshot;
   slDescription?: string;
   smartMoneyFlowStatus?: SmartMoneyFlowStatus;
+  atr?: number;
+  atrPct?: number;
+  bepTriggerPrice?: number;
+  isAutoBepDone?: boolean;
 }
 
 export interface SmartMoneyFlowStatus {

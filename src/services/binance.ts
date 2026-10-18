@@ -963,7 +963,8 @@ export class BinanceFuturesClient {
     qty: number,
     price: number,
     reduceOnly: boolean = false,
-    positionSide?: 'LONG' | 'SHORT' | 'BOTH'
+    positionSide?: 'LONG' | 'SHORT' | 'BOTH',
+    timeInForce: 'GTC' | 'GTX' | 'IOC' = 'GTC'
   ): Promise<any> {
     if (!this.apiKey || !this.apiSecret) return null;
     try {
@@ -974,7 +975,7 @@ export class BinanceFuturesClient {
         symbol,
         side,
         type: 'LIMIT',
-        timeInForce: 'GTC',
+        timeInForce,
         quantity: formattedQty,
         price: formattedPrice,
       };
@@ -1016,7 +1017,7 @@ export class BinanceFuturesClient {
             symbol,
             side,
             type: 'LIMIT',
-            timeInForce: 'GTC',
+            timeInForce,
             quantity: this.formatQty(symbol, qty),
             price: this.formatPrice(symbol, price),
           };
@@ -1758,6 +1759,63 @@ export class BinanceFuturesClient {
         }
         this.rsiCache.set(cacheKey, { timestamp: now, rsi });
         return rsi;
+      }
+    } catch {}
+    return undefined;
+  }
+
+  private atrCache: Map<string, { timestamp: number; atr: number; atrPct: number; currentPrice: number }> = new Map();
+
+  public async getSymbolAtr(
+    symbol: string,
+    interval: string = '15m',
+    period: number = 14
+  ): Promise<{ atr: number; atrPct: number; currentPrice: number } | undefined> {
+    const cacheKey = `${symbol}_${interval}_${period}`;
+    const cached = this.atrCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 30_000) {
+      return { atr: cached.atr, atrPct: cached.atrPct, currentPrice: cached.currentPrice };
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      const limit = Math.max(30, period + 25);
+      const res = await client.get('/fapi/v1/klines', {
+        params: { symbol, interval, limit },
+        timeout: 4000,
+      });
+
+      if (res && Array.isArray(res.data) && res.data.length >= period + 1) {
+        const trValues: number[] = [];
+        for (let i = 1; i < res.data.length; i++) {
+          const prev = res.data[i - 1];
+          const curr = res.data[i];
+          const high = parseFloat(curr[2]);
+          const low = parseFloat(curr[3]);
+          const prevClose = parseFloat(prev[4]);
+          const tr = Math.max(
+            high - low,
+            Math.abs(high - prevClose),
+            Math.abs(low - prevClose)
+          );
+          trValues.push(tr);
+        }
+
+        if (trValues.length >= period) {
+          let atr = trValues.slice(0, period).reduce((sum, v) => sum + v, 0) / period;
+          for (let i = period; i < trValues.length; i++) {
+            atr = (atr * (period - 1) + trValues[i]) / period;
+          }
+
+          const currentPrice = parseFloat(res.data[res.data.length - 1][4]);
+          if (currentPrice > 0) {
+            const atrPct = (atr / currentPrice) * 100;
+            const result = { atr, atrPct, currentPrice };
+            this.atrCache.set(cacheKey, { timestamp: now, atr, atrPct, currentPrice });
+            return result;
+          }
+        }
       }
     } catch {}
     return undefined;

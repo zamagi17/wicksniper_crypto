@@ -162,7 +162,7 @@ export class WickSniperEngine {
       marginUsdt: 5.0,
       leverage: 5,
       takeProfitPct: 1.5,
-      trailingTpEnabled: true,
+      trailingTpEnabled: false, // Default false agar Take Profit dipasang sebagai Limit Order Maker langsung di Binance (0.02% Fee)!
       trailingCallbackPct: 0.3,
       stopLossPct: 1.2,
       structuralSlEnabled: true,
@@ -170,6 +170,19 @@ export class WickSniperEngine {
       cooldownMinutes: 30,
       maxConcurrentPositions: 3,
       scanIntervalSeconds: 30,
+      maxHoldHours: 8,
+      atrFilterEnabled: true,
+      atrTimeframe: '15m',
+      atrPeriod: 14,
+      minAtrPct: 0.8,
+      maxAtrPct: 3.0,
+      atrDynamicSlTpEnabled: true,
+      atrSlMultiplier: 1.2,
+      atrTpMultiplier: 1.8,
+      autoBepEnabled: true,
+      atrBepTriggerMultiplier: 1.0,
+      entryOrderType: 'LIMIT', // Default LIMIT Maker (0.02% Fee)
+      limitWaitSeconds: 15,
     };
   }
 
@@ -1798,6 +1811,38 @@ export class WickSniperEngine {
         pos.maxAdversePnlPct = pos.pnlPct;
       }
 
+      // Auto Break-Even (BEP) untuk SMART_MONEY saat profit mencapai bepTriggerPrice
+      if (
+        pos.strategyType === 'SMART_MONEY' &&
+        !pos.isAutoBepDone &&
+        pos.bepTriggerPrice &&
+        this.config.smartMoney?.autoBepEnabled !== false
+      ) {
+        const bepHit = isLong
+          ? currentPrice >= pos.bepTriggerPrice
+          : currentPrice <= pos.bepTriggerPrice;
+        if (bepHit) {
+          pos.isAutoBepDone = true;
+          const bepBufferPct = 0.08;
+          pos.hardSlPrice = parseFloat(
+            binanceFutures.formatPrice(
+              pos.symbol,
+              isLong
+                ? pos.avgEntryPrice * (1 + bepBufferPct / 100)
+                : pos.avgEntryPrice * (1 - bepBufferPct / 100)
+            )
+          );
+          pos.slDescription = `Auto-BEP Impas (Risk-Free @ $${formatCryptoPrice(pos.hardSlPrice)})`;
+          logger.log(
+            'SUCCESS',
+            `🛡️ [SMART MONEY AUTO-BEP] ${pos.symbol}: Floating profit menyentuh trigger BEP $${formatCryptoPrice(pos.bepTriggerPrice)}! Hard SL digeser ke titik impas $${formatCryptoPrice(pos.hardSlPrice)} (Risk-Free Trade).`,
+            pos.symbol
+          );
+          telegram.notifyAutoBep(pos.symbol, pos.avgEntryPrice, pos.hardSlPrice, pos.unrealizedPnl);
+          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+        }
+      }
+
       // Evaluasi Jalur Khusus Posisi LONG (Momentum / Squeeze)
       if (isLong) {
         pos.highestPrice = Math.max(pos.highestPrice || currentPrice, currentPrice);
@@ -2194,9 +2239,17 @@ export class WickSniperEngine {
     }
 
     if (pos.strategyType === 'SMART_MONEY') {
-      const smTpPct = this.config.smartMoney?.takeProfitPct || 1.5;
       const isLong = pos.side === 'LONG';
-      const smTp = isLong ? pos.avgEntryPrice * (1 + smTpPct / 100) : pos.avgEntryPrice * (1 - smTpPct / 100);
+      const smCfg = this.config.smartMoney;
+      let smTp: number;
+      if (smCfg?.atrDynamicSlTpEnabled !== false && pos.atr && pos.atr > 0) {
+        const tpMultiplier = smCfg?.atrTpMultiplier ?? 1.8;
+        const tpDist = pos.atr * tpMultiplier;
+        smTp = isLong ? pos.avgEntryPrice + tpDist : pos.avgEntryPrice - tpDist;
+      } else {
+        const smTpPct = smCfg?.takeProfitPct || 1.5;
+        smTp = isLong ? pos.avgEntryPrice * (1 + smTpPct / 100) : pos.avgEntryPrice * (1 - smTpPct / 100);
+      }
       return { targetTpPrice: smTp, targetTp2Price: smTp, isBepActive: false };
     }
 
@@ -2272,7 +2325,7 @@ export class WickSniperEngine {
   }
 
   private recalculatePositionSl(pos: ActivePosition) {
-    if (pos.partialTpDone) {
+    if (pos.partialTpDone || pos.isAutoBepDone) {
       const effectiveBufferPct = this.config.exit.bepBufferPct ?? 0.08;
       pos.hardSlPrice = pos.breakEvenPrice && pos.breakEvenPrice > 0
         ? pos.breakEvenPrice
@@ -2284,16 +2337,26 @@ export class WickSniperEngine {
       const smCfg = this.config.smartMoney;
       const fallbackSl = smCfg?.stopLossPct || 1.2;
       const bufferPct = (smCfg?.structuralSlBufferPct ?? 0.3) / 100;
-      const whaleEntry = pos.smartMoneyFlowStatus?.whaleAvgEntry;
+      const whaleEntry = pos.smartMoneyFlowStatus?.whaleAvgEntry || pos.paramsSnapshot?.whaleAvgEntry;
+      const atrDynamic = smCfg?.atrDynamicSlTpEnabled !== false && (pos.atr || 0) > 0;
+      const atrVal = pos.atr || 0;
+      const atrSlMult = smCfg?.atrSlMultiplier ?? 1.2;
 
       if (smCfg?.structuralSlEnabled !== false && whaleEntry && whaleEntry > 0) {
+        const staticBuffer = whaleEntry * bufferPct;
+        const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
+        const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
+
         if (pos.side === 'SHORT') {
-          const structSl = whaleEntry * (1 + bufferPct);
+          const structSl = whaleEntry + effectiveBuffer;
           pos.hardSlPrice = Math.max(pos.avgEntryPrice * 1.008, Math.min(structSl, pos.avgEntryPrice * (1 + Math.max(1.5, fallbackSl) / 100)));
         } else {
-          const structSl = whaleEntry * (1 - bufferPct);
+          const structSl = whaleEntry - effectiveBuffer;
           pos.hardSlPrice = Math.min(pos.avgEntryPrice * 0.992, Math.max(structSl, pos.avgEntryPrice * (1 - Math.max(1.5, fallbackSl) / 100)));
         }
+      } else if (atrDynamic) {
+        const atrDist = atrVal * atrSlMult;
+        pos.hardSlPrice = pos.side === 'SHORT' ? pos.avgEntryPrice + atrDist : pos.avgEntryPrice - atrDist;
       } else {
         pos.hardSlPrice = pos.side === 'LONG'
           ? pos.avgEntryPrice * (1 - fallbackSl / 100)
@@ -4018,8 +4081,26 @@ export class WickSniperEngine {
 
     for (const pos of this.activePositions.values()) {
       if (pos.status !== 'SNIPING') continue;
-      // Posisi Smart Money murni mengikuti pergerakan paus sampai TP / SL / Trailing Runner tercapai (tidak boleh dicut oleh timer Wick)
-      if (pos.strategyType === 'SMART_MONEY') continue;
+      // Evaluasi batas waktu hold untuk SMART_MONEY (Mencegah funding fee drain)
+      if (pos.strategyType === 'SMART_MONEY') {
+        const maxHoldHours = this.config.smartMoney?.maxHoldHours ?? 8;
+        if (maxHoldHours > 0) {
+          const maxHoldMs = maxHoldHours * 3600 * 1000;
+          const deadline = pos.openedAt + maxHoldMs;
+          pos.holdDeadlineAt = deadline;
+          pos.holdRemainingSeconds = Math.max(0, Math.ceil((deadline - now) / 1000));
+          if (now >= deadline) {
+            const holdHoursStr = ((now - pos.openedAt) / 3600000).toFixed(1);
+            logger.log(
+              'WARN',
+              `⏰ [SMART MONEY TIMEOUT] ${pos.symbol} telah ditahan selama ${holdHoursStr} jam (Batas maks: ${maxHoldHours} jam). Menutup posisi untuk menghindari potongan funding fee...`,
+              pos.symbol
+            );
+            this.closePosition(pos, 'TIME_LIMIT_EXIT', pos.currentPrice);
+          }
+        }
+        continue;
+      }
 
       const totalAllowedMs = maxHoldMs + (pos.extendedHoldMs || 0);
       const holdDeadlineAt = pos.openedAt + totalAllowedMs;
@@ -5201,42 +5282,81 @@ export class WickSniperEngine {
     const qty = parseFloat(binanceFutures.formatQty(symbol, plannedQty));
     const actualMargin = (qty * currentPrice) / leverage;
 
-    const tpPct = smCfg.takeProfitPct || 1.5;
+    const fallbackTpPct = smCfg.takeProfitPct || 1.5;
     const fallbackSlPct = smCfg.stopLossPct || 1.2;
-    const tpPrice = isShort
-      ? parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - tpPct / 100)))
-      : parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + tpPct / 100)));
-
-    let slPriceRaw: number;
-    let slLogDesc = '';
     const bufferPct = (smCfg.structuralSlBufferPct ?? 0.3) / 100;
+    const atrDynamic = smCfg.atrDynamicSlTpEnabled !== false && (signal.atr || 0) > 0;
+    const atrVal = signal.atr || 0;
+    const atrSlMult = smCfg.atrSlMultiplier ?? 1.2;
+    const atrTpMult = smCfg.atrTpMultiplier ?? 1.8;
 
-    if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
-      if (isShort) {
-        // SHORT: SL ditaruh tepat di atas modal paus (+ buffer misal 0.3%)
-        const structuralLevel = signal.whaleAvgEntry * (1 + bufferPct);
-        const minSl = currentPrice * 1.008; // Minimal 0.8% dari entry agar tidak tersenggol spread
-        const maxSl = currentPrice * (1 + Math.max(1.5, fallbackSlPct) / 100); // Maks batas atas
-        slPriceRaw = Math.max(minSl, Math.min(structuralLevel, maxSl));
-        const actualSlPct = ((slPriceRaw - currentPrice) / currentPrice) * 100;
-        slLogDesc = `Structural (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} +${(bufferPct * 100).toFixed(1)}% buffer ➜ SL: +${actualSlPct.toFixed(2)}%)`;
+    const calcSmLevels = (basePrice: number) => {
+      // 1. Take Profit
+      let targetTpRaw: number;
+      if (atrDynamic) {
+        const tpDist = atrVal * atrTpMult;
+        targetTpRaw = isShort ? basePrice - tpDist : basePrice + tpDist;
       } else {
-        // LONG: SL ditaruh tepat di bawah modal paus (- buffer misal 0.3%)
-        const structuralLevel = signal.whaleAvgEntry * (1 - bufferPct);
-        const minSl = currentPrice * 0.992; // Minimal 0.8% dari entry
-        const maxSl = currentPrice * (1 - Math.max(1.5, fallbackSlPct) / 100); // Maks batas bawah
-        slPriceRaw = Math.min(minSl, Math.max(structuralLevel, maxSl));
-        const actualSlPct = ((currentPrice - slPriceRaw) / currentPrice) * 100;
-        slLogDesc = `Structural (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} -${(bufferPct * 100).toFixed(1)}% buffer ➜ SL: -${actualSlPct.toFixed(2)}%)`;
+        targetTpRaw = isShort
+          ? basePrice * (1 - fallbackTpPct / 100)
+          : basePrice * (1 + fallbackTpPct / 100);
       }
-    } else {
-      slPriceRaw = isShort
-        ? currentPrice * (1 + fallbackSlPct / 100)
-        : currentPrice * (1 - fallbackSlPct / 100);
-      slLogDesc = `Fixed SL -${fallbackSlPct}%`;
-    }
+      const tpTarget = parseFloat(binanceFutures.formatPrice(symbol, targetTpRaw));
 
-    const slPrice = parseFloat(binanceFutures.formatPrice(symbol, slPriceRaw));
+      // 2. Stop Loss Hybrid
+      let slRaw: number;
+      let desc = '';
+      if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
+        const staticBuffer = signal.whaleAvgEntry * bufferPct;
+        const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
+        const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
+
+        if (isShort) {
+          const structuralLevel = signal.whaleAvgEntry + effectiveBuffer;
+          const minSl = basePrice * 1.008;
+          const maxSl = basePrice * (1 + Math.max(1.5, fallbackSlPct) / 100);
+          slRaw = Math.max(minSl, Math.min(structuralLevel, maxSl));
+          const slPctVal = ((slRaw - basePrice) / basePrice) * 100;
+          desc = `Hybrid (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} + Buffer $${formatCryptoPrice(effectiveBuffer)} ➜ SL: +${slPctVal.toFixed(2)}%)`;
+        } else {
+          const structuralLevel = signal.whaleAvgEntry - effectiveBuffer;
+          const minSl = basePrice * 0.992;
+          const maxSl = basePrice * (1 - Math.max(1.5, fallbackSlPct) / 100);
+          slRaw = Math.min(minSl, Math.max(structuralLevel, maxSl));
+          const slPctVal = ((basePrice - slRaw) / basePrice) * 100;
+          desc = `Hybrid (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} - Buffer $${formatCryptoPrice(effectiveBuffer)} ➜ SL: -${slPctVal.toFixed(2)}%)`;
+        }
+      } else if (atrDynamic) {
+        const atrDist = atrVal * atrSlMult;
+        slRaw = isShort ? basePrice + atrDist : basePrice - atrDist;
+        const slPctVal = (atrDist / basePrice) * 100;
+        desc = `ATR Dynamic SL (±${slPctVal.toFixed(2)}% [${atrSlMult}x ATR])`;
+      } else {
+        slRaw = isShort
+          ? basePrice * (1 + fallbackSlPct / 100)
+          : basePrice * (1 - fallbackSlPct / 100);
+        desc = `Fixed SL -${fallbackSlPct}%`;
+      }
+      const slTarget = parseFloat(binanceFutures.formatPrice(symbol, slRaw));
+
+      // 3. BEP Trigger Price
+      let bepTrigger: number | undefined = undefined;
+      if (smCfg.autoBepEnabled !== false && atrDynamic) {
+        const bepMult = smCfg.atrBepTriggerMultiplier ?? 1.0;
+        const bepDist = atrVal * bepMult;
+        bepTrigger = parseFloat(binanceFutures.formatPrice(
+          symbol,
+          isShort ? basePrice - bepDist : basePrice + bepDist
+        ));
+      }
+
+      return { tpTarget, slTarget, desc, bepTrigger };
+    };
+
+    const initialLevels = calcSmLevels(currentPrice);
+    const tpPrice = initialLevels.tpTarget;
+    const slPrice = initialLevels.slTarget;
+    let slLogDesc = initialLevels.desc;
 
     let realEntryPrice = currentPrice;
     let realQty = qty;
@@ -5251,23 +5371,98 @@ export class WickSniperEngine {
         await binanceFutures.setLeverage(symbol, leverage);
         await binanceFutures.setMarginType(symbol, this.config.marginType);
         const orderSide = isShort ? 'SELL' : 'BUY';
-        const res = await binanceFutures.openMarketOrder(symbol, orderSide, qty);
-        if (!res || !res.orderId) {
-          const errMsg = binanceFutures.lastOrderError || 'Order rejected by Binance';
-          logger.log('ERROR', `❌ [LIVE SMART MONEY ORDER GAGAL] ${symbol} order rejected: ${errMsg}`, symbol);
-          return;
-        }
-        liveOrderId = String(res.orderId);
-        const fillAvg = parseFloat(res.avgPrice || '0');
-        const fillExec = parseFloat(res.executedQty || '0');
-        const fillCum = parseFloat(res.cumQuote || '0');
-        if (fillAvg > 0) {
-          realEntryPrice = fillAvg;
-        } else if (fillExec > 0 && fillCum > 0) {
-          realEntryPrice = fillCum / fillExec;
-        }
-        if (fillExec > 0) {
+        const posSide = isShort ? 'SHORT' : 'LONG';
+        const isLimitEntry = (smCfg.entryOrderType ?? 'LIMIT') === 'LIMIT';
+
+        if (isLimitEntry) {
+          // Ambil harga orderbook terbaik agar order langsung antre sebagai MAKER (0.02% Fee hemat)
+          let entryPriceTarget = currentPrice;
+          try {
+            const spread = await binanceFutures.getOrderbookSpread(symbol);
+            if (spread) {
+              if (isShort && spread.askPrice > 0) {
+                entryPriceTarget = Math.max(currentPrice, spread.askPrice);
+              } else if (!isShort && spread.bidPrice > 0) {
+                entryPriceTarget = Math.min(currentPrice, spread.bidPrice);
+              }
+            }
+          } catch {}
+
+          const formattedEntryPrice = parseFloat(binanceFutures.formatPrice(symbol, entryPriceTarget));
+          logger.log(
+            'INFO',
+            `⏳ [LIMIT MAKER ENTRY] Memasang Order Limit Entry ${orderSide} ${symbol} @ $${formatCryptoPrice(formattedEntryPrice)} (Qty: ${qty}) untuk mengamankan tarif murah Maker (0.02%)...`,
+            symbol
+          );
+
+          const res = await binanceFutures.placeLimitOrder(symbol, orderSide, qty, formattedEntryPrice, false, posSide, 'GTC');
+          if (!res || !res.orderId) {
+            const errMsg = binanceFutures.lastOrderError || 'Order Limit rejected by Binance';
+            logger.log('ERROR', `❌ [LIVE SMART MONEY LIMIT ENTRY GAGAL] ${symbol} limit order rejected: ${errMsg}`, symbol);
+            return;
+          }
+
+          liveOrderId = String(res.orderId);
+          let fillAvg = parseFloat(res.avgPrice || '0');
+          let fillExec = parseFloat(res.executedQty || '0');
+
+          // Jika belum terisi seketika, beri toleransi waktu tunggu agar terisi di antrean order book
+          if (res.status !== 'FILLED' && fillExec < qty) {
+            const maxWaitSec = smCfg.limitWaitSeconds ?? 15;
+            const maxAttempts = Math.max(5, Math.ceil((maxWaitSec * 1000) / 750));
+            logger.log('INFO', `⏳ [WAITING LIMIT FILL] Menunggu Limit Order #${liveOrderId} terisi di Binance (Maks ${maxWaitSec}s)...`, symbol);
+
+            for (let i = 0; i < maxAttempts; i++) {
+              await new Promise((r) => setTimeout(r, 750));
+              try {
+                const orderStatus = await binanceFutures.getOrder(symbol, liveOrderId);
+                if (orderStatus) {
+                  fillAvg = parseFloat(orderStatus.avgPrice || '0');
+                  fillExec = parseFloat(orderStatus.executedQty || '0');
+                  if (orderStatus.status === 'FILLED' || fillExec >= qty) {
+                    break;
+                  }
+                  if (orderStatus.status === 'CANCELED' || orderStatus.status === 'EXPIRED') {
+                    break;
+                  }
+                }
+              } catch {}
+            }
+          }
+
+          // Jika sama sekali tidak terisi dalam batas waktu tunggu: batalkan order limit agar modal aman
+          if (fillExec <= 0) {
+            await binanceFutures.cancelOrder(symbol, liveOrderId).catch(() => {});
+            logger.log(
+              'WARN',
+              `⚠️ [LIMIT ENTRY TIMEOUT] Order Limit Entry ${symbol} @ $${formatCryptoPrice(formattedEntryPrice)} tidak terisi dalam ${smCfg.limitWaitSeconds ?? 15}s. Order dibatalkan agar modal aman.`,
+              symbol
+            );
+            return;
+          }
+
+          realEntryPrice = fillAvg > 0 ? fillAvg : formattedEntryPrice;
           realQty = fillExec;
+        } else {
+          // Mode MARKET (Taker 0.05%) jika dipilih eksplisit oleh user
+          const res = await binanceFutures.openMarketOrder(symbol, orderSide, qty);
+          if (!res || !res.orderId) {
+            const errMsg = binanceFutures.lastOrderError || 'Order rejected by Binance';
+            logger.log('ERROR', `❌ [LIVE SMART MONEY ORDER GAGAL] ${symbol} order rejected: ${errMsg}`, symbol);
+            return;
+          }
+          liveOrderId = String(res.orderId);
+          const fillAvg = parseFloat(res.avgPrice || '0');
+          const fillExec = parseFloat(res.executedQty || '0');
+          const fillCum = parseFloat(res.cumQuote || '0');
+          if (fillAvg > 0) {
+            realEntryPrice = fillAvg;
+          } else if (fillExec > 0 && fillCum > 0) {
+            realEntryPrice = fillCum / fillExec;
+          }
+          if (fillExec > 0) {
+            realQty = fillExec;
+          }
         }
       } catch (err: any) {
         logger.log('ERROR', `❌ [LIVE SMART MONEY EXCEPTION] ${symbol}: ${err?.message || err}`, symbol);
@@ -5284,32 +5479,12 @@ export class WickSniperEngine {
 
     const effectiveMargin = (realQty * realEntryPrice) / leverage;
 
-    // Hitung ulang target TP dan SL dengan acuan harga riil eksekusi
-    const effectiveTpPrice = isShort
-      ? parseFloat(binanceFutures.formatPrice(symbol, realEntryPrice * (1 - tpPct / 100)))
-      : parseFloat(binanceFutures.formatPrice(symbol, realEntryPrice * (1 + tpPct / 100)));
-
-    let effectiveSlPriceRaw = slPriceRaw;
-    if (realEntryPrice !== currentPrice) {
-      if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
-        if (isShort) {
-          const structuralLevel = signal.whaleAvgEntry * (1 + bufferPct);
-          const minSl = realEntryPrice * 1.008;
-          const maxSl = realEntryPrice * (1 + Math.max(1.5, fallbackSlPct) / 100);
-          effectiveSlPriceRaw = Math.max(minSl, Math.min(structuralLevel, maxSl));
-        } else {
-          const structuralLevel = signal.whaleAvgEntry * (1 - bufferPct);
-          const minSl = realEntryPrice * 0.992;
-          const maxSl = realEntryPrice * (1 - Math.max(1.5, fallbackSlPct) / 100);
-          effectiveSlPriceRaw = Math.min(minSl, Math.max(structuralLevel, maxSl));
-        }
-      } else {
-        effectiveSlPriceRaw = isShort
-          ? realEntryPrice * (1 + fallbackSlPct / 100)
-          : realEntryPrice * (1 - fallbackSlPct / 100);
-      }
-    }
-    const effectiveSlPrice = parseFloat(binanceFutures.formatPrice(symbol, effectiveSlPriceRaw));
+    // Hitung ulang target TP, SL, dan BEP Trigger dengan acuan harga riil eksekusi
+    const effectiveLevels = calcSmLevels(realEntryPrice);
+    const effectiveTpPrice = effectiveLevels.tpTarget;
+    const effectiveSlPrice = effectiveLevels.slTarget;
+    slLogDesc = effectiveLevels.desc;
+    const effectiveBepTrigger = effectiveLevels.bepTrigger;
 
     const layer0: GridLayer = {
       layerIndex: 0,
@@ -5369,6 +5544,10 @@ export class WickSniperEngine {
       highestPrice: realEntryPrice,
       lowestPrice: realEntryPrice,
       slDescription: slLogDesc,
+      atr: signal.atr,
+      atrPct: signal.atrPct,
+      bepTriggerPrice: effectiveBepTrigger,
+      isAutoBepDone: false,
       paramsSnapshot: {
         strategy: 'SMART_MONEY',
         side: signal.side,
@@ -5384,9 +5563,16 @@ export class WickSniperEngine {
         whalePositionsUsdt: signal.whalePositionsUsdt,
         retailLongRatio: signal.retailLongRatio,
         retailShortRatio: signal.retailShortRatio,
-        takeProfitPct: tpPct,
+        takeProfitPct: fallbackTpPct,
         stopLossPct: parseFloat((Math.abs((slPrice - currentPrice) / currentPrice) * 100).toFixed(2)),
         slDescription: slLogDesc,
+        atr: signal.atr,
+        atrPct: signal.atrPct,
+        bepTriggerPrice: effectiveBepTrigger,
+        maxHoldHours: smCfg.maxHoldHours ?? 8,
+        atrFilterEnabled: smCfg.atrFilterEnabled !== false,
+        atrDynamicSlTpEnabled: atrDynamic,
+        autoBepEnabled: smCfg.autoBepEnabled !== false,
         structuralSlEnabled: smCfg.structuralSlEnabled !== false,
         structuralSlBufferPct: smCfg.structuralSlBufferPct ?? 0.3,
         whaleDistanceFilterEnabled: smCfg.whaleDistanceFilterEnabled !== false,
@@ -5434,16 +5620,17 @@ export class WickSniperEngine {
     }
 
     const volUsdt = (realQty * realEntryPrice).toFixed(2);
+    const actualEffectiveTpPct = Math.abs(((effectiveTpPrice - realEntryPrice) / realEntryPrice) * 100).toFixed(2);
     const actualEffectiveSlPct = Math.abs(((effectiveSlPrice - realEntryPrice) / realEntryPrice) * 100).toFixed(2);
     const tpSign = signal.side === 'LONG' ? '+' : '-';
     const slSign = signal.side === 'LONG' ? '-' : '+';
     logger.log(
       'SUCCESS',
-      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(realEntryPrice)} | Layers: ${numLayers}x | Margin Modal: $${effectiveMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(effectiveTpPrice)} (${tpSign}${tpPct}%) | SL: $${formatCryptoPrice(effectiveSlPrice)} (${slSign}${actualEffectiveSlPct}%, ${slLogDesc})`,
+      `🎯 [SMART MONEY AUTO-ENTRY] ${symbol} ${signal.side} @ $${formatCryptoPrice(realEntryPrice)} | Layers: ${numLayers}x | Margin Modal: $${effectiveMargin.toFixed(2)} USDT (Total: $${totalMargin.toFixed(2)}) | Volume Order: $${volUsdt} USDT (${leverage}x) | TP: $${formatCryptoPrice(effectiveTpPrice)} (${tpSign}${actualEffectiveTpPct}%) | SL: $${formatCryptoPrice(effectiveSlPrice)} (${slSign}${actualEffectiveSlPct}%, ${slLogDesc})`,
       symbol
     );
 
-    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, spacingPct, tpPct, parseFloat(actualEffectiveSlPct));
+    telegram.notifyNewOrder(initialPos, this.config.tradingMode, 0, 0, spacingPct, parseFloat(actualEffectiveTpPct), parseFloat(actualEffectiveSlPct));
 
     this.broadcastStatus();
   }

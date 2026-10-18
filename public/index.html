@@ -592,6 +592,27 @@
             <small class="form-hint">Jeda koin yang sama sebelum boleh open posisi baru lagi (Standar: 30m).</small>
           </div>
 
+          <div class="form-group">
+            <label>Timeout Maksimal Hold Posisi (Jam) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-max-hold-hours" min="0" max="72" step="1" class="form-control" placeholder="8">
+            <small class="form-hint">Tutup otomatis setelah X jam untuk hindari funding fee drain (Standar: 8 jam, 0 = nonaktif).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Tipe Order Entry <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <select id="cfg-sm-entry-order-type" class="form-control">
+              <option value="LIMIT">🟢 LIMIT Maker (0.02% Fee - Murah Hemat Fee)</option>
+              <option value="MARKET">⚡ MARKET Taker (0.05% Fee - Eksekusi Instan)</option>
+            </select>
+            <small class="form-hint">LIMIT ditempatkan di pucuk antrean orderbook sebagai Maker (hemat 60% komisi fee).</small>
+          </div>
+
+          <div class="form-group">
+            <label>Batas Tunggu Fill Limit Entry (Detik) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <input type="number" id="cfg-sm-limit-wait-sec" min="5" max="60" step="1" class="form-control" placeholder="15">
+            <small class="form-hint">Batalkan order jika harga melesat dan tidak tersentuh dalam X detik (Standar: 15s).</small>
+          </div>
+
           <div class="form-group" style="grid-column: span 2; background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #c084fc; margin: 0; cursor: pointer;">
               <input type="checkbox" id="cfg-sm-rsi-filter" style="width: 16px; height: 16px; accent-color: #a855f7;" checked onchange="toggleSmRsiInput()">
@@ -685,6 +706,70 @@
             <div id="cfg-sm-callback-box" style="display: flex; align-items: center; gap: 8px;">
               <label style="margin: 0; font-size: 11px; color: var(--text-muted);">Callback (%):</label>
               <input type="number" id="cfg-sm-trailing-callback" min="0.1" max="2.0" step="0.1" style="width: 75px; padding: 4px 8px;" class="form-control" placeholder="0.3">
+            </div>
+          </div>
+
+          <!-- ATR Volatility Filter & Dynamic SL/TP Section -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(234, 179, 8, 0.05); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #eab308; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-atr-filter-enabled" style="width: 16px; height: 16px; accent-color: #eab308;" checked onchange="toggleSmAtrInput()">
+              <span>⚡ Filter Volatilitas ATR% & Dynamic SL/TP/BEP <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-atr-box" style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; gap: 14px;">
+                <div style="flex: 1;">
+                  <label style="font-size: 11px; margin-bottom: 2px;">Timeframe & Periode ATR</label>
+                  <div style="display: flex; gap: 6px;">
+                    <select id="cfg-sm-atr-timeframe" class="form-control" style="padding: 4px 8px; flex: 1;">
+                      <option value="15m">15 Menit (15m)</option>
+                      <option value="1h">1 Jam (1h)</option>
+                    </select>
+                    <input type="number" id="cfg-sm-atr-period" min="7" max="50" step="1" class="form-control" placeholder="14" style="width: 70px; padding: 4px 8px;">
+                  </div>
+                  <small class="form-hint">Standar: 15m & Periode 14.</small>
+                </div>
+                <div style="flex: 1;">
+                  <label style="font-size: 11px; margin-bottom: 2px;">Min ATR% Validasi Entry (%)</label>
+                  <input type="number" id="cfg-sm-min-atr-pct" min="0.2" max="3.0" step="0.1" class="form-control" placeholder="0.8" style="padding: 4px 8px;">
+                  <small class="form-hint">Reject jika candle &lt; 0.8% (Koin sideways mati gaya, TP rawan macet).</small>
+                </div>
+                <div style="flex: 1;">
+                  <label style="font-size: 11px; margin-bottom: 2px;">Maks ATR% Batas Bahaya (%)</label>
+                  <input type="number" id="cfg-sm-max-atr-pct" min="1.5" max="10.0" step="0.1" class="form-control" placeholder="3.0" style="padding: 4px 8px;">
+                  <small class="form-hint">Reject jika candle &gt; 3.0% (Volatilitas liar berisiko tinggi).</small>
+                </div>
+              </div>
+
+              <div style="border-top: 1px dashed rgba(234, 179, 8, 0.2); padding-top: 8px; display: flex; gap: 14px; align-items: flex-end;">
+                <div style="flex: 1.2;">
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: #fde047; cursor: pointer;">
+                    <input type="checkbox" id="cfg-sm-atr-dynamic-sltp" style="accent-color: #eab308;" checked onchange="toggleSmAtrDynamicInputs()">
+                    TP/SL Dinamis Multiplier ATR
+                  </label>
+                  <div id="cfg-sm-atr-mult-row" style="display: flex; gap: 8px; margin-top: 4px;">
+                    <div>
+                      <small style="font-size: 10px; color: var(--text-muted);">SL (x ATR):</small>
+                      <input type="number" id="cfg-sm-atr-sl-mult" min="0.5" max="5.0" step="0.1" class="form-control" placeholder="1.2" style="padding: 3px 6px; width: 70px;">
+                    </div>
+                    <div>
+                      <small style="font-size: 10px; color: var(--text-muted);">TP (x ATR):</small>
+                      <input type="number" id="cfg-sm-atr-tp-mult" min="0.8" max="6.0" step="0.1" class="form-control" placeholder="1.8" style="padding: 3px 6px; width: 70px;">
+                    </div>
+                  </div>
+                </div>
+
+                <div style="flex: 1.8;">
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: #38bdf8; cursor: pointer;">
+                    <input type="checkbox" id="cfg-sm-auto-bep" style="accent-color: #38bdf8;" checked onchange="toggleSmAutoBepInput()">
+                    Auto Geser SL ke Impas (BEP)
+                  </label>
+                  <div id="cfg-sm-auto-bep-row" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                    <small style="font-size: 10px; color: var(--text-muted);">Trigger Saat Cuan Menyentuh:</small>
+                    <input type="number" id="cfg-sm-atr-bep-mult" min="0.5" max="3.0" step="0.1" class="form-control" placeholder="1.0" style="padding: 3px 6px; width: 70px;">
+                    <small style="font-size: 10px; color: var(--text-muted);">x ATR (Risk-Free)</small>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
