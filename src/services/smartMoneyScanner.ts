@@ -222,7 +222,7 @@ export class SmartMoneyScanner {
         // Mengikuti arah Top 20% Akun Trader Profit Binance (murni spekulasi cuan, bebas hedging spot paus)
         if (canShort && smartShort >= thresholdShort) {
           const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
-          const whaleAligned = metrics.whaleShortRatio >= minWhaleRatio;
+          const whaleAligned = !isSmartFilterOn || metrics.whaleShortRatio >= minWhaleRatio;
 
           if (!whaleAligned) {
             logger.log(
@@ -238,7 +238,7 @@ export class SmartMoneyScanner {
 
         if (!detectedSide && canLong && smartLong >= thresholdLong) {
           const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
-          const whaleAligned = metrics.whaleLongRatio >= minWhaleRatio;
+          const whaleAligned = !isSmartFilterOn || metrics.whaleLongRatio >= minWhaleRatio;
 
           if (!whaleAligned) {
             logger.log(
@@ -343,7 +343,7 @@ export class SmartMoneyScanner {
             whaleDistancePct = -distanceDropPct;
 
             // 2. Cek Anti-Squeeze (Harga tidak boleh menembus modal paus ke arah rugi)
-            if (this.config.whaleHealthFilterEnabled !== false && currentPrice > whaleAvgEntry) {
+            if (this.config.whaleHealthFilterEnabled !== false && checkWhaleHealthShort && currentPrice > whaleAvgEntry) {
               const adverseLossPct = ((currentPrice - whaleAvgEntry) / whaleAvgEntry) * 100;
               const maxAdverse = this.config.maxWhaleAdverseLossPct ?? 0.8;
               if (adverseLossPct > maxAdverse) {
@@ -356,7 +356,7 @@ export class SmartMoneyScanner {
             }
 
             // 3. Cek Anti-FOMO (Harga tidak boleh sudah anjlok terlalu jauh ke bawah)
-            if (this.config.whaleDistanceFilterEnabled !== false) {
+            if (this.config.whaleDistanceFilterEnabled !== false && checkWhaleHealthShort) {
               const maxDist = this.config.maxWhaleDistancePct ?? 1.5;
               if (distanceDropPct > maxDist) {
                 logger.log(
@@ -398,7 +398,7 @@ export class SmartMoneyScanner {
             whaleDistancePct = distanceSurgePct;
 
             // 2. Cek Anti-Dumping (Harga tidak boleh anjlok di bawah modal paus ke arah rugi)
-            if (this.config.whaleHealthFilterEnabled !== false && currentPrice < whaleAvgEntry) {
+            if (this.config.whaleHealthFilterEnabled !== false && checkWhaleHealthLong && currentPrice < whaleAvgEntry) {
               const adverseLossPct = ((whaleAvgEntry - currentPrice) / whaleAvgEntry) * 100;
               const maxAdverse = this.config.maxWhaleAdverseLossPct ?? 0.8;
               if (adverseLossPct > maxAdverse) {
@@ -411,7 +411,7 @@ export class SmartMoneyScanner {
             }
 
             // 3. Cek Anti-FOMO (Harga tidak boleh sudah terbang terlalu tinggi di atas)
-            if (this.config.whaleDistanceFilterEnabled !== false) {
+            if (this.config.whaleDistanceFilterEnabled !== false && checkWhaleHealthLong) {
               const maxDist = this.config.maxWhaleDistancePct ?? 1.5;
               if (distanceSurgePct > maxDist) {
                 logger.log(
@@ -497,6 +497,8 @@ export class SmartMoneyScanner {
           whaleTotalWhales,
           smartTraderLongRatio: metrics.smartTraderLongRatio,
           smartTraderShortRatio: metrics.smartTraderShortRatio,
+          smartTraderLongAvgEntry: metrics.smartTraderLongAvgEntry,
+          smartTraderShortAvgEntry: metrics.smartTraderShortAvgEntry,
           smartTraderAligned,
           atr: atrData?.atr,
           atrPct: atrData?.atrPct,

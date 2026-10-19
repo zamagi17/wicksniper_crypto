@@ -5334,7 +5334,13 @@ export class WickSniperEngine {
       // 2. Stop Loss Hybrid
       let slRaw: number;
       let desc = '';
-      if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
+      const isWhaleDominant = (isShort ? signal.whaleShortRatio : signal.whaleLongRatio) >= 0.50;
+      const useWhaleStructuralSl = smCfg.structuralSlEnabled !== false &&
+        signal.whaleAvgEntry &&
+        signal.whaleAvgEntry > 0 &&
+        (signal.signalDriver !== 'SMART_TRADER' || isWhaleDominant);
+
+      if (useWhaleStructuralSl && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;
         const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
         const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
@@ -5619,6 +5625,8 @@ export class WickSniperEngine {
         smartTraderMinRatio: smCfg.smartTraderMinRatio ?? 30,
         smartTraderLongRatio: signal.smartTraderLongRatio,
         smartTraderShortRatio: signal.smartTraderShortRatio,
+        smartTraderLongAvgEntry: signal.smartTraderLongAvgEntry,
+        smartTraderShortAvgEntry: signal.smartTraderShortAvgEntry,
         smartTraderAligned: signal.smartTraderAligned,
         structuralSlEnabled: smCfg.structuralSlEnabled !== false,
         structuralSlBufferPct: smCfg.structuralSlBufferPct ?? 0.3,
@@ -5658,6 +5666,8 @@ export class WickSniperEngine {
       whaleTotalWhales: signal.whaleTotalWhales,
       smartTraderLongRatio: signal.smartTraderLongRatio,
       smartTraderShortRatio: signal.smartTraderShortRatio,
+      smartTraderLongAvgEntry: signal.smartTraderLongAvgEntry,
+      smartTraderShortAvgEntry: signal.smartTraderShortAvgEntry,
       smartTraderAligned: signal.smartTraderAligned,
       aligned: true,
       reversalDetected: false,
@@ -5722,17 +5732,17 @@ export class WickSniperEngine {
         const sameSideName = isLong ? 'LONG' : 'SHORT';
         const oppSideName = isLong ? 'SHORT' : 'LONG';
 
-        // Deteksi pembalikan arah paus jika rasio paus lawan >= 52%
-        const reversalDetected = oppSideRatio >= 0.52;
-        const aligned = sameSideRatio >= 0.52;
-
         const posDriver = pos.paramsSnapshot?.signalDriver || this.config.smartMoney?.signalDriver || 'SMART_TRADER';
+        const stSameRatio = isLong ? (metrics.smartTraderLongRatio ?? 0.5) : (metrics.smartTraderShortRatio ?? 0.5);
+        const stOppRatio = isLong ? (metrics.smartTraderShortRatio ?? 0.5) : (metrics.smartTraderLongRatio ?? 0.5);
+        const stReversal = stOppRatio >= 0.52;
+        const stAligned = (stSameRatio || 0) >= 0.52;
+
+        const isReversal = posDriver === 'SMART_TRADER' ? stReversal : (oppSideRatio >= 0.52);
+        const isAligned = posDriver === 'SMART_TRADER' ? stAligned : (sameSideRatio >= 0.52);
+
         let label = '';
         if (posDriver === 'SMART_TRADER') {
-          const stSameRatio = isLong ? (metrics.smartTraderLongRatio ?? 0.5) : (metrics.smartTraderShortRatio ?? 0.5);
-          const stOppRatio = isLong ? (metrics.smartTraderShortRatio ?? 0.5) : (metrics.smartTraderLongRatio ?? 0.5);
-          const stReversal = stOppRatio >= 0.52;
-          const stAligned = stSameRatio >= 0.52;
           if (stReversal) {
             label = `⚠️ Smart Trader Berbalik: ${oppSideName} (${(stOppRatio * 100).toFixed(0)}%) • Berlawanan`;
           } else if (stAligned) {
@@ -5740,9 +5750,9 @@ export class WickSniperEngine {
           } else {
             label = `⚖️ Smart Trader Seimbang (${(stSameRatio * 100).toFixed(0)}% : ${(stOppRatio * 100).toFixed(0)}%)`;
           }
-        } else if (reversalDetected) {
+        } else if (isReversal) {
           label = `⚠️ Paus Berbalik: ${oppSideName} (${(oppSideRatio * 100).toFixed(0)}%) • Berlawanan`;
-        } else if (aligned) {
+        } else if (isAligned) {
           label = `🐋 Paus ${sameSideName} (${(sameSideRatio * 100).toFixed(0)}%) • Searah`;
         } else {
           label = `⚖️ Paus Seimbang (${(sameSideRatio * 100).toFixed(0)}% : ${(oppSideRatio * 100).toFixed(0)}%)`;
@@ -5761,8 +5771,6 @@ export class WickSniperEngine {
         const sameSideWinrate = isLong ? metrics.longWhaleWinratePct : metrics.shortWhaleWinratePct;
         const sameSideProfit = isLong ? metrics.longProfitWhales : metrics.shortProfitWhales;
         const sameSideTotal = isLong ? metrics.longWhales : metrics.shortWhales;
-        const stSameRatio = isLong ? metrics.smartTraderLongRatio : metrics.smartTraderShortRatio;
-        const stAligned = (stSameRatio || 0) >= 0.5;
 
         pos.smartMoneyFlowStatus = {
           whaleLongRatio: metrics.whaleLongRatio,
@@ -5770,6 +5778,8 @@ export class WickSniperEngine {
           whaleLongShortRatio: metrics.whaleLongShortRatio,
           smartTraderLongRatio: metrics.smartTraderLongRatio,
           smartTraderShortRatio: metrics.smartTraderShortRatio,
+          smartTraderLongAvgEntry: metrics.smartTraderLongAvgEntry,
+          smartTraderShortAvgEntry: metrics.smartTraderShortAvgEntry,
           smartTraderAligned: stAligned,
           retailLongRatio: metrics.retailLongRatio,
           retailShortRatio: metrics.retailShortRatio,
@@ -5780,19 +5790,20 @@ export class WickSniperEngine {
           whaleWinratePct: sameSideWinrate,
           whaleProfitWhales: sameSideProfit,
           whaleTotalWhales: sameSideTotal,
-          aligned,
-          reversalDetected,
+          aligned: isAligned,
+          reversalDetected: isReversal,
           label,
           detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : '') + (metrics.smartTraderLongRatio !== undefined ? ` | Smart Trader: ${(metrics.smartTraderLongRatio * 100).toFixed(0)}% L / ${(metrics.smartTraderShortRatio * 100).toFixed(0)}% S` : ''),
           updatedAt: now,
         };
 
-        if (reversalDetected) {
+        if (isReversal) {
+          const revRatio = (posDriver === 'SMART_TRADER' ? stOppRatio : oppSideRatio) * 100;
           telegram.notifyWhaleReversal(
             pos.symbol,
             pos.side,
             oppSideName,
-            oppSideRatio * 100,
+            revRatio,
             pos.currentPrice,
             pos.avgEntryPrice,
             pos.unrealizedPnl || 0,

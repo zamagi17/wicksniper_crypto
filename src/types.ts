@@ -193,6 +193,8 @@ export interface SmartMoneySignal {
   whaleTotalWhales?: number;
   smartTraderLongRatio?: number;
   smartTraderShortRatio?: number;
+  smartTraderLongAvgEntry?: number;
+  smartTraderShortAvgEntry?: number;
   smartTraderAligned?: boolean;
   atr?: number;
   atrPct?: number;
@@ -351,6 +353,8 @@ export interface SmartMoneyFlowStatus {
   whaleTotalWhales?: number;
   smartTraderLongRatio?: number;
   smartTraderShortRatio?: number;
+  smartTraderLongAvgEntry?: number;
+  smartTraderShortAvgEntry?: number;
   smartTraderAligned?: boolean;
   aligned: boolean;
   reversalDetected: boolean;
