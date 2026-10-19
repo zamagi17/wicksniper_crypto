@@ -4372,6 +4372,9 @@ function updateSmDriverLabels() {
   const hintDriver = document.getElementById('hint-sm-signal-driver');
   const grpSmartTrader = document.getElementById('grp-sm-smart-trader-min');
   const grpWhale = document.getElementById('grp-sm-min-whale');
+  const badgeDist = document.getElementById('badge-sm-whale-dist-status');
+  const badgeHealth = document.getElementById('badge-sm-whale-health-status');
+  const badgeStructSl = document.getElementById('badge-sm-structural-sl-status');
 
   if (driver === 'SMART_TRADER') {
     if (lblShort) lblShort.innerHTML = '🧠 Dominasi Smart Trader Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
@@ -4379,17 +4382,46 @@ function updateSmDriverLabels() {
     if (lblLong) lblLong.innerHTML = '🧠 Dominasi Smart Trader Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
     if (hintLong) hintLong.innerText = 'Top 20% Akun Trader Profit harus pegang >= X% Long untuk memicu sinyal Long (Standar: 60%).';
     if (hintDriver) hintDriver.innerHTML = '<b>Smart Trader Driven:</b> Mengikuti arah akumulasi akun-akun top trader profit (bebas distorsi hedging paus). Dilengkapi guard anti-ekstrem paus (min 30%).';
+
     if (grpSmartTrader) {
       const lbl = grpSmartTrader.querySelector('label');
       const hint = grpSmartTrader.querySelector('.form-hint');
-      if (lbl) lbl.innerText = 'Min. % Rasio Searah Smart Trader (%)';
-      if (hint) hint.innerText = 'Batas minimal konsensus Smart Trader searah sinyal.';
+      if (lbl) lbl.innerHTML = 'Min. % Rasio Searah Smart Trader (%) <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Otomatis Bypassed</span>';
+      if (hint) hint.innerText = 'Tidak dipakai: Dominasi Smart Trader sudah ditentukan oleh threshold utama (60%) di atas.';
+      grpSmartTrader.style.opacity = '0.45';
+      const input = grpSmartTrader.querySelector('input');
+      if (input) input.style.pointerEvents = 'none';
     }
     if (grpWhale) {
       const lbl = grpWhale.querySelector('label');
       const hint = grpWhale.querySelector('.form-hint');
-      if (lbl) lbl.innerText = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%)';
-      if (hint) hint.innerText = 'Cegah entry jika Paus lawan > 70% (Minimal Paus searah: 30%).';
+      if (lbl) lbl.innerHTML = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
+      if (hint) hint.innerText = 'Aktif: Mencegah entry jika Paus lawan > 70% (Minimal Paus searah: 30%).';
+      grpWhale.style.opacity = '1';
+      const input = grpWhale.querySelector('input');
+      if (input) input.style.pointerEvents = 'auto';
+    }
+
+    if (badgeDist) {
+      badgeDist.style.display = 'inline-block';
+      badgeDist.style.background = 'rgba(255, 159, 10, 0.15)';
+      badgeDist.style.border = '1px solid rgba(255, 159, 10, 0.35)';
+      badgeDist.style.color = '#ff9f0a';
+      badgeDist.innerText = '🟡 Bersyarat (Aktif jika Paus dominan ≥50%)';
+    }
+    if (badgeHealth) {
+      badgeHealth.style.display = 'inline-block';
+      badgeHealth.style.background = 'rgba(168, 85, 247, 0.15)';
+      badgeHealth.style.border = '1px solid rgba(168, 85, 247, 0.35)';
+      badgeHealth.style.color = '#c084fc';
+      badgeHealth.innerText = '🟡 Bersyarat (Aktif jika Paus dominan ≥50%)';
+    }
+    if (badgeStructSl) {
+      badgeStructSl.style.display = 'inline-block';
+      badgeStructSl.style.background = 'rgba(52, 199, 89, 0.15)';
+      badgeStructSl.style.border = '1px solid rgba(52, 199, 89, 0.35)';
+      badgeStructSl.style.color = '#34c759';
+      badgeStructSl.innerText = '🎯 Auto Fallback (Modal Paus jika dominan, atau 1.2x ATR)';
     }
   } else if (driver === 'WHALE') {
     if (lblShort) lblShort.innerHTML = '🐋 Dominasi Paus Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
@@ -4397,17 +4429,46 @@ function updateSmDriverLabels() {
     if (lblLong) lblLong.innerHTML = '🐋 Dominasi Paus Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
     if (hintLong) hintLong.innerText = 'Akumulasi total volume Paus Binance harus pegang >= X% Long untuk memicu sinyal Long (Standar: 60%).';
     if (hintDriver) hintDriver.innerHTML = '<b>Whale Driven:</b> Mengikuti arah total volume posisi Paus Binance (Top Trader Position Ratio).';
+
     if (grpSmartTrader) {
       const lbl = grpSmartTrader.querySelector('label');
       const hint = grpSmartTrader.querySelector('.form-hint');
-      if (lbl) lbl.innerText = '🧠 Min. % Rasio Searah Smart Trader / Guard (%)';
-      if (hint) hint.innerText = 'Cegah entry jika Smart Trader melawan arah posisi Paus.';
+      if (lbl) lbl.innerHTML = '🧠 Min. % Rasio Searah Smart Trader / Guard (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
+      if (hint) hint.innerText = 'Aktif: Cegah entry jika Smart Trader melawan arah posisi Paus.';
+      grpSmartTrader.style.opacity = '1';
+      const input = grpSmartTrader.querySelector('input');
+      if (input) input.style.pointerEvents = 'auto';
     }
     if (grpWhale) {
       const lbl = grpWhale.querySelector('label');
       const hint = grpWhale.querySelector('.form-hint');
-      if (lbl) lbl.innerText = '🐋 Min. % Rasio Searah Paus (%)';
-      if (hint) hint.innerText = 'Batas minimal dominasi Paus searah posisi.';
+      if (lbl) lbl.innerHTML = '🐋 Min. % Rasio Searah Paus (%) <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Otomatis Bypassed</span>';
+      if (hint) hint.innerText = 'Tidak dipakai: Dominasi Paus sudah ditentukan oleh threshold utama (60%) di atas.';
+      grpWhale.style.opacity = '0.45';
+      const input = grpWhale.querySelector('input');
+      if (input) input.style.pointerEvents = 'none';
+    }
+
+    if (badgeDist) {
+      badgeDist.style.display = 'inline-block';
+      badgeDist.style.background = 'rgba(46, 213, 115, 0.15)';
+      badgeDist.style.border = '1px solid rgba(46, 213, 115, 0.35)';
+      badgeDist.style.color = '#2ed573';
+      badgeDist.innerText = '🟢 Aktif Penuh';
+    }
+    if (badgeHealth) {
+      badgeHealth.style.display = 'inline-block';
+      badgeHealth.style.background = 'rgba(46, 213, 115, 0.15)';
+      badgeHealth.style.border = '1px solid rgba(46, 213, 115, 0.35)';
+      badgeHealth.style.color = '#2ed573';
+      badgeHealth.innerText = '🟢 Aktif Penuh';
+    }
+    if (badgeStructSl) {
+      badgeStructSl.style.display = 'inline-block';
+      badgeStructSl.style.background = 'rgba(52, 199, 89, 0.15)';
+      badgeStructSl.style.border = '1px solid rgba(52, 199, 89, 0.35)';
+      badgeStructSl.style.color = '#34c759';
+      badgeStructSl.innerText = '🟢 Aktif: Kunci di Balik Modal Paus';
     }
   } else if (driver === 'DUAL_CONFLUENCE') {
     if (lblShort) lblShort.innerHTML = '🎯 Dominasi Dual Confluence Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
@@ -4415,17 +4476,46 @@ function updateSmDriverLabels() {
     if (lblLong) lblLong.innerHTML = '🎯 Dominasi Dual Confluence Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
     if (hintLong) hintLong.innerText = 'Paus dan Smart Trader wajib sama-sama pegang >= X% Long (Standar: 60%).';
     if (hintDriver) hintDriver.innerHTML = '<b>Dual Confluence:</b> Wajib Paus DAN Smart Trader keduanya searah dan dominan.';
+
     if (grpSmartTrader) {
       const lbl = grpSmartTrader.querySelector('label');
       const hint = grpSmartTrader.querySelector('.form-hint');
-      if (lbl) lbl.innerText = '🎯 Min. % Rasio Searah Smart Trader (%)';
+      if (lbl) lbl.innerHTML = '🎯 Min. % Rasio Searah Smart Trader (%) <span class="badge-tag" style="background: rgba(56,189,248,0.15); border: 1px solid rgba(56,189,248,0.35); color: #38bdf8; font-size: 10px;">🟢 Aktif</span>';
       if (hint) hint.innerText = 'Minimal dominasi Smart Trader dalam konfluensi.';
+      grpSmartTrader.style.opacity = '1';
+      const input = grpSmartTrader.querySelector('input');
+      if (input) input.style.pointerEvents = 'auto';
     }
     if (grpWhale) {
       const lbl = grpWhale.querySelector('label');
       const hint = grpWhale.querySelector('.form-hint');
-      if (lbl) lbl.innerText = '🎯 Min. % Rasio Searah Paus (%)';
+      if (lbl) lbl.innerHTML = '🎯 Min. % Rasio Searah Paus (%) <span class="badge-tag" style="background: rgba(56,189,248,0.15); border: 1px solid rgba(56,189,248,0.35); color: #38bdf8; font-size: 10px;">🟢 Aktif</span>';
       if (hint) hint.innerText = 'Minimal dominasi Paus dalam konfluensi.';
+      grpWhale.style.opacity = '1';
+      const input = grpWhale.querySelector('input');
+      if (input) input.style.pointerEvents = 'auto';
+    }
+
+    if (badgeDist) {
+      badgeDist.style.display = 'inline-block';
+      badgeDist.style.background = 'rgba(46, 213, 115, 0.15)';
+      badgeDist.style.border = '1px solid rgba(46, 213, 115, 0.35)';
+      badgeDist.style.color = '#2ed573';
+      badgeDist.innerText = '🟢 Aktif Penuh';
+    }
+    if (badgeHealth) {
+      badgeHealth.style.display = 'inline-block';
+      badgeHealth.style.background = 'rgba(46, 213, 115, 0.15)';
+      badgeHealth.style.border = '1px solid rgba(46, 213, 115, 0.35)';
+      badgeHealth.style.color = '#2ed573';
+      badgeHealth.innerText = '🟢 Aktif Penuh';
+    }
+    if (badgeStructSl) {
+      badgeStructSl.style.display = 'inline-block';
+      badgeStructSl.style.background = 'rgba(52, 199, 89, 0.15)';
+      badgeStructSl.style.border = '1px solid rgba(52, 199, 89, 0.35)';
+      badgeStructSl.style.color = '#34c759';
+      badgeStructSl.innerText = '🟢 Aktif: Kunci di Balik Modal Paus';
     }
   }
 }
