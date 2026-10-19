@@ -512,12 +512,12 @@
               <span>🧭 Driver Sinyal Utama</span>
               <span class="badge-tag badge-smart-money">Smart Money</span>
             </label>
-            <select id="cfg-sm-signal-driver" class="form-control" style="margin-top: 6px; font-weight: 600;">
+            <select id="cfg-sm-signal-driver" class="form-control" style="margin-top: 6px; font-weight: 600;" onchange="updateSmDriverLabels()">
               <option value="SMART_TRADER" selected>🧠 Smart Trader Driven (Ikuti Top 20% Akun Trader Profit - Rekomendasi)</option>
               <option value="WHALE">🐋 Whale Driven (Ikuti Volume Paus - Mode Lama)</option>
               <option value="DUAL_CONFLUENCE">🎯 Dual Confluence (Wajib Paus & Smart Trader Searah)</option>
             </select>
-            <small class="form-hint" style="margin-top: 6px; display: block; line-height: 1.4;">
+            <small id="hint-sm-signal-driver" class="form-hint" style="margin-top: 6px; display: block; line-height: 1.4;">
               <b>Smart Trader Driven:</b> Mengikuti arah akun-akun paling konsisten profit (bebas dari distorsi hedging spot koin Paus). Dilengkapi guard anti-ekstrem paus (min 30%).
             </small>
           </div>
@@ -533,15 +533,15 @@
           </div>
 
           <div class="form-group">
-            <label>Ambang Dominasi Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <label id="lbl-sm-thresh-short">🧠 Dominasi Smart Trader Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-thresh-short" min="50" max="95" step="1" class="form-control" placeholder="60">
-            <small class="form-hint">Driver (Smart Trader/Paus) harus pegang >= X% Short untuk trigger Short (Standar: 60%).</small>
+            <small id="hint-sm-thresh-short" class="form-hint">Top 20% Akun Trader Profit harus pegang >= X% Short untuk memicu sinyal Short (Standar: 60%).</small>
           </div>
 
           <div class="form-group">
-            <label>Ambang Dominasi Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+            <label id="lbl-sm-thresh-long">🧠 Dominasi Smart Trader Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
             <input type="number" id="cfg-sm-thresh-long" min="50" max="95" step="1" class="form-control" placeholder="60">
-            <small class="form-hint">Driver (Smart Trader/Paus) harus pegang >= X% Long untuk trigger Long (Standar: 60%).</small>
+            <small id="hint-sm-thresh-long" class="form-hint">Top 20% Akun Trader Profit harus pegang >= X% Long untuk memicu sinyal Long (Standar: 60%).</small>
           </div>
 
           <div class="form-group" style="grid-column: span 2; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 10px 14px;">
@@ -705,12 +705,12 @@
               <span>🧠 Filter Konfluensi & Anti-Ekstrem <span class="badge-tag badge-smart-money">Smart Money</span></span>
             </label>
             <div id="cfg-sm-smart-trader-box" style="display: flex; gap: 14px; margin-top: 8px;">
-              <div style="flex: 1;">
+              <div id="grp-sm-smart-trader-min" style="flex: 1; transition: opacity 0.2s;">
                 <label style="font-size: 11px; margin-bottom: 2px;">Min. % Rasio Searah Smart Trader (%)</label>
                 <input type="number" id="cfg-sm-smart-trader-min-ratio" min="20" max="80" step="1" class="form-control" placeholder="30" style="padding: 4px 8px;">
                 <small class="form-hint">Saat mode Paus: batas minimal Smart Trader searah (Standar: 30%).</small>
               </div>
-              <div style="flex: 1;">
+              <div id="grp-sm-min-whale" style="flex: 1; transition: opacity 0.2s;">
                 <label style="font-size: 11px; margin-bottom: 2px;">Min. % Rasio Searah Paus / Anti-Ekstrem (%)</label>
                 <input type="number" id="cfg-sm-min-whale-ratio" min="10" max="60" step="1" class="form-control" placeholder="30" style="padding: 4px 8px;">
                 <small class="form-hint">Saat mode Smart Trader: cegah entry jika Paus lawan > 70% (min searah: 30%).</small>

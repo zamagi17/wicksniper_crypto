@@ -967,7 +967,12 @@ function renderActivePositions(positions) {
 
       let tpStatusBadge = '';
       if (isSm) {
-        tpStatusBadge = `<span class="badge-tag badge-smart-money" style="background: rgba(46, 213, 115, 0.15); border: 1px solid rgba(46, 213, 115, 0.4); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🐋 Smart Money</span>`;
+        const smDriver = pos.paramsSnapshot?.signalDriver || currentConfig?.smartMoney?.signalDriver || 'SMART_TRADER';
+        const badgeText = smDriver === 'SMART_TRADER' ? '🧠 Smart Trader' : smDriver === 'DUAL_CONFLUENCE' ? '🎯 Confluence' : '🐋 Whale Flow';
+        const badgeColor = smDriver === 'SMART_TRADER' ? '#c084fc' : smDriver === 'DUAL_CONFLUENCE' ? '#38bdf8' : '#2ed573';
+        const badgeBg = smDriver === 'SMART_TRADER' ? 'rgba(192, 132, 252, 0.15)' : smDriver === 'DUAL_CONFLUENCE' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(46, 213, 115, 0.15)';
+        const badgeBorder = smDriver === 'SMART_TRADER' ? 'rgba(192, 132, 252, 0.4)' : smDriver === 'DUAL_CONFLUENCE' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(46, 213, 115, 0.4)';
+        tpStatusBadge = `<span class="badge-tag badge-smart-money" style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">${badgeText}</span>`;
       }
       let tpBannerHtml = '';
       const isLong = pos.side === 'LONG';
@@ -1042,6 +1047,11 @@ function renderActivePositions(positions) {
       let whaleHealthTag = '';
       let smartTraderTag = '';
 
+      const posDriver = pos.paramsSnapshot?.signalDriver || currentConfig?.smartMoney?.signalDriver || 'SMART_TRADER';
+      const isSmartTraderDriven = posDriver === 'SMART_TRADER';
+      const isWhaleDriven = posDriver === 'WHALE';
+      const isDualDriven = posDriver === 'DUAL_CONFLUENCE';
+
       const stLongRatio = smFlow?.smartTraderLongRatio ?? pos.paramsSnapshot?.smartTraderLongRatio;
       const stShortRatio = smFlow?.smartTraderShortRatio ?? pos.paramsSnapshot?.smartTraderShortRatio;
       if (stLongRatio !== undefined || stShortRatio !== undefined) {
@@ -1053,8 +1063,9 @@ function renderActivePositions(positions) {
         const stColor = isAligned ? '#c084fc' : '#ff453a';
         const stBg = isAligned ? 'rgba(192, 132, 252, 0.12)' : 'rgba(255, 69, 58, 0.12)';
         const stBorder = isAligned ? 'rgba(192, 132, 252, 0.35)' : 'rgba(255, 69, 58, 0.35)';
-        const stIcon = isAligned ? 'Searah ✅' : 'Beda Arah ⚠️';
-        smartTraderTag = `<span class="badge-tag" style="background: ${stBg}; border: 1px solid ${stBorder}; color: ${stColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Proporsi Akun Top Trader: ${myRatio.toFixed(1)}% ${pos.side}">🧠 Smart Trader: ${myRatio.toFixed(0)}% (${stIcon})</span>`;
+        const roleLabel = isSmartTraderDriven ? 'Utama' : isDualDriven ? 'Konfluensi' : 'Guard';
+        const stIcon = isAligned ? `Searah ✅ (${roleLabel})` : `Beda Arah ⚠️ (${roleLabel})`;
+        smartTraderTag = `<span class="badge-tag" style="background: ${stBg}; border: 1px solid ${stBorder}; color: ${stColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Proporsi Akun Top Trader: ${myRatio.toFixed(1)}% ${pos.side} • Peran: ${roleLabel}">🧠 Smart Trader: ${myRatio.toFixed(0)}% (${stIcon})</span>`;
       }
 
       if (smFlow) {
@@ -1064,13 +1075,15 @@ function renderActivePositions(positions) {
           : smFlow.aligned
             ? 'background: rgba(48, 209, 88, 0.16); border: 1px solid rgba(48, 209, 88, 0.45); color: #30d158;'
             : 'background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); color: #8e8e93;';
-        smFlowBadgeHtml = `<span class="badge-tag ${flowClass}" style="${flowBg} padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; cursor: help;" title="${smFlow.detail || ''} (Murni sebagai analisa arah aliran Paus)">${smFlow.label}</span>`;
+        const flowDriverName = isSmartTraderDriven ? 'Smart Trader' : isDualDriven ? 'Dual Confluence' : 'Paus';
+        smFlowBadgeHtml = `<span class="badge-tag ${flowClass}" style="${flowBg} padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; cursor: help;" title="${smFlow.detail || ''} (Murni sebagai analisa arah aliran ${flowDriverName})">${smFlow.label}</span>`;
 
         if (smFlow.whaleAvgEntry) {
           const distPct = smFlow.whaleDistancePct ?? 0;
           const distSign = distPct > 0 ? '+' : '';
           const distColor = Math.abs(distPct) <= 1.5 ? '#30d158' : Math.abs(distPct) <= 3.0 ? '#ffd60a' : '#ff453a';
-          modalPausTag = `<span class="badge-tag" style="background: rgba(255, 159, 10, 0.12); border: 1px solid rgba(255, 159, 10, 0.35); color: #ff9f0a; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Harga Masuk Rata-Rata Paus: $${formatCryptoPrice(smFlow.whaleAvgEntry)} (Selisih dari harga: ${distSign}${distPct.toFixed(1)}%)">🐋 Modal: $${formatCryptoPrice(smFlow.whaleAvgEntry)} <span style="color: ${distColor};">(${distSign}${distPct.toFixed(1)}%)</span></span>`;
+          const modalTitle = isSmartTraderDriven ? 'Modal Paus (Guard)' : 'Modal Paus';
+          modalPausTag = `<span class="badge-tag" style="background: rgba(255, 159, 10, 0.12); border: 1px solid rgba(255, 159, 10, 0.35); color: #ff9f0a; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Harga Masuk Rata-Rata Paus: $${formatCryptoPrice(smFlow.whaleAvgEntry)} (Selisih dari harga: ${distSign}${distPct.toFixed(1)}%)">🐋 ${modalTitle}: $${formatCryptoPrice(smFlow.whaleAvgEntry)} <span style="color: ${distColor};">(${distSign}${distPct.toFixed(1)}%)</span></span>`;
         }
 
         if (smFlow.whaleWinratePct !== undefined) {
@@ -1078,16 +1091,28 @@ function renderActivePositions(positions) {
           const winColor = winrate >= 50 ? '#30d158' : '#ff453a';
           const winBg = winrate >= 50 ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)';
           const winBorder = winrate >= 50 ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
-          whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Kesehatan Paus: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
+          const healthTitle = isSmartTraderDriven ? 'Kesehatan Paus (Guard)' : 'Kesehatan Paus';
+          whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="${healthTitle}: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
         }
 
         if (smFlow.reversalDetected) {
           const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
-          const oppRatio = ((pos.side === 'LONG' ? smFlow.whaleShortRatio : smFlow.whaleLongRatio) * 100).toFixed(0);
+          let oppRatio = '0';
+          let revDriverLabel = 'PAUS';
+          if (isSmartTraderDriven) {
+            revDriverLabel = 'SMART TRADER';
+            oppRatio = (((pos.side === 'LONG' ? (smFlow.smartTraderShortRatio ?? smFlow.whaleShortRatio) : (smFlow.smartTraderLongRatio ?? smFlow.whaleLongRatio)) || 0) * 100).toFixed(0);
+          } else if (isDualDriven) {
+            revDriverLabel = 'DUAL CONFLUENCE';
+            oppRatio = (((pos.side === 'LONG' ? smFlow.whaleShortRatio : smFlow.whaleLongRatio) || 0) * 100).toFixed(0);
+          } else {
+            revDriverLabel = 'PAUS';
+            oppRatio = (((pos.side === 'LONG' ? smFlow.whaleShortRatio : smFlow.whaleLongRatio) || 0) * 100).toFixed(0);
+          }
           smReversalBannerHtml = `
             <div style="background: linear-gradient(90deg, rgba(255, 69, 58, 0.14), rgba(255, 159, 10, 0.08)); border: 1px dashed rgba(255, 69, 58, 0.45); border-radius: 6px; padding: 7px 12px; margin: 8px 0 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 11.5px;">
               <span style="color: #ff453a; font-weight: 600;">
-                ⚠️ <b>ANALISA ALIRAN PAUS BERUBAH ARAH:</b> Dominasi Paus saat ini berbalik menjadi <b>${oppSide} (${oppRatio}%)</b>!
+                ⚠️ <b>ANALISA ALIRAN ${revDriverLabel} BERUBAH ARAH:</b> Dominasi ${revDriverLabel} saat ini berbalik menjadi <b>${oppSide} (${oppRatio}%)</b>!
               </span>
               <span style="color: #ffd60a; font-size: 11px; font-weight: 500;">
                 ℹ️ Posisi tetap floating sesuai TP/SL (Tanda analisa pengawasan).
@@ -1123,10 +1148,7 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
-              ${smFlowBadgeHtml}
-              ${modalPausTag}
-              ${whaleHealthTag}
-              ${smartTraderTag}
+              ${isSmartTraderDriven ? smartTraderTag + smFlowBadgeHtml + modalPausTag + whaleHealthTag : smFlowBadgeHtml + modalPausTag + whaleHealthTag + smartTraderTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -1167,20 +1189,20 @@ function renderActivePositions(positions) {
               ${slMetricHtml}
             </div>
             <div class="pos-metric-item">
-              <small>Aliran Paus (Analisa)</small>
+              <small>${isSmartTraderDriven ? 'Aliran Smart Trader (Analisa)' : isDualDriven ? 'Aliran Confluence (Analisa)' : 'Aliran Paus (Analisa)'}</small>
               ${smFlow ? `
                 <span style="${smFlow.reversalDetected ? 'color: #ff453a; font-weight: 600;' : smFlow.aligned ? 'color: #30d158; font-weight: 600;' : 'color: #8e8e93; font-weight: 500;'}">
                   ${smFlow.label}
                 </span>
                 ${smFlow.detail ? `<small class="text-muted" style="font-size: 10px;" title="${smFlow.detail}">${smFlow.detail}</small>` : ''}
               ` : `
-                <span class="text-muted">Memuat data paus...</span>
+                <span class="text-muted">${isSmartTraderDriven ? 'Memuat data Smart Trader...' : 'Memuat data Paus...'}</span>
               `}
             </div>
             ${isSm ? `
             <div class="pos-metric-item">
               <small>Strategi</small>
-              <span class="text-cyan"><b>🐋 Smart Money</b> <small>${pos.trailingTpActive ? '🚀 Trailing TP Aktif' : '🎯 Sniper TP'}</small></span>
+              <span class="text-cyan"><b>${isSmartTraderDriven ? '🧠 Smart Trader Flow' : isDualDriven ? '🎯 Dual Confluence' : '🐋 Whale Flow'}</b> <small>${pos.trailingTpActive ? '🚀 Trailing TP Aktif' : '🎯 Sniper TP'}</small></span>
             </div>
             ` : `
             <div class="pos-metric-item">
@@ -1798,8 +1820,13 @@ function renderClosedTradesTable(trades) {
       const pnlColor = isWin ? 'text-green' : 'text-red';
       const sign = isWin ? '+' : '';
       const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio;
+      const tradeDriver = t.paramsSnapshot?.signalDriver || 'SMART_TRADER';
       const stratBadge = isSmTrade
-        ? `<span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Smart Money (Whale Flow)">🐋 SM</span>`
+        ? (tradeDriver === 'SMART_TRADER'
+            ? `<span class="badge-tag" style="background: rgba(192, 132, 252, 0.15); border: 1px solid rgba(192, 132, 252, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Smart Trader Flow">🧠 ST</span>`
+            : tradeDriver === 'DUAL_CONFLUENCE'
+            ? `<span class="badge-tag" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Dual Confluence">🎯 DC</span>`
+            : `<span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Whale Flow">🐋 SM</span>`)
         : '';
       const layerBadge = t.layersFilled
         ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
@@ -1988,7 +2015,10 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     }
 
     const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio || !!snap?.whaleLongRatio || !!snap?.whaleAvgEntry;
-    const stratName = isSm ? '🐋 Smart Money' : t.strategyType === 'MOMENTUM_LONG' ? '🚀 Momentum Long' : '⚡ Wick Sniper';
+    const tradeDriver = snap?.signalDriver || 'SMART_TRADER';
+    const stratName = isSm
+      ? (tradeDriver === 'SMART_TRADER' ? '🧠 Smart Trader' : tradeDriver === 'DUAL_CONFLUENCE' ? '🎯 Dual Confluence' : '🐋 Whale Flow')
+      : t.strategyType === 'MOMENTUM_LONG' ? '🚀 Momentum Long' : '⚡ Wick Sniper';
 
     // Header Title & Badge
     const detailSide = (t.side || snap?.side || 'SHORT').toUpperCase();
@@ -2486,14 +2516,36 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           const distSign = (whaleDist || 0) > 0 ? '+' : '';
           const winColor = (whaleWin || 0) >= 50 ? 'text-green' : 'text-red';
 
-          return `
-            <div class="td-section-title" style="margin-top: 14px;">🐋 Snapshot Aliran Smart Money (Paus) Saat Entry</div>
-            <div class="td-kpi-grid">
-              ${sameSideRatio !== undefined ? `
+          const tradeDriver = snap?.signalDriver || 'SMART_TRADER';
+          const isSt = tradeDriver === 'SMART_TRADER';
+          const isDc = tradeDriver === 'DUAL_CONFLUENCE';
+          const sectionTitle = isSt
+            ? '🧠 Snapshot Aliran Smart Trader Saat Entry'
+            : isDc
+            ? '🎯 Snapshot Aliran Dual Confluence Saat Entry'
+            : '🐋 Snapshot Aliran Paus Saat Entry';
+
+          const stShortRatio = snap?.smartTraderShortRatio ?? sm?.smartTraderShortRatio;
+          const stLongRatio = snap?.smartTraderLongRatio ?? sm?.smartTraderLongRatio;
+          const sameSideStRatio = isTradeLong ? stLongRatio : stShortRatio;
+          const oppSideStRatio = isTradeLong ? stShortRatio : stLongRatio;
+
+          const stCardHtml = sameSideStRatio !== undefined ? `
               <div class="td-kpi-card">
-                <div class="td-kpi-label">🐋 Dominasi Paus ${tradeSide}</div>
+                <div class="td-kpi-label">🧠 Dominasi Smart Trader ${tradeSide}</div>
+                <div class="td-kpi-val" style="color: #c084fc;"><b>${(Number(sameSideStRatio) * 100).toFixed(1)}%</b> <small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(Lawan: ${(Number(oppSideStRatio || 0) * 100).toFixed(1)}%)</small></div>
+              </div>` : '';
+
+          const whaleCardHtml = sameSideRatio !== undefined ? `
+              <div class="td-kpi-card">
+                <div class="td-kpi-label">🐋 Dominasi Paus ${tradeSide} ${isSt ? '(Guard)' : ''}</div>
                 <div class="td-kpi-val text-cyan"><b>${(Number(sameSideRatio) * 100).toFixed(1)}%</b> <small style="font-size:10px; color:var(--text-muted); font-weight:normal;">(Lawan: ${(Number(oppSideRatio || 0) * 100).toFixed(1)}%)</small></div>
-              </div>` : ''}
+              </div>` : '';
+
+          return `
+            <div class="td-section-title" style="margin-top: 14px;">${sectionTitle}</div>
+            <div class="td-kpi-grid">
+              ${isSt ? stCardHtml + whaleCardHtml : whaleCardHtml + stCardHtml}
 
               ${whaleAvg ? `
               <div class="td-kpi-card">
@@ -3218,6 +3270,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmWhaleDistInput === 'function') toggleSmWhaleDistInput();
   if (typeof toggleSmWhaleHealthInput === 'function') toggleSmWhaleHealthInput();
   if (typeof toggleSmSmartTraderInput === 'function') toggleSmSmartTraderInput();
+  if (typeof updateSmDriverLabels === 'function') updateSmDriverLabels();
   if (typeof toggleSmStructuralSlInput === 'function') toggleSmStructuralSlInput();
   if (typeof toggleSmAtrInput === 'function') toggleSmAtrInput();
   if (typeof toggleSmAtrDynamicInputs === 'function') toggleSmAtrDynamicInputs();
@@ -4305,6 +4358,76 @@ function toggleSmSmartTraderInput() {
   }
 }
 window.toggleSmSmartTraderInput = toggleSmSmartTraderInput;
+
+function updateSmDriverLabels() {
+  const driverEl = document.getElementById('cfg-sm-signal-driver');
+  const driver = driverEl ? driverEl.value : 'SMART_TRADER';
+
+  const lblShort = document.getElementById('lbl-sm-thresh-short');
+  const hintShort = document.getElementById('hint-sm-thresh-short');
+  const lblLong = document.getElementById('lbl-sm-thresh-long');
+  const hintLong = document.getElementById('hint-sm-thresh-long');
+  const hintDriver = document.getElementById('hint-sm-signal-driver');
+  const grpSmartTrader = document.getElementById('grp-sm-smart-trader-min');
+  const grpWhale = document.getElementById('grp-sm-min-whale');
+
+  if (driver === 'SMART_TRADER') {
+    if (lblShort) lblShort.innerHTML = '🧠 Dominasi Smart Trader Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
+    if (hintShort) hintShort.innerText = 'Top 20% Akun Trader Profit harus pegang >= X% Short untuk memicu sinyal Short (Standar: 60%).';
+    if (lblLong) lblLong.innerHTML = '🧠 Dominasi Smart Trader Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
+    if (hintLong) hintLong.innerText = 'Top 20% Akun Trader Profit harus pegang >= X% Long untuk memicu sinyal Long (Standar: 60%).';
+    if (hintDriver) hintDriver.innerHTML = '<b>Smart Trader Driven:</b> Mengikuti arah akumulasi akun-akun top trader profit (bebas distorsi hedging paus). Dilengkapi guard anti-ekstrem paus (min 30%).';
+    if (grpSmartTrader) {
+      const lbl = grpSmartTrader.querySelector('label');
+      const hint = grpSmartTrader.querySelector('.form-hint');
+      if (lbl) lbl.innerText = 'Min. % Rasio Searah Smart Trader (%)';
+      if (hint) hint.innerText = 'Batas minimal konsensus Smart Trader searah sinyal.';
+    }
+    if (grpWhale) {
+      const lbl = grpWhale.querySelector('label');
+      const hint = grpWhale.querySelector('.form-hint');
+      if (lbl) lbl.innerText = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%)';
+      if (hint) hint.innerText = 'Cegah entry jika Paus lawan > 70% (Minimal Paus searah: 30%).';
+    }
+  } else if (driver === 'WHALE') {
+    if (lblShort) lblShort.innerHTML = '🐋 Dominasi Paus Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
+    if (hintShort) hintShort.innerText = 'Akumulasi total volume Paus Binance harus pegang >= X% Short untuk memicu sinyal Short (Standar: 60%).';
+    if (lblLong) lblLong.innerHTML = '🐋 Dominasi Paus Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
+    if (hintLong) hintLong.innerText = 'Akumulasi total volume Paus Binance harus pegang >= X% Long untuk memicu sinyal Long (Standar: 60%).';
+    if (hintDriver) hintDriver.innerHTML = '<b>Whale Driven:</b> Mengikuti arah total volume posisi Paus Binance (Top Trader Position Ratio).';
+    if (grpSmartTrader) {
+      const lbl = grpSmartTrader.querySelector('label');
+      const hint = grpSmartTrader.querySelector('.form-hint');
+      if (lbl) lbl.innerText = '🧠 Min. % Rasio Searah Smart Trader / Guard (%)';
+      if (hint) hint.innerText = 'Cegah entry jika Smart Trader melawan arah posisi Paus.';
+    }
+    if (grpWhale) {
+      const lbl = grpWhale.querySelector('label');
+      const hint = grpWhale.querySelector('.form-hint');
+      if (lbl) lbl.innerText = '🐋 Min. % Rasio Searah Paus (%)';
+      if (hint) hint.innerText = 'Batas minimal dominasi Paus searah posisi.';
+    }
+  } else if (driver === 'DUAL_CONFLUENCE') {
+    if (lblShort) lblShort.innerHTML = '🎯 Dominasi Dual Confluence Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
+    if (hintShort) hintShort.innerText = 'Paus dan Smart Trader wajib sama-sama pegang >= X% Short (Standar: 60%).';
+    if (lblLong) lblLong.innerHTML = '🎯 Dominasi Dual Confluence Long Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
+    if (hintLong) hintLong.innerText = 'Paus dan Smart Trader wajib sama-sama pegang >= X% Long (Standar: 60%).';
+    if (hintDriver) hintDriver.innerHTML = '<b>Dual Confluence:</b> Wajib Paus DAN Smart Trader keduanya searah dan dominan.';
+    if (grpSmartTrader) {
+      const lbl = grpSmartTrader.querySelector('label');
+      const hint = grpSmartTrader.querySelector('.form-hint');
+      if (lbl) lbl.innerText = '🎯 Min. % Rasio Searah Smart Trader (%)';
+      if (hint) hint.innerText = 'Minimal dominasi Smart Trader dalam konfluensi.';
+    }
+    if (grpWhale) {
+      const lbl = grpWhale.querySelector('label');
+      const hint = grpWhale.querySelector('.form-hint');
+      if (lbl) lbl.innerText = '🎯 Min. % Rasio Searah Paus (%)';
+      if (hint) hint.innerText = 'Minimal dominasi Paus dalam konfluensi.';
+    }
+  }
+}
+window.updateSmDriverLabels = updateSmDriverLabels;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

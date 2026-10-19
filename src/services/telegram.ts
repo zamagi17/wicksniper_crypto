@@ -160,24 +160,39 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       const distSign = (whaleDist || 0) >= 0 ? '+' : '';
 
       const driver = snap.signalDriver || 'SMART_TRADER';
-      const driverLabel = driver === 'SMART_TRADER' ? '🧠 Smart Trader Driven' : driver === 'DUAL_CONFLUENCE' ? '🎯 Dual Confluence' : '🐋 Whale Driven';
-      triggerLine = `🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b> [${driverLabel}]`;
-      if (wLong > 0 || wShort > 0) {
-        triggerLine += `\n🌊 <b>Dominasi Paus:</b> <b>${wLong.toFixed(0)}% L / ${wShort.toFixed(0)}% S</b> (Ritel: ${rLong.toFixed(0)}% L / ${rShort.toFixed(0)}% S)`;
+      const isSmartDriver = driver === 'SMART_TRADER';
+      const isDual = driver === 'DUAL_CONFLUENCE';
+
+      if (isSmartDriver) {
+        triggerLine = `🧠 <b>Strategi:</b> <b>Smart Trader Flow Tracker</b>`;
+      } else if (isDual) {
+        triggerLine = `🎯 <b>Strategi:</b> <b>Dual Confluence Flow Tracker</b>`;
+      } else {
+        triggerLine = `🐋 <b>Strategi:</b> <b>Whale Flow Tracker</b>`;
       }
-      if (whaleEntry && whaleEntry > 0) {
-        triggerLine += `\n💼 <b>Modal Paus:</b> <code>$${formatCryptoPrice(whaleEntry)}</code> (${distSign}${(whaleDist || 0).toFixed(1)}%)`;
-      }
-      if (whaleWin !== undefined) {
-        triggerLine += `\n🩺 <b>Kesehatan Paus:</b> <b>${whaleWin.toFixed(0)}% Laba</b>`;
-      }
+
       const stLong = smFlow.smartTraderLongRatio ?? snap.smartTraderLongRatio;
       const stShort = smFlow.smartTraderShortRatio ?? snap.smartTraderShortRatio;
+      let stLine = '';
       if (stLong !== undefined && stShort !== undefined) {
         const myRatio = (isLong ? stLong : stShort) * 100;
         const isAligned = smFlow.smartTraderAligned !== undefined ? smFlow.smartTraderAligned : myRatio >= 50;
         const stTag = isAligned ? 'Searah ✅' : 'Beda Arah ⚠️';
-        triggerLine += `\n🧠 <b>Smart Trader (Akun):</b> <b>${(stLong * 100).toFixed(0)}% L / ${(stShort * 100).toFixed(0)}% S</b> (${stTag})`;
+        stLine = `\n🧠 <b>Smart Trader (Akun):</b> <b>${(stLong * 100).toFixed(0)}% L / ${(stShort * 100).toFixed(0)}% S</b> (${stTag})`;
+      }
+
+      let whaleLine = '';
+      if (wLong > 0 || wShort > 0) {
+        const whaleLabel = isSmartDriver ? 'Guard Paus' : 'Dominasi Paus';
+        whaleLine = `\n🌊 <b>${whaleLabel}:</b> <b>${wLong.toFixed(0)}% L / ${wShort.toFixed(0)}% S</b> (Ritel: ${rLong.toFixed(0)}% L / ${rShort.toFixed(0)}% S)`;
+      }
+
+      if (isSmartDriver) {
+        triggerLine += stLine;
+        triggerLine += whaleLine;
+      } else {
+        triggerLine += whaleLine;
+        triggerLine += stLine;
       }
       if (pos.atrPct) {
         triggerLine += `\n📊 <b>ATR:</b> <b>${pos.atrPct.toFixed(2)}%</b> ($${formatCryptoPrice(pos.atr || 0)})`;
@@ -261,7 +276,13 @@ ${slLine}
       : '';
 
     const isSm = trade.strategyType === 'SMART_MONEY' || trade.paramsSnapshot?.strategy === 'SMART_MONEY';
-    const stratLine = isSm ? `\n🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b>` : '';
+    const stratLine = isSm
+      ? (trade.paramsSnapshot?.signalDriver === 'SMART_TRADER'
+          ? `\n🧠 <b>Strategi:</b> <b>Smart Trader Flow Tracker</b>`
+          : trade.paramsSnapshot?.signalDriver === 'DUAL_CONFLUENCE'
+          ? `\n🎯 <b>Strategi:</b> <b>Dual Confluence Tracker</b>`
+          : `\n🐋 <b>Strategi:</b> <b>Whale Flow Tracker</b>`)
+      : '';
 
     const msg =
 `${emoji} <b>[${title}]</b> ${emoji}
@@ -352,10 +373,11 @@ Posisi telah diamankan dari risiko pembalikan arah dengan buffer pengaman profit
     currentPrice: number,
     avgEntryPrice: number,
     unrealizedPnl: number,
-    pnlPct: number
+    pnlPct: number,
+    driverName: string = 'Paus'
   ) {
     if (this.config.notifyOnEmergency === false) return;
-    const key = `WHALE_REV_${symbol}`;
+    const key = `${driverName.toUpperCase().replace(/\s+/g, '_')}_REV_${symbol}`;
     const now = Date.now();
     const last = this.emergencyAlertCooldown.get(key) || 0;
     if (now - last < 5 * 60 * 1000) return; // Maks 1x per 5 menit per simbol agar tidak spam
@@ -363,17 +385,19 @@ Posisi telah diamankan dari risiko pembalikan arah dengan buffer pengaman profit
 
     const pnlSign = unrealizedPnl >= 0 ? '+' : '';
     const pnlEmoji = unrealizedPnl >= 0 ? '🟢' : '🔴';
+    const isSmart = driverName.toLowerCase().includes('smart');
+    const icon = isSmart ? '🧠' : '🐋';
 
     const msg =
-`⚠️ <b>[PERINGATAN: ALIRAN PAUS BERBALIK ARAH]</b> 🐋
+`⚠️ <b>[PERINGATAN: ALIRAN ${driverName.toUpperCase()} BERBALIK ARAH]</b> ${icon}
 
 🪙 <b>Koin:</b> <code>${symbol}</code>
 📊 <b>Posisi Terbuka:</b> <b>${currentSide}</b> @ <code>$${formatCryptoPrice(avgEntryPrice)}</code>
 💵 <b>Harga Terkini:</b> <code>$${formatCryptoPrice(currentPrice)}</code>
 ${pnlEmoji} <b>Floating PnL:</b> <b>${pnlSign}$${unrealizedPnl.toFixed(2)} USDT (${pnlSign}${pnlPct.toFixed(2)}%)</b>
 
-🔄 <b>Perubahan Aliran Dana:</b>
-Dominasi Paus kini berbalik menjadi <b>${newDominantSide} (${newDominantRatioPct.toFixed(1)}%)</b> • <i>Arah Berlawanan</i>.
+🔄 <b>Perubahan Aliran:</b>
+Dominasi ${driverName} kini berbalik menjadi <b>${newDominantSide} (${newDominantRatioPct.toFixed(1)}%)</b> • <i>Arah Berlawanan</i>.
 
 🛡️ <i>Catatan: Posisi tetap aktif terjaga oleh sistem Stop Loss & Take Profit. Waspadai pembalikan tren.</i>
 ⏱️ <i>Waktu: ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</i>`;

@@ -5226,9 +5226,11 @@ export class WickSniperEngine {
       const cooldownMins = smCfg.cooldownMinutes || 30;
       this.smartMoneyScanner.setCooldown(symbol, cooldownMins);
 
+      const effectiveDriver = signal.signalDriver || smCfg.signalDriver || 'SMART_TRADER';
+      const driverTag = effectiveDriver === 'SMART_TRADER' ? '🧠 [SMART TRADER SIGNAL]' : effectiveDriver === 'DUAL_CONFLUENCE' ? '🎯 [DUAL CONFLUENCE SIGNAL]' : '🐋 [WHALE SIGNAL]';
       logger.log(
         'SNIPER',
-        `🐋 [SMART MONEY SIGNAL] ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga Awal: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi...`,
+        `${driverTag} ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga Awal: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi...`,
         symbol
       );
 
@@ -5672,7 +5674,9 @@ export class WickSniperEngine {
       aligned: true,
       reversalDetected: false,
       label: initialLabel,
-      detail: `Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S${signal.whaleAvgEntry ? ` | Modal Paus: $${formatCryptoPrice(signal.whaleAvgEntry)}` : ''}`,
+      detail: effectiveDriver === 'SMART_TRADER'
+        ? `Smart Trader: ${(((signal.side === 'LONG' ? signal.smartTraderLongRatio : signal.smartTraderShortRatio) || 0.5) * 100).toFixed(0)}% ${signal.side} | Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S${signal.whaleAvgEntry ? ` | Modal Paus: $${formatCryptoPrice(signal.whaleAvgEntry)}` : ''}`
+        : `Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Smart Trader: ${(((signal.side === 'LONG' ? signal.smartTraderLongRatio : signal.smartTraderShortRatio) || 0.5) * 100).toFixed(0)}% ${signal.side} | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S${signal.whaleAvgEntry ? ` | Modal Paus: $${formatCryptoPrice(signal.whaleAvgEntry)}` : ''}`,
       updatedAt: Date.now(),
     };
 
@@ -5738,8 +5742,17 @@ export class WickSniperEngine {
         const stReversal = stOppRatio >= 0.52;
         const stAligned = (stSameRatio || 0) >= 0.52;
 
-        const isReversal = posDriver === 'SMART_TRADER' ? stReversal : (oppSideRatio >= 0.52);
-        const isAligned = posDriver === 'SMART_TRADER' ? stAligned : (sameSideRatio >= 0.52);
+        const isDual = posDriver === 'DUAL_CONFLUENCE';
+        const isReversal = posDriver === 'SMART_TRADER'
+          ? stReversal
+          : isDual
+          ? (stReversal || oppSideRatio >= 0.52)
+          : (oppSideRatio >= 0.52);
+        const isAligned = posDriver === 'SMART_TRADER'
+          ? stAligned
+          : isDual
+          ? (stAligned && sameSideRatio >= 0.52)
+          : (sameSideRatio >= 0.52);
 
         let label = '';
         if (posDriver === 'SMART_TRADER') {
@@ -5750,6 +5763,14 @@ export class WickSniperEngine {
           } else {
             label = `⚖️ Smart Trader Seimbang (${(stSameRatio * 100).toFixed(0)}% : ${(stOppRatio * 100).toFixed(0)}%)`;
           }
+        } else if (isDual) {
+          if (isReversal) {
+            label = `⚠️ Confluence Berbalik: ${oppSideName} • Berlawanan`;
+          } else if (isAligned) {
+            label = `🎯 Dual Confluence ${sameSideName} (Paus ${(sameSideRatio * 100).toFixed(0)}% + Smart ${(stSameRatio * 100).toFixed(0)}%) • Searah`;
+          } else {
+            label = `⚖️ Confluence Seimbang (Paus ${(sameSideRatio * 100).toFixed(0)}% / Smart ${(stSameRatio * 100).toFixed(0)}%)`;
+          }
         } else if (isReversal) {
           label = `⚠️ Paus Berbalik: ${oppSideName} (${(oppSideRatio * 100).toFixed(0)}%) • Berlawanan`;
         } else if (isAligned) {
@@ -5758,7 +5779,9 @@ export class WickSniperEngine {
           label = `⚖️ Paus Seimbang (${(sameSideRatio * 100).toFixed(0)}% : ${(oppSideRatio * 100).toFixed(0)}%)`;
         }
 
-        const detail = `Paus: ${(metrics.whaleLongRatio * 100).toFixed(0)}% L / ${(metrics.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(metrics.retailLongRatio * 100).toFixed(0)}% L / ${(metrics.retailShortRatio * 100).toFixed(0)}% S`;
+        const detail = posDriver === 'SMART_TRADER'
+          ? `Smart Trader: ${((metrics.smartTraderLongRatio ?? 0) * 100).toFixed(0)}% L / ${((metrics.smartTraderShortRatio ?? 0) * 100).toFixed(0)}% S | Paus: ${(metrics.whaleLongRatio * 100).toFixed(0)}% L / ${(metrics.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(metrics.retailLongRatio * 100).toFixed(0)}% L / ${(metrics.retailShortRatio * 100).toFixed(0)}% S`
+          : `Paus: ${(metrics.whaleLongRatio * 100).toFixed(0)}% L / ${(metrics.whaleShortRatio * 100).toFixed(0)}% S | Smart Trader: ${((metrics.smartTraderLongRatio ?? 0) * 100).toFixed(0)}% L / ${((metrics.smartTraderShortRatio ?? 0) * 100).toFixed(0)}% S | Ritel: ${(metrics.retailLongRatio * 100).toFixed(0)}% L / ${(metrics.retailShortRatio * 100).toFixed(0)}% S`;
 
         const whaleAvgEntry = isLong ? metrics.whaleLongAvgEntry : metrics.whaleShortAvgEntry;
         let whaleDistancePct: number | undefined;
@@ -5793,7 +5816,7 @@ export class WickSniperEngine {
           aligned: isAligned,
           reversalDetected: isReversal,
           label,
-          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : '') + (metrics.smartTraderLongRatio !== undefined ? ` | Smart Trader: ${(metrics.smartTraderLongRatio * 100).toFixed(0)}% L / ${(metrics.smartTraderShortRatio * 100).toFixed(0)}% S` : ''),
+          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : ''),
           updatedAt: now,
         };
 
@@ -5807,7 +5830,8 @@ export class WickSniperEngine {
             pos.currentPrice,
             pos.avgEntryPrice,
             pos.unrealizedPnl || 0,
-            pos.pnlPct || 0
+            pos.pnlPct || 0,
+            posDriver === 'SMART_TRADER' ? 'Smart Trader' : isDual ? 'Dual Confluence' : 'Paus'
           );
         }
       } catch (err: any) {
