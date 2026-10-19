@@ -22,6 +22,7 @@ export class SmartMoneyScanner {
   private lastPrices: Map<string, number> = new Map();
   private tickerVol24h: Map<string, number> = new Map();
   private scanCursor: number = 0;
+  private lastPulseLogAt: number = 0;
 
   constructor(config: SmartMoneyConfig, botScannerConfig?: BotConfig['scanner']) {
     this.config = config;
@@ -175,6 +176,43 @@ export class SmartMoneyScanner {
         if (i + CHUNK_SIZE < symbolsToScan.length) {
           await new Promise((r) => setTimeout(r, 120));
         }
+      }
+
+      // Denyut Nadi Scanner Berkala (Setiap 2.5 Menit agar user tahu scanner berjalan aktif & transparan)
+      const now = Date.now();
+      if (now - this.lastPulseLogAt >= 150000) {
+        this.lastPulseLogAt = now;
+        const driver = this.config.signalDriver || 'SMART_TRADER';
+        const driverName = driver === 'SMART_TRADER' ? 'SMART TRADER' : driver === 'DUAL_CONFLUENCE' ? 'DUAL CONFLUENCE' : 'PAUS';
+        const targetPct = Math.round(Math.max(thresholdShort, thresholdLong) * 100);
+
+        let topCoin = '';
+        let topRatio = 0;
+        let topSide = '';
+        for (const sym of symbolsToScan) {
+          const m = this.trackedMetrics.get(sym);
+          if (!m) continue;
+          if (driver === 'SMART_TRADER') {
+            const sShort = m.smartTraderShortRatio || 0;
+            const sLong = m.smartTraderLongRatio || 0;
+            if (sShort > topRatio) { topRatio = sShort; topCoin = sym; topSide = 'Short'; }
+            if (sLong > topRatio) { topRatio = sLong; topCoin = sym; topSide = 'Long'; }
+          } else {
+            const wShort = m.whaleShortRatio || 0;
+            const wLong = m.whaleLongRatio || 0;
+            if (wShort > topRatio) { topRatio = wShort; topCoin = sym; topSide = 'Short'; }
+            if (wLong > topRatio) { topRatio = wLong; topCoin = sym; topSide = 'Long'; }
+          }
+        }
+
+        const topInfo = topCoin && topRatio > 0
+          ? `Akumulasi terdekat: ${topCoin} (${topSide} ${(topRatio * 100).toFixed(1)}%)`
+          : 'Menganalisis arus order';
+
+        logger.log(
+          'INFO',
+          `📡 [RADAR ${driverName}] Aktif memindai ${candidateSymbols.length} koin Futures | Batch rotasi ${symbolsToScan.length} koin (TF ${period}) | ${topInfo} | Syarat pemicu: >= ${targetPct}% | Status: Berjalan normal & siaga berburu sinyal...`
+        );
       }
     } catch (e: any) {
       logger.log('INFO', `[SMART MONEY SCAN] Gagal memindai: ${e?.message || e}`);

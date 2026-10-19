@@ -133,6 +133,7 @@ export class WickSniperEngine {
   private lastRadarPulseAt: number = Date.now();
   private lastAutoBlacklistRefreshAt: number = Date.now();
   private lastAutoTuneAnalysisAt: number = Date.now();
+  private lastQuotaWarnAt: number = 0;
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
   private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
@@ -641,18 +642,21 @@ export class WickSniperEngine {
           this.runAutoTuneAnalysis().catch(() => {});
         }
 
-        // Denyut Nadi Radar Berkala (Setiap 15 Menit saat Siaga)
+        // Denyut Nadi Radar Berkala (Setiap 5 Menit saat Siaga)
         const now = Date.now();
-        if (now - this.lastRadarPulseAt >= 15 * 60 * 1000) {
+        if (now - this.lastRadarPulseAt >= 5 * 60 * 1000) {
           this.lastRadarPulseAt = now;
           const stats = this.scanner.getStats();
           const posCount = this.activePositions.size;
-          const maxCoins = this.config.grid.maxConcurrentCoins;
+          const isSm = this.config.triggerStrategy === 'SMART_MONEY' || this.config.smartMoney?.enabled;
+          const maxCoins = isSm
+            ? Math.max(this.config.smartMoney?.maxConcurrentPositions || 0, this.config.grid?.maxConcurrentCoins || 0) || 3
+            : (this.config.grid?.maxConcurrentCoins || 2);
           const availBal = this.config.tradingMode === 'LIVE' ? this.liveAvailableBalance : this.virtualBalance;
           const ticksLabel = stats.ticksPerSecond > 0 ? `${(stats.ticksPerSecond / 1000).toFixed(1)}k ticks/s` : 'aktif';
           logger.log(
             'INFO',
-            `📡 [RADAR SIAGA] Memindai ${stats.trackedPairs} koin Futures (WebSocket: ${ticksLabel}) | ${posCount}/${maxCoins} posisi terbuka | Saldo: $${availBal.toFixed(2)} USDT | Status: Normal & Siaga berburu lonjakan...`
+            `📡 [RADAR SIAGA] Memindai ${stats.trackedPairs} koin Futures (WebSocket: ${ticksLabel}) | ${posCount}/${maxCoins} posisi terbuka | Saldo: $${availBal.toFixed(2)} USDT | Status: Normal & Siaga berburu peluang...`
           );
         }
 
@@ -5202,8 +5206,20 @@ export class WickSniperEngine {
     if (this.smartMoneyScanner.isCoolingDown(symbol) || this.scanner.isCoolingDown(symbol)) return;
     if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) return;
 
-    const maxConcurrent = this.config.smartMoney?.maxConcurrentPositions || this.config.grid?.maxConcurrentCoins || 3;
-    if (this.activePositions.size >= maxConcurrent) {
+    const maxConcurrent = Math.max(
+      this.config.smartMoney?.maxConcurrentPositions || 0,
+      this.config.grid?.maxConcurrentCoins || 0
+    ) || 3;
+    const currentActiveAndDeploying = this.activePositions.size + this.deployingSymbols.size;
+    if (currentActiveAndDeploying >= maxConcurrent) {
+      const now = Date.now();
+      if (now - this.lastQuotaWarnAt >= 60000) {
+        this.lastQuotaWarnAt = now;
+        logger.log(
+          'INFO',
+          `⏸️ [KUOTA POSISI PENUH] Slot posisi aktif (${currentActiveAndDeploying}/${maxConcurrent}) terisi penuh. Sinyal ${signal.symbol} (${signal.side}) menunggu salah satu posisi Take Profit/Close sebelum membuka posisi baru.`
+        );
+      }
       return;
     }
 

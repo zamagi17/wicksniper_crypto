@@ -3215,7 +3215,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 1.2);
   setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
   setVal('cfg-sm-leverage', smCfg.leverage ?? cfg.leverage ?? 5);
-  setVal('cfg-sm-max-positions', smCfg.maxConcurrentPositions ?? cfg.grid?.maxConcurrentCoins ?? 3);
+  const unifiedMaxOnLoad = Math.max(smCfg.maxConcurrentPositions || 0, cfg.grid?.maxConcurrentCoins || 0) || 3;
+  setVal('cfg-sm-max-positions', unifiedMaxOnLoad);
   setVal('cfg-sm-cooldown', smCfg.cooldownMinutes ?? 30);
   setVal('cfg-sm-max-hold-hours', smCfg.maxHoldHours ?? 8);
   setVal('cfg-sm-entry-order-type', smCfg.entryOrderType || 'LIMIT');
@@ -3409,7 +3410,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-max-margin', cfg.grid?.maxTotalMarginPerCoin || 50);
   setVal('cfg-total-layers', cfg.grid?.totalLayers || 25);
   setVal('cfg-layer-spacing', cfg.grid?.layerSpacingPct || 1.2);
-  setVal('cfg-max-coins', cfg.grid?.maxConcurrentCoins || 2);
+  setVal('cfg-max-coins', typeof unifiedMaxOnLoad !== 'undefined' ? unifiedMaxOnLoad : (cfg.grid?.maxConcurrentCoins || 2));
   setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.1);
   setVal('cfg-cooldown', cfg.scanner?.cooldownMinutes || 20);
   setVal('cfg-data-source', cfg.scanner?.dataSource || 'WEBSOCKET');
@@ -3543,6 +3544,10 @@ function getSettingsFormData() {
     return el ? el.value : def;
   };
 
+  const maxCoinsGlobal = parseInt(getVal('cfg-max-coins', '2'), 10) || 2;
+  const rawSmMax = parseInt(getVal('cfg-sm-max-positions', String(maxCoinsGlobal)), 10) || maxCoinsGlobal;
+  const unifiedMaxCoins = Math.max(maxCoinsGlobal, rawSmMax);
+
   return {
     triggerStrategy: getVal('cfg-trigger-strategy', 'SMART_MONEY'),
     smartMoney: {
@@ -3560,7 +3565,7 @@ function getSettingsFormData() {
       structuralSlBufferPct: parseFloat(getVal('cfg-sm-structural-sl-buffer', '0.3')) || 0.3,
       marginUsdt: parseFloat(getVal('cfg-sm-margin', '5')) || 5,
       leverage: parseInt(getVal('cfg-sm-leverage', '5'), 10) || 5,
-      maxConcurrentPositions: parseInt(getVal('cfg-sm-max-positions', '3'), 10) || 3,
+      maxConcurrentPositions: unifiedMaxCoins,
       cooldownMinutes: parseInt(getVal('cfg-sm-cooldown', '30'), 10) || 30,
       maxHoldHours: parseInt(getVal('cfg-sm-max-hold-hours', '8'), 10) ?? 8,
       entryOrderType: getVal('cfg-sm-entry-order-type', 'LIMIT'),
@@ -3682,7 +3687,7 @@ function getSettingsFormData() {
       maxTotalMarginPerCoin: parseFloat(getVal('cfg-max-margin', '50')) || 50,
       totalLayers: parseInt(getVal('cfg-total-layers', '25')) || 25,
       layerSpacingPct: parseFloat(getVal('cfg-layer-spacing', '1.2')) || 1.2,
-      maxConcurrentCoins: parseInt(getVal('cfg-max-coins', '2')) || 2,
+      maxConcurrentCoins: unifiedMaxCoins,
       martingaleMultiplier: parseFloat(getVal('cfg-martingale', '1.1')) || 1.1,
     },
     apiKey: (getVal('cfg-api-key', '') || '').trim(),
@@ -5054,6 +5059,18 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cfg-trailing-sl-enabled')?.addEventListener('change', toggleTrailingSL);
   document.getElementById('cfg-whitelist-enabled')?.addEventListener('change', toggleWhitelistInput);
   document.getElementById('cfg-data-source')?.addEventListener('change', toggleDataSourceGroup);
+
+  const elMaxCoins = document.getElementById('cfg-max-coins');
+  const elSmMax = document.getElementById('cfg-sm-max-positions');
+  if (elMaxCoins && elSmMax) {
+    elMaxCoins.addEventListener('input', () => {
+      elSmMax.value = elMaxCoins.value;
+    });
+    elSmMax.addEventListener('input', () => {
+      elMaxCoins.value = elSmMax.value;
+    });
+  }
+
   loadTradableSymbols();
 });
 
