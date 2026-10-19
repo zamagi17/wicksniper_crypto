@@ -11,6 +11,7 @@ export interface TelegramConfig {
   notifyOnClose?: boolean;
   notifyOnEmergency?: boolean;
   notifyOnAutoBlacklist?: boolean;
+  notifyOnReversal?: boolean;
   heartbeatIntervalHours?: number;
 }
 
@@ -377,10 +378,11 @@ Posisi telah diamankan dari risiko pembalikan arah dengan buffer pengaman profit
     driverName: string = 'Paus'
   ) {
     if (this.config.notifyOnEmergency === false) return;
+    if (this.config.notifyOnReversal === false) return;
     const key = `${driverName.toUpperCase().replace(/\s+/g, '_')}_REV_${symbol}`;
     const now = Date.now();
     const last = this.emergencyAlertCooldown.get(key) || 0;
-    if (now - last < 5 * 60 * 1000) return; // Maks 1x per 5 menit per simbol agar tidak spam
+    if (now - last < 15 * 60 * 1000) return; // Fallback cooldown 15 menit per simbol agar tidak spam
     this.emergencyAlertCooldown.set(key, now);
 
     const pnlSign = unrealizedPnl >= 0 ? '+' : '';

@@ -5739,15 +5739,15 @@ export class WickSniperEngine {
         const posDriver = pos.paramsSnapshot?.signalDriver || this.config.smartMoney?.signalDriver || 'SMART_TRADER';
         const stSameRatio = isLong ? (metrics.smartTraderLongRatio ?? 0.5) : (metrics.smartTraderShortRatio ?? 0.5);
         const stOppRatio = isLong ? (metrics.smartTraderShortRatio ?? 0.5) : (metrics.smartTraderLongRatio ?? 0.5);
-        const stReversal = stOppRatio >= 0.52;
+        const stReversal = stOppRatio >= 0.58;
         const stAligned = (stSameRatio || 0) >= 0.52;
 
         const isDual = posDriver === 'DUAL_CONFLUENCE';
         const isReversal = posDriver === 'SMART_TRADER'
           ? stReversal
           : isDual
-          ? (stReversal || oppSideRatio >= 0.52)
-          : (oppSideRatio >= 0.52);
+          ? (stReversal || oppSideRatio >= 0.58)
+          : (oppSideRatio >= 0.58);
         const isAligned = posDriver === 'SMART_TRADER'
           ? stAligned
           : isDual
@@ -5821,18 +5821,25 @@ export class WickSniperEngine {
         };
 
         if (isReversal) {
-          const revRatio = (posDriver === 'SMART_TRADER' ? stOppRatio : oppSideRatio) * 100;
-          telegram.notifyWhaleReversal(
-            pos.symbol,
-            pos.side,
-            oppSideName,
-            revRatio,
-            pos.currentPrice,
-            pos.avgEntryPrice,
-            pos.unrealizedPnl || 0,
-            pos.pnlPct || 0,
-            posDriver === 'SMART_TRADER' ? 'Smart Trader' : isDual ? 'Dual Confluence' : 'Paus'
-          );
+          // Anti-spam: Hanya kirim notifikasi 1x saat arah pertama kali berbalik, bukan berulang-ulang
+          if (pos.lastReversalNotifiedSide !== oppSideName) {
+            pos.lastReversalNotifiedSide = oppSideName;
+            const revRatio = (posDriver === 'SMART_TRADER' ? stOppRatio : oppSideRatio) * 100;
+            telegram.notifyWhaleReversal(
+              pos.symbol,
+              pos.side,
+              oppSideName,
+              revRatio,
+              pos.currentPrice,
+              pos.avgEntryPrice,
+              pos.unrealizedPnl || 0,
+              pos.pnlPct || 0,
+              posDriver === 'SMART_TRADER' ? 'Smart Trader' : isDual ? 'Dual Confluence' : 'Paus'
+            );
+          }
+        } else if (isAligned) {
+          // Reset jika aliran kembali searah dengan posisi
+          pos.lastReversalNotifiedSide = undefined;
         }
       } catch (err: any) {
         // Silent fail untuk analisa background

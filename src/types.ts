@@ -105,8 +105,9 @@ export interface BotConfig {
     notifyOnNewOrder?: boolean;
     notifyOnLayerFill?: boolean;
     notifyOnClose?: boolean;
-      notifyOnEmergency?: boolean;
-      notifyOnAutoBlacklist?: boolean;
+    notifyOnEmergency?: boolean;
+    notifyOnAutoBlacklist?: boolean;
+    notifyOnReversal?: boolean;
     heartbeatIntervalHours?: number;
   };
   triggerStrategy?: 'WICK_SNIPER' | 'SMART_MONEY' | 'HYBRID';
@@ -336,6 +337,7 @@ export interface ActivePosition {
   bepTriggerPrice?: number;
   isAutoBepDone?: boolean;
   entryReason?: string;
+  lastReversalNotifiedSide?: 'LONG' | 'SHORT';
 }
 
 export interface SmartMoneyFlowStatus {
