@@ -3153,6 +3153,7 @@ function populateSettingsForm(cfg) {
   const smCheckbox = document.getElementById('cfg-sm-enabled');
   if (smCheckbox) smCheckbox.checked = smCfg.enabled !== false;
   setVal('cfg-sm-direction', smCfg.direction || 'BOTH');
+  setVal('cfg-sm-signal-driver', smCfg.signalDriver || 'SMART_TRADER');
   setVal('cfg-sm-period', smCfg.period || '5m');
   setVal('cfg-sm-thresh-short', Math.round((smCfg.thresholdShortRatio || 0.60) * 100));
   setVal('cfg-sm-thresh-long', Math.round((smCfg.thresholdLongRatio || 0.60) * 100));
@@ -3203,11 +3204,12 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-atr-tp-mult', smCfg.atrTpMultiplier ?? 1.8);
   const smAutoBepCb = document.getElementById('cfg-sm-auto-bep');
   if (smAutoBepCb) smAutoBepCb.checked = smCfg.autoBepEnabled !== false;
-  setVal('cfg-sm-atr-bep-mult', smCfg.atrBepTriggerMultiplier ?? 1.0);
+  setVal('cfg-sm-atr-bep-mult', smCfg.atrBepTriggerMultiplier ?? 0.6);
   setVal('cfg-sm-auto-bep-buffer-pct', smCfg.autoBepBufferPct ?? 0.3);
   const smSmartTraderCb = document.getElementById('cfg-sm-smart-trader-filter');
   if (smSmartTraderCb) smSmartTraderCb.checked = smCfg.smartTraderFilterEnabled !== false;
-  setVal('cfg-sm-smart-trader-min-ratio', smCfg.smartTraderMinRatio ?? 50);
+  setVal('cfg-sm-smart-trader-min-ratio', smCfg.smartTraderMinRatio ?? 30);
+  setVal('cfg-sm-min-whale-ratio', smCfg.minWhaleRatio ?? 30);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3493,6 +3495,7 @@ function getSettingsFormData() {
       ...(currentConfig?.smartMoney || {}),
       enabled: !!document.getElementById('cfg-sm-enabled')?.checked,
       direction: getVal('cfg-sm-direction', 'BOTH'),
+      signalDriver: getVal('cfg-sm-signal-driver', 'SMART_TRADER'),
       period: getVal('cfg-sm-period', '5m'),
       thresholdShortRatio: (parseFloat(getVal('cfg-sm-thresh-short', '60')) || 60) / 100,
       thresholdLongRatio: (parseFloat(getVal('cfg-sm-thresh-long', '60')) || 60) / 100,
@@ -3532,10 +3535,11 @@ function getSettingsFormData() {
       atrSlMultiplier: parseFloat(getVal('cfg-sm-atr-sl-mult', '1.2')) || 1.2,
       atrTpMultiplier: parseFloat(getVal('cfg-sm-atr-tp-mult', '1.8')) || 1.8,
       autoBepEnabled: !!document.getElementById('cfg-sm-auto-bep')?.checked,
-      atrBepTriggerMultiplier: parseFloat(getVal('cfg-sm-atr-bep-mult', '1.0')) || 1.0,
+      atrBepTriggerMultiplier: parseFloat(getVal('cfg-sm-atr-bep-mult', '0.6')) || 0.6,
       autoBepBufferPct: parseFloat(getVal('cfg-sm-auto-bep-buffer-pct', '0.3')) || 0.3,
       smartTraderFilterEnabled: !!document.getElementById('cfg-sm-smart-trader-filter')?.checked,
-      smartTraderMinRatio: parseFloat(getVal('cfg-sm-smart-trader-min-ratio', '50')) || 50,
+      smartTraderMinRatio: parseFloat(getVal('cfg-sm-smart-trader-min-ratio', '30')) || 30,
+      minWhaleRatio: parseFloat(getVal('cfg-sm-min-whale-ratio', '30')) || 30,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,

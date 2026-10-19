@@ -205,56 +205,107 @@ export class SmartMoneyScanner {
       let reason = '';
       let smartTraderAligned = true;
 
-      const rawMinSmart = this.config.smartTraderMinRatio ?? 50;
+      const driver = this.config.signalDriver || 'SMART_TRADER';
+      const rawMinSmart = this.config.smartTraderMinRatio ?? 30;
       const minSmartRatio = rawMinSmart > 1 ? rawMinSmart / 100 : rawMinSmart;
+      const rawMinWhale = this.config.minWhaleRatio ?? 30;
+      const minWhaleRatio = rawMinWhale > 1 ? rawMinWhale / 100 : rawMinWhale;
       const isSmartFilterOn = this.config.smartTraderFilterEnabled !== false;
 
-      // Deteksi Sinyal SHORT: Whale Short >= threshold (misal 60%)
-      if (
-        (this.config.direction === 'BOTH' || this.config.direction === 'SHORT_ONLY') &&
-        metrics.whaleShortRatio >= thresholdShort
-      ) {
-        const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
-        const smartShort = metrics.smartTraderShortRatio ?? 0.5;
-        const smartLong = metrics.smartTraderLongRatio ?? 0.5;
-        smartTraderAligned = smartShort >= minSmartRatio;
+      const smartShort = metrics.smartTraderShortRatio ?? 0.5;
+      const smartLong = metrics.smartTraderLongRatio ?? 0.5;
+      const canShort = this.config.direction === 'BOTH' || this.config.direction === 'SHORT_ONLY';
+      const canLong = this.config.direction === 'BOTH' || this.config.direction === 'LONG_ONLY';
 
-        if (isSmartFilterOn && !smartTraderAligned) {
-          logger.log(
-            'INFO',
-            `🧠 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% tapi Smart Trader didominasi Long ${(smartLong * 100).toFixed(1)}% (Short hanya ${(smartShort * 100).toFixed(1)}% < min ${(minSmartRatio * 100).toFixed(0)}%). Divergent / Rawan Squeeze.`
-          );
-        } else if (isRetailTrapped) {
-          detectedSide = 'SHORT';
-          const smartTag = metrics.smartTraderShortRatio !== undefined
-            ? ` | Smart Trader Short ${(smartShort * 100).toFixed(1)}%`
-            : '';
-          reason = `Whale Short ${(metrics.whaleShortRatio * 100).toFixed(1)}%${smartTag} | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+      if (driver === 'SMART_TRADER') {
+        // MODE 1: SMART TRADER DRIVEN (Default & Rekomendasi)
+        // Mengikuti arah Top 20% Akun Trader Profit Binance (murni spekulasi cuan, bebas hedging spot paus)
+        if (canShort && smartShort >= thresholdShort) {
+          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
+          const whaleAligned = metrics.whaleShortRatio >= minWhaleRatio;
+
+          if (!whaleAligned) {
+            logger.log(
+              'INFO',
+              `🧠 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Smart Trader Short ${(smartShort * 100).toFixed(1)}% tapi Paus didominasi Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% (Short hanya ${(metrics.whaleShortRatio * 100).toFixed(1)}% < min ${(minWhaleRatio * 100).toFixed(0)}%). Paus terlalu ekstrem berlawanan.`
+            );
+          } else if (isRetailTrapped) {
+            detectedSide = 'SHORT';
+            smartTraderAligned = true;
+            reason = `Smart Trader Short ${(smartShort * 100).toFixed(1)}% | Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+          }
         }
-      }
 
-      // Deteksi Sinyal LONG: Whale Long >= threshold (misal 60%)
-      if (
-        !detectedSide &&
-        (this.config.direction === 'BOTH' || this.config.direction === 'LONG_ONLY') &&
-        metrics.whaleLongRatio >= thresholdLong
-      ) {
-        const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
-        const smartLong = metrics.smartTraderLongRatio ?? 0.5;
-        const smartShort = metrics.smartTraderShortRatio ?? 0.5;
-        smartTraderAligned = smartLong >= minSmartRatio;
+        if (!detectedSide && canLong && smartLong >= thresholdLong) {
+          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
+          const whaleAligned = metrics.whaleLongRatio >= minWhaleRatio;
 
-        if (isSmartFilterOn && !smartTraderAligned) {
-          logger.log(
-            'INFO',
-            `🧠 [SMART MONEY SKIP] ${symbol} LONG dilewati: Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% tapi Smart Trader didominasi Short ${(smartShort * 100).toFixed(1)}% (Long hanya ${(smartLong * 100).toFixed(1)}% < min ${(minSmartRatio * 100).toFixed(0)}%). Divergent / Rawan Dump.`
-          );
-        } else if (isRetailTrapped) {
-          detectedSide = 'LONG';
-          const smartTag = metrics.smartTraderLongRatio !== undefined
-            ? ` | Smart Trader Long ${(smartLong * 100).toFixed(1)}%`
-            : '';
-          reason = `Whale Long ${(metrics.whaleLongRatio * 100).toFixed(1)}%${smartTag} | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          if (!whaleAligned) {
+            logger.log(
+              'INFO',
+              `🧠 [SMART MONEY SKIP] ${symbol} LONG dilewati: Smart Trader Long ${(smartLong * 100).toFixed(1)}% tapi Paus didominasi Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% (Long hanya ${(metrics.whaleLongRatio * 100).toFixed(1)}% < min ${(minWhaleRatio * 100).toFixed(0)}%). Paus terlalu ekstrem berlawanan.`
+            );
+          } else if (isRetailTrapped) {
+            detectedSide = 'LONG';
+            smartTraderAligned = true;
+            reason = `Smart Trader Long ${(smartLong * 100).toFixed(1)}% | Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          }
+        }
+      } else if (driver === 'DUAL_CONFLUENCE') {
+        // MODE 2: DUAL CONFLUENCE (Wajib Paus dan Smart Trader searah di atas threshold)
+        if (canShort && metrics.whaleShortRatio >= thresholdShort && smartShort >= thresholdShort) {
+          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
+          if (isRetailTrapped) {
+            detectedSide = 'SHORT';
+            smartTraderAligned = true;
+            reason = `Dual Confluence Short: Paus ${(metrics.whaleShortRatio * 100).toFixed(1)}% + Smart Trader ${(smartShort * 100).toFixed(1)}% | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+          }
+        }
+
+        if (!detectedSide && canLong && metrics.whaleLongRatio >= thresholdLong && smartLong >= thresholdLong) {
+          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
+          if (isRetailTrapped) {
+            detectedSide = 'LONG';
+            smartTraderAligned = true;
+            reason = `Dual Confluence Long: Paus ${(metrics.whaleLongRatio * 100).toFixed(1)}% + Smart Trader ${(smartLong * 100).toFixed(1)}% | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          }
+        }
+      } else {
+        // MODE 3: WHALE DRIVEN (Mode Lama)
+        if (canShort && metrics.whaleShortRatio >= thresholdShort) {
+          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
+          smartTraderAligned = smartShort >= minSmartRatio;
+
+          if (isSmartFilterOn && !smartTraderAligned) {
+            logger.log(
+              'INFO',
+              `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% tapi Smart Trader didominasi Long ${(smartLong * 100).toFixed(1)}% (Short hanya ${(smartShort * 100).toFixed(1)}% < min ${(minSmartRatio * 100).toFixed(0)}%). Divergent / Rawan Squeeze.`
+            );
+          } else if (isRetailTrapped) {
+            detectedSide = 'SHORT';
+            const smartTag = metrics.smartTraderShortRatio !== undefined
+              ? ` | Smart Trader Short ${(smartShort * 100).toFixed(1)}%`
+              : '';
+            reason = `Whale Short ${(metrics.whaleShortRatio * 100).toFixed(1)}%${smartTag} | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+          }
+        }
+
+        if (!detectedSide && canLong && metrics.whaleLongRatio >= thresholdLong) {
+          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
+          smartTraderAligned = smartLong >= minSmartRatio;
+
+          if (isSmartFilterOn && !smartTraderAligned) {
+            logger.log(
+              'INFO',
+              `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% tapi Smart Trader didominasi Short ${(smartShort * 100).toFixed(1)}% (Long hanya ${(smartLong * 100).toFixed(1)}% < min ${(minSmartRatio * 100).toFixed(0)}%). Divergent / Rawan Dump.`
+            );
+          } else if (isRetailTrapped) {
+            detectedSide = 'LONG';
+            const smartTag = metrics.smartTraderLongRatio !== undefined
+              ? ` | Smart Trader Long ${(smartLong * 100).toFixed(1)}%`
+              : '';
+            reason = `Whale Long ${(metrics.whaleLongRatio * 100).toFixed(1)}%${smartTag} | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          }
         }
       }
 
@@ -274,7 +325,8 @@ export class SmartMoneyScanner {
           whaleTotalWhales = metrics.shortWhales;
 
           // 1. Cek Filter Kesehatan Paus (% Meraih Laba)
-          if (this.config.whaleHealthFilterEnabled !== false && whaleWinratePct !== undefined) {
+          const checkWhaleHealthShort = driver !== 'SMART_TRADER' || metrics.whaleShortRatio >= 0.50;
+          if (this.config.whaleHealthFilterEnabled !== false && checkWhaleHealthShort && whaleWinratePct !== undefined) {
             const minWinrate = this.config.minWhaleWinratePct ?? 50;
             if (whaleWinratePct < minWinrate) {
               logger.log(
@@ -328,7 +380,8 @@ export class SmartMoneyScanner {
           whaleTotalWhales = metrics.longWhales;
 
           // 1. Cek Filter Kesehatan Paus (% Meraih Laba)
-          if (this.config.whaleHealthFilterEnabled !== false && whaleWinratePct !== undefined) {
+          const checkWhaleHealthLong = driver !== 'SMART_TRADER' || metrics.whaleLongRatio >= 0.50;
+          if (this.config.whaleHealthFilterEnabled !== false && checkWhaleHealthLong && whaleWinratePct !== undefined) {
             const minWinrate = this.config.minWhaleWinratePct ?? 50;
             if (whaleWinratePct < minWinrate) {
               logger.log(
@@ -428,6 +481,7 @@ export class SmartMoneyScanner {
           id: signalId,
           symbol,
           side: detectedSide,
+          signalDriver: driver,
           currentPrice,
           triggerPrice: currentPrice,
           whaleLongRatio: metrics.whaleLongRatio,

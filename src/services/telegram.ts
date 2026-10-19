@@ -159,7 +159,9 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       const whaleWin = smFlow.whaleWinratePct ?? snap.whaleWinratePct;
       const distSign = (whaleDist || 0) >= 0 ? '+' : '';
 
-      triggerLine = `🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b>`;
+      const driver = snap.signalDriver || 'SMART_TRADER';
+      const driverLabel = driver === 'SMART_TRADER' ? '🧠 Smart Trader Driven' : driver === 'DUAL_CONFLUENCE' ? '🎯 Dual Confluence' : '🐋 Whale Driven';
+      triggerLine = `🐋 <b>Strategi:</b> <b>Smart Money Flow Tracker</b> [${driverLabel}]`;
       if (wLong > 0 || wShort > 0) {
         triggerLine += `\n🌊 <b>Dominasi Paus:</b> <b>${wLong.toFixed(0)}% L / ${wShort.toFixed(0)}% S</b> (Ritel: ${rLong.toFixed(0)}% L / ${rShort.toFixed(0)}% S)`;
       }

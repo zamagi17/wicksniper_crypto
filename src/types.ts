@@ -165,6 +165,8 @@ export interface SmartMoneyConfig {
   autoBepEnabled?: boolean;    // Auto pindah SL ke BEP (impas) saat posisi mencapai target profit awal
   atrBepTriggerMultiplier?: number; // Pengali ATR untuk memicu Auto-BEP (default: 1.0x)
   autoBepBufferPct?: number;   // Buffer profit di atas/bawah entry saat Auto-BEP aktif (%, default: 0.3%)
+  signalDriver?: 'SMART_TRADER' | 'WHALE' | 'DUAL_CONFLUENCE'; // Pengemudi utama sinyal (default: 'SMART_TRADER')
+  minWhaleRatio?: number;      // Ambang minimal rasio Paus saat mode SMART_TRADER (%, default: 30%)
   smartTraderFilterEnabled?: boolean; // Filter konfluensi: Wajib searah dengan Smart Trader (Top Accounts)
   smartTraderMinRatio?: number;      // Ambang minimal rasio Smart Trader (%, default: 50%)
   entryOrderType?: 'LIMIT' | 'MARKET'; // Tipe order entry: LIMIT (Maker 0.02% murah) vs MARKET (Taker 0.05%)
@@ -175,6 +177,7 @@ export interface SmartMoneySignal {
   id: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
+  signalDriver?: 'SMART_TRADER' | 'WHALE' | 'DUAL_CONFLUENCE';
   currentPrice: number;
   triggerPrice: number;
   whaleLongRatio: number;

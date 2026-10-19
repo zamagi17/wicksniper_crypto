@@ -180,10 +180,12 @@ export class WickSniperEngine {
       atrSlMultiplier: 1.2,
       atrTpMultiplier: 1.8,
       autoBepEnabled: true,
-      atrBepTriggerMultiplier: 1.0,
+      atrBepTriggerMultiplier: 0.6,
       autoBepBufferPct: 0.3,
+      signalDriver: 'SMART_TRADER',
+      minWhaleRatio: 30,
       smartTraderFilterEnabled: true,
-      smartTraderMinRatio: 50,
+      smartTraderMinRatio: 30,
       entryOrderType: 'LIMIT', // Default LIMIT Maker (0.02% Fee)
       limitWaitSeconds: 15,
     };
@@ -5367,13 +5369,21 @@ export class WickSniperEngine {
 
       // 3. BEP Trigger Price
       let bepTrigger: number | undefined = undefined;
-      if (smCfg.autoBepEnabled !== false && atrDynamic) {
-        const bepMult = smCfg.atrBepTriggerMultiplier ?? 1.0;
-        const bepDist = atrVal * bepMult;
-        bepTrigger = parseFloat(binanceFutures.formatPrice(
-          symbol,
-          isShort ? basePrice - bepDist : basePrice + bepDist
-        ));
+      if (smCfg.autoBepEnabled !== false) {
+        if (atrDynamic) {
+          const bepMult = smCfg.atrBepTriggerMultiplier ?? 0.6;
+          const bepDist = atrVal * bepMult;
+          bepTrigger = parseFloat(binanceFutures.formatPrice(
+            symbol,
+            isShort ? basePrice - bepDist : basePrice + bepDist
+          ));
+        } else {
+          const triggerPct = (fallbackTpPct * 0.4) / 100;
+          bepTrigger = parseFloat(binanceFutures.formatPrice(
+            symbol,
+            isShort ? basePrice * (1 - triggerPct) : basePrice * (1 + triggerPct)
+          ));
+        }
       }
 
       return { tpTarget, slTarget, desc, bepTrigger };
@@ -5601,9 +5611,12 @@ export class WickSniperEngine {
         atrFilterEnabled: smCfg.atrFilterEnabled !== false,
         atrDynamicSlTpEnabled: atrDynamic,
         autoBepEnabled: smCfg.autoBepEnabled !== false,
+        atrBepTriggerMultiplier: smCfg.atrBepTriggerMultiplier ?? 0.6,
         autoBepBufferPct: smCfg.autoBepBufferPct ?? 0.3,
+        signalDriver: signal.signalDriver || smCfg.signalDriver || 'SMART_TRADER',
+        minWhaleRatio: smCfg.minWhaleRatio ?? 30,
         smartTraderFilterEnabled: smCfg.smartTraderFilterEnabled !== false,
-        smartTraderMinRatio: smCfg.smartTraderMinRatio ?? 50,
+        smartTraderMinRatio: smCfg.smartTraderMinRatio ?? 30,
         smartTraderLongRatio: signal.smartTraderLongRatio,
         smartTraderShortRatio: signal.smartTraderShortRatio,
         smartTraderAligned: signal.smartTraderAligned,
@@ -5623,6 +5636,15 @@ export class WickSniperEngine {
       },
     };
 
+    const effectiveDriver = signal.signalDriver || smCfg.signalDriver || 'SMART_TRADER';
+    let initialLabel = `🐋 Paus ${signal.side} (${((signal.side === 'LONG' ? signal.whaleLongRatio : signal.whaleShortRatio) * 100).toFixed(0)}%) • Searah`;
+    if (effectiveDriver === 'SMART_TRADER') {
+      const stSame = ((signal.side === 'LONG' ? signal.smartTraderLongRatio : signal.smartTraderShortRatio) || 0.5) * 100;
+      initialLabel = `🧠 Smart Trader ${signal.side} (${stSame.toFixed(0)}%) • Searah`;
+    } else if (effectiveDriver === 'DUAL_CONFLUENCE') {
+      initialLabel = `🎯 Dual Confluence ${signal.side} • Searah`;
+    }
+
     initialPos.smartMoneyFlowStatus = {
       whaleLongRatio: signal.whaleLongRatio,
       whaleShortRatio: signal.whaleShortRatio,
@@ -5639,7 +5661,7 @@ export class WickSniperEngine {
       smartTraderAligned: signal.smartTraderAligned,
       aligned: true,
       reversalDetected: false,
-      label: `🐋 Paus ${signal.side} (${((signal.side === 'LONG' ? signal.whaleLongRatio : signal.whaleShortRatio) * 100).toFixed(0)}%) • Searah`,
+      label: initialLabel,
       detail: `Paus: ${(signal.whaleLongRatio * 100).toFixed(0)}% L / ${(signal.whaleShortRatio * 100).toFixed(0)}% S | Ritel: ${(signal.retailLongRatio * 100).toFixed(0)}% L / ${(signal.retailShortRatio * 100).toFixed(0)}% S${signal.whaleAvgEntry ? ` | Modal Paus: $${formatCryptoPrice(signal.whaleAvgEntry)}` : ''}`,
       updatedAt: Date.now(),
     };
@@ -5704,8 +5726,21 @@ export class WickSniperEngine {
         const reversalDetected = oppSideRatio >= 0.52;
         const aligned = sameSideRatio >= 0.52;
 
+        const posDriver = pos.paramsSnapshot?.signalDriver || this.config.smartMoney?.signalDriver || 'SMART_TRADER';
         let label = '';
-        if (reversalDetected) {
+        if (posDriver === 'SMART_TRADER') {
+          const stSameRatio = isLong ? (metrics.smartTraderLongRatio ?? 0.5) : (metrics.smartTraderShortRatio ?? 0.5);
+          const stOppRatio = isLong ? (metrics.smartTraderShortRatio ?? 0.5) : (metrics.smartTraderLongRatio ?? 0.5);
+          const stReversal = stOppRatio >= 0.52;
+          const stAligned = stSameRatio >= 0.52;
+          if (stReversal) {
+            label = `⚠️ Smart Trader Berbalik: ${oppSideName} (${(stOppRatio * 100).toFixed(0)}%) • Berlawanan`;
+          } else if (stAligned) {
+            label = `🧠 Smart Trader ${sameSideName} (${(stSameRatio * 100).toFixed(0)}%) • Searah`;
+          } else {
+            label = `⚖️ Smart Trader Seimbang (${(stSameRatio * 100).toFixed(0)}% : ${(stOppRatio * 100).toFixed(0)}%)`;
+          }
+        } else if (reversalDetected) {
           label = `⚠️ Paus Berbalik: ${oppSideName} (${(oppSideRatio * 100).toFixed(0)}%) • Berlawanan`;
         } else if (aligned) {
           label = `🐋 Paus ${sameSideName} (${(sameSideRatio * 100).toFixed(0)}%) • Searah`;
