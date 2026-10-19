@@ -4360,9 +4360,9 @@ function toggleSmSmartTraderInput() {
   const cb = document.getElementById('cfg-sm-smart-trader-filter');
   const box = document.getElementById('cfg-sm-smart-trader-box');
   if (box) {
-    box.style.opacity = cb && cb.checked ? '1' : '0.4';
-    box.style.pointerEvents = cb && cb.checked ? 'auto' : 'none';
+    box.style.opacity = cb && cb.checked ? '1' : '0.45';
   }
+  updateSmDriverLabels();
 }
 window.toggleSmSmartTraderInput = toggleSmSmartTraderInput;
 
@@ -4380,6 +4380,7 @@ function updateSmDriverLabels() {
   const badgeDist = document.getElementById('badge-sm-whale-dist-status');
   const badgeHealth = document.getElementById('badge-sm-whale-health-status');
   const badgeStructSl = document.getElementById('badge-sm-structural-sl-status');
+  const isFilterChecked = document.getElementById('cfg-sm-smart-trader-filter')?.checked !== false;
 
   if (driver === 'SMART_TRADER') {
     if (lblShort) lblShort.innerHTML = '🧠 Dominasi Smart Trader Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
@@ -4400,11 +4401,18 @@ function updateSmDriverLabels() {
     if (grpWhale) {
       const lbl = grpWhale.querySelector('label');
       const hint = grpWhale.querySelector('.form-hint');
-      if (lbl) lbl.innerHTML = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
-      if (hint) hint.innerText = 'Aktif: Mencegah entry jika Paus lawan > 70% (Minimal Paus searah: 30%).';
-      grpWhale.style.opacity = '1';
       const input = grpWhale.querySelector('input');
-      if (input) input.style.pointerEvents = 'auto';
+      if (isFilterChecked) {
+        if (lbl) lbl.innerHTML = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
+        if (hint) hint.innerText = 'Aktif: Mencegah entry jika Paus lawan > 70% (Minimal Paus searah: 30%).';
+        grpWhale.style.opacity = '1';
+        if (input) input.style.pointerEvents = 'auto';
+      } else {
+        if (lbl) lbl.innerHTML = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%) <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Nonaktif</span>';
+        if (hint) hint.innerText = 'Nonaktif: Filter dimatikan, bot tidak membatasi perlawanan arah paus.';
+        grpWhale.style.opacity = '0.45';
+        if (input) input.style.pointerEvents = 'none';
+      }
     }
 
     if (badgeDist) {
@@ -4438,11 +4446,18 @@ function updateSmDriverLabels() {
     if (grpSmartTrader) {
       const lbl = grpSmartTrader.querySelector('label');
       const hint = grpSmartTrader.querySelector('.form-hint');
-      if (lbl) lbl.innerHTML = '🧠 Min. % Rasio Searah Smart Trader / Guard (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
-      if (hint) hint.innerText = 'Aktif: Cegah entry jika Smart Trader melawan arah posisi Paus.';
-      grpSmartTrader.style.opacity = '1';
       const input = grpSmartTrader.querySelector('input');
-      if (input) input.style.pointerEvents = 'auto';
+      if (isFilterChecked) {
+        if (lbl) lbl.innerHTML = '🧠 Min. % Rasio Searah Smart Trader / Guard (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
+        if (hint) hint.innerText = 'Aktif: Cegah entry jika Smart Trader melawan arah posisi Paus.';
+        grpSmartTrader.style.opacity = '1';
+        if (input) input.style.pointerEvents = 'auto';
+      } else {
+        if (lbl) lbl.innerHTML = '🧠 Min. % Rasio Searah Smart Trader / Guard (%) <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Nonaktif</span>';
+        if (hint) hint.innerText = 'Nonaktif: Filter dimatikan.';
+        grpSmartTrader.style.opacity = '0.45';
+        if (input) input.style.pointerEvents = 'none';
+      }
     }
     if (grpWhale) {
       const lbl = grpWhale.querySelector('label');
