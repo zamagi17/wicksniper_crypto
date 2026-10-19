@@ -324,6 +324,7 @@ export interface ActivePosition {
   atrPct?: number;
   bepTriggerPrice?: number;
   isAutoBepDone?: boolean;
+  entryReason?: string;
 }
 
 export interface SmartMoneyFlowStatus {
@@ -398,6 +399,7 @@ export interface ClosedTrade {
   postExit30m?: PostExitSnapshot;
   smartMoneyFlowStatus?: SmartMoneyFlowStatus;
   slDescription?: string;
+  entryReason?: string;
 }
 
 export interface EngineStatus {

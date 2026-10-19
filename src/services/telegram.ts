@@ -172,6 +172,10 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       if (pos.atrPct) {
         triggerLine += `\n📊 <b>ATR:</b> <b>${pos.atrPct.toFixed(2)}%</b> ($${formatCryptoPrice(pos.atr || 0)})`;
       }
+      const entryReasonText = pos.entryReason || snap.entryReason || snap.signalReason;
+      if (entryReasonText) {
+        triggerLine += `\n🎯 <b>Alasan Masuk:</b> <code>${entryReasonText}</code>`;
+      }
     } else {
       triggerLine = `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     }

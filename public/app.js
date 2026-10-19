@@ -585,6 +585,111 @@ function formatDurationHms(totalSeconds) {
   return `${h} jam ${m} menit ${s} detik`;
 }
 
+function getPosEntryReason(pos) {
+  if (!pos) return '';
+  if (pos.entryReason) return pos.entryReason;
+  if (pos.paramsSnapshot?.entryReason) return pos.paramsSnapshot.entryReason;
+  if (pos.paramsSnapshot?.signalReason) return pos.paramsSnapshot.signalReason;
+
+  if (pos.strategyType === 'SMART_MONEY' || pos.paramsSnapshot?.strategy === 'SMART_MONEY' || pos.smartMoneyFlowStatus) {
+    const snap = pos.paramsSnapshot || {};
+    const flow = pos.smartMoneyFlowStatus || {};
+    const isShort = pos.side === 'SHORT';
+    const parts = [];
+
+    const wShort = snap.whaleShortRatio ?? flow.whaleShortRatio;
+    const wLong = snap.whaleLongRatio ?? flow.whaleLongRatio;
+    const rShort = snap.retailShortRatio ?? flow.retailShortRatio;
+    const rLong = snap.retailLongRatio ?? flow.retailLongRatio;
+
+    if (isShort && wShort !== undefined) {
+      parts.push(`Whale Short ${(wShort * 100).toFixed(1)}%`);
+      if (rLong !== undefined) parts.push(`Retail Long ${(rLong * 100).toFixed(1)}%`);
+    } else if (!isShort && wLong !== undefined) {
+      parts.push(`Whale Long ${(wLong * 100).toFixed(1)}%`);
+      if (rShort !== undefined) parts.push(`Retail Short ${(rShort * 100).toFixed(1)}%`);
+    }
+
+    const modalPaus = snap.whaleAvgEntry ?? flow.whaleAvgEntry;
+    const distPct = snap.whaleDistancePct ?? flow.whaleDistancePct;
+    if (modalPaus && modalPaus > 0) {
+      const distStr = distPct !== undefined ? ` (Jarak: ${distPct > 0 ? '+' : ''}${distPct.toFixed(1)}%)` : '';
+      parts.push(`Modal Paus: $${formatCryptoPrice(modalPaus)}${distStr}`);
+    }
+
+    const winrate = snap.whaleWinratePct ?? flow.whaleWinratePct;
+    const profitWhales = snap.whaleProfitWhales ?? flow.whaleProfitWhales;
+    const totalWhales = snap.whaleTotalWhales ?? flow.whaleTotalWhales;
+    if (winrate !== undefined) {
+      parts.push(`Laba: ${winrate.toFixed(0)}%${totalWhales ? ` (${profitWhales ?? 0}/${totalWhales})` : ''}`);
+    }
+
+    const atrVal = pos.atr ?? snap.atr;
+    const atrPctVal = pos.atrPct ?? snap.atrPct;
+    if (atrPctVal !== undefined) {
+      parts.push(`ATR: ${atrPctVal.toFixed(2)}%${atrVal ? ` ($${formatCryptoPrice(atrVal)})` : ''}`);
+    }
+
+    if (parts.length > 0) {
+      return parts.join(' | ');
+    }
+    return 'Smart Money Flow Alignment';
+  }
+  return '';
+}
+
+function formatSmartMoneyReasonChips(rawReason) {
+  if (!rawReason) return '';
+  const parts = String(rawReason).split(' | ').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return escapeHtml(rawReason);
+
+  return parts.map((part) => {
+    let icon = '📌';
+    let bg = 'rgba(255, 255, 255, 0.06)';
+    let border = 'rgba(255, 255, 255, 0.15)';
+    let color = '#f1f2f6';
+
+    if (part.includes('Whale Short')) {
+      icon = '🐋';
+      bg = 'rgba(255, 69, 58, 0.14)';
+      border = 'rgba(255, 69, 58, 0.35)';
+      color = '#ff453a';
+    } else if (part.includes('Whale Long')) {
+      icon = '🐋';
+      bg = 'rgba(48, 209, 88, 0.14)';
+      border = 'rgba(48, 209, 88, 0.35)';
+      color = '#30d158';
+    } else if (part.includes('Retail')) {
+      icon = '👥';
+      bg = 'rgba(255, 159, 10, 0.12)';
+      border = 'rgba(255, 159, 10, 0.32)';
+      color = '#ff9f0a';
+    } else if (part.includes('Modal Paus')) {
+      icon = '💼';
+      bg = 'rgba(0, 240, 255, 0.12)';
+      border = 'rgba(0, 240, 255, 0.32)';
+      color = '#00f0ff';
+    } else if (part.includes('Laba')) {
+      icon = '🩺';
+      bg = 'rgba(48, 209, 88, 0.12)';
+      border = 'rgba(48, 209, 88, 0.32)';
+      color = '#30d158';
+    } else if (part.includes('RSI')) {
+      icon = '📊';
+      bg = 'rgba(191, 90, 242, 0.12)';
+      border = 'rgba(191, 90, 242, 0.32)';
+      color = '#bf5af2';
+    } else if (part.includes('ATR')) {
+      icon = '⚡';
+      bg = 'rgba(255, 214, 10, 0.12)';
+      border = 'rgba(255, 214, 10, 0.32)';
+      color = '#ffd60a';
+    }
+
+    return `<span class="sm-reason-chip" style="background: ${bg}; border: 1px solid ${border}; color: ${color}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; line-height: 1.4;">${icon} ${escapeHtml(part)}</span>`;
+  }).join(' ');
+}
+
 function renderStatus(status) {
   currentStatus = status;
 
@@ -955,6 +1060,23 @@ function renderActivePositions(positions) {
         }
       }
 
+      let smEntryReasonBannerHtml = '';
+      if (isSm) {
+        const reasonText = getPosEntryReason(pos);
+        if (reasonText) {
+          smEntryReasonBannerHtml = `
+            <div class="sm-entry-reason-banner">
+              <span class="sm-reason-title">
+                🎯 <span>Alasan Entry:</span>
+              </span>
+              <div class="sm-reason-chips-wrap">
+                ${formatSmartMoneyReasonChips(reasonText)}
+              </div>
+            </div>
+          `;
+        }
+      }
+
       return `
         <div class="position-card">
           <div class="pos-header">
@@ -983,6 +1105,7 @@ function renderActivePositions(positions) {
 
           ${tpBannerHtml}
           ${smReversalBannerHtml}
+          ${smEntryReasonBannerHtml}
 
           <div class="pos-metrics">
             <div class="pos-metric-item">
@@ -2316,7 +2439,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           const retailLong = snap?.retailLongRatio ?? sm?.retailLongRatio;
           const retailShort = snap?.retailShortRatio ?? sm?.retailShortRatio;
           const slDesc = snap?.slDescription || t.slDescription;
-          const signalReason = snap?.signalReason;
+          const signalReason = snap?.signalReason || snap?.entryReason || t.entryReason || getPosEntryReason(t);
 
           const sameSideRatio = isTradeLong ? whaleLongRatio : whaleShortRatio;
           const oppSideRatio = isTradeLong ? whaleShortRatio : whaleLongRatio;
@@ -2373,7 +2496,9 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               ${signalReason ? `
               <div class="td-kpi-card" style="grid-column: span 2;">
                 <div class="td-kpi-label">🎯 Log Pemicu Entry</div>
-                <div class="td-kpi-val" style="font-size: 11.5px; color: var(--text-muted); font-weight: 500;">${escapeHtml(signalReason)}</div>
+                <div class="td-kpi-val" style="font-size: 11.5px; margin-top: 4px;">
+                  <div class="sm-reason-chips-wrap">${formatSmartMoneyReasonChips(signalReason)}</div>
+                </div>
               </div>` : ''}
             </div>
           `;

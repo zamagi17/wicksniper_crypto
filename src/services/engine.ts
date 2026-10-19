@@ -3625,6 +3625,7 @@ export class WickSniperEngine {
         strategyType: pos.strategyType || (pos.smartMoneyFlowStatus ? 'SMART_MONEY' : 'WICK_SNIPER'),
         smartMoneyFlowStatus: pos.smartMoneyFlowStatus,
         slDescription: pos.slDescription,
+        entryReason: pos.entryReason || pos.paramsSnapshot?.entryReason || pos.paramsSnapshot?.signalReason,
         paramsSnapshot: {
           ...(pos.paramsSnapshot || this.captureParamsSnapshot()),
           ...(pos.smartMoneyFlowStatus ? { smartMoneyFlowStatus: pos.smartMoneyFlowStatus } : {}),
@@ -4386,7 +4387,11 @@ export class WickSniperEngine {
             targetTpPrice,
             hardSlPrice,
             status: 'SNIPING',
-            paramsSnapshot: this.captureParamsSnapshot(),
+            entryReason: isSm ? 'Posisi Binance Live Diadopsi Otomatis' : undefined,
+            paramsSnapshot: {
+              ...this.captureParamsSnapshot(),
+              ...(isSm ? { entryReason: 'Posisi Binance Live Diadopsi Otomatis', signalReason: 'Posisi Binance Live Diadopsi Otomatis' } : {}),
+            },
           };
 
           if (this.config.exit.atrDynamicSlTpEnabled) {
@@ -5548,8 +5553,10 @@ export class WickSniperEngine {
       atrPct: signal.atrPct,
       bepTriggerPrice: effectiveBepTrigger,
       isAutoBepDone: false,
+      entryReason: signal.reason,
       paramsSnapshot: {
         strategy: 'SMART_MONEY',
+        entryReason: signal.reason,
         side: signal.side,
         entryLayers: numLayers,
         layerSpacingPct: spacingPct,
