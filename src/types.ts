@@ -164,6 +164,7 @@ export interface SmartMoneyConfig {
   atrTpMultiplier?: number;    // Pengali ATR untuk TP (default: 1.8x)
   autoBepEnabled?: boolean;    // Auto pindah SL ke BEP (impas) saat posisi mencapai target profit awal
   atrBepTriggerMultiplier?: number; // Pengali ATR untuk memicu Auto-BEP (default: 1.0x)
+  autoBepBufferPct?: number;   // Buffer profit di atas/bawah entry saat Auto-BEP aktif (%, default: 0.3%)
   entryOrderType?: 'LIMIT' | 'MARKET'; // Tipe order entry: LIMIT (Maker 0.02% murah) vs MARKET (Taker 0.05%)
   limitWaitSeconds?: number;   // Batas waktu tunggu fill order limit sebelum dibatalkan (default: 15 detik)
 }

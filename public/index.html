@@ -763,10 +763,17 @@
                     <input type="checkbox" id="cfg-sm-auto-bep" style="accent-color: #38bdf8;" checked onchange="toggleSmAutoBepInput()">
                     Auto Geser SL ke Impas (BEP)
                   </label>
-                  <div id="cfg-sm-auto-bep-row" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-                    <small style="font-size: 10px; color: var(--text-muted);">Trigger Saat Cuan Menyentuh:</small>
-                    <input type="number" id="cfg-sm-atr-bep-mult" min="0.5" max="3.0" step="0.1" class="form-control" placeholder="1.0" style="padding: 3px 6px; width: 70px;">
-                    <small style="font-size: 10px; color: var(--text-muted);">x ATR (Risk-Free)</small>
+                  <div id="cfg-sm-auto-bep-row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                      <small style="font-size: 10px; color: var(--text-muted);">Trigger:</small>
+                      <input type="number" id="cfg-sm-atr-bep-mult" min="0.5" max="3.0" step="0.1" class="form-control" placeholder="1.0" style="padding: 3px 6px; width: 55px;">
+                      <small style="font-size: 10px; color: var(--text-muted);">x ATR</small>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                      <small style="font-size: 10px; color: var(--text-muted);">Buffer:</small>
+                      <input type="number" id="cfg-sm-auto-bep-buffer-pct" min="0" max="3.0" step="0.05" class="form-control" placeholder="0.3" style="padding: 3px 6px; width: 55px;">
+                      <small style="font-size: 10px; color: var(--text-muted);">% (Kunci Cuan)</small>
+                    </div>
                   </div>
                 </div>
               </div>

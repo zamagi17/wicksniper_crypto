@@ -279,19 +279,20 @@ ${slLine}
   /**
    * Notifikasi Smart Money Auto-BEP Shift
    */
-  public async notifyAutoBep(symbol: string, entryPrice: number, bepPrice: number, floatingPnl: number) {
+  public async notifyAutoBep(symbol: string, entryPrice: number, bepPrice: number, floatingPnl: number, bufferPct?: number) {
     if (this.config.notifyOnLayerFill === false && this.config.notifyOnClose === false) return;
     const pnlSign = floatingPnl >= 0 ? '+' : '';
+    const bufferTag = bufferPct !== undefined ? ` (+${bufferPct}% Buffer)` : '';
     const msg =
 `🛡️ <b>[SMART MONEY AUTO-BEP AKTIF]</b> 🔒
 ━━━━━━━━━━━━━━━━━━━━
 🪙 <b>Simbol:</b> <code>#${symbol}</code>
-🎯 <b>Status:</b> <b>Risk-Free Trade (SL Dipindah ke BEP)</b>
+🎯 <b>Status:</b> <b>Risk-Free Trade (SL Dipindah ke BEP${bufferTag})</b>
 💵 <b>Entry Rata-rata:</b> <code>$${formatCryptoPrice(entryPrice)}</code>
 🛡️ <b>SL Baru (Impas):</b> <code>$${formatCryptoPrice(bepPrice)}</code>
 💰 <b>Floating Cuan:</b> <b>${pnlSign}$${floatingPnl.toFixed(2)} USDT</b>
 ━━━━━━━━━━━━━━━━━━━━
-Posisi telah diamankan dari risiko pembalikan arah!`;
+Posisi telah diamankan dari risiko pembalikan arah dengan buffer pengaman profit!`;
     await this.sendMessage(msg);
   }
 

@@ -181,6 +181,7 @@ export class WickSniperEngine {
       atrTpMultiplier: 1.8,
       autoBepEnabled: true,
       atrBepTriggerMultiplier: 1.0,
+      autoBepBufferPct: 0.3,
       entryOrderType: 'LIMIT', // Default LIMIT Maker (0.02% Fee)
       limitWaitSeconds: 15,
     };
@@ -1823,7 +1824,7 @@ export class WickSniperEngine {
           : currentPrice <= pos.bepTriggerPrice;
         if (bepHit) {
           pos.isAutoBepDone = true;
-          const bepBufferPct = 0.08;
+          const bepBufferPct = this.config.smartMoney?.autoBepBufferPct ?? 0.3;
           pos.hardSlPrice = parseFloat(
             binanceFutures.formatPrice(
               pos.symbol,
@@ -1832,13 +1833,14 @@ export class WickSniperEngine {
                 : pos.avgEntryPrice * (1 - bepBufferPct / 100)
             )
           );
-          pos.slDescription = `Auto-BEP Impas (Risk-Free @ $${formatCryptoPrice(pos.hardSlPrice)})`;
+          pos.breakEvenPrice = pos.hardSlPrice;
+          pos.slDescription = `Auto-BEP Impas (Risk-Free +${bepBufferPct}% @ $${formatCryptoPrice(pos.hardSlPrice)})`;
           logger.log(
             'SUCCESS',
-            `🛡️ [SMART MONEY AUTO-BEP] ${pos.symbol}: Floating profit menyentuh trigger BEP $${formatCryptoPrice(pos.bepTriggerPrice)}! Hard SL digeser ke titik impas $${formatCryptoPrice(pos.hardSlPrice)} (Risk-Free Trade).`,
+            `🛡️ [SMART MONEY AUTO-BEP] ${pos.symbol}: Floating profit menyentuh trigger BEP $${formatCryptoPrice(pos.bepTriggerPrice)}! Hard SL digeser ke titik impas + buffer ${bepBufferPct}% di $${formatCryptoPrice(pos.hardSlPrice)} (Risk-Free Trade).`,
             pos.symbol
           );
-          telegram.notifyAutoBep(pos.symbol, pos.avgEntryPrice, pos.hardSlPrice, pos.unrealizedPnl);
+          telegram.notifyAutoBep(pos.symbol, pos.avgEntryPrice, pos.hardSlPrice, pos.unrealizedPnl, bepBufferPct);
           db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
         }
       }
@@ -1848,14 +1850,26 @@ export class WickSniperEngine {
         pos.highestPrice = Math.max(pos.highestPrice || currentPrice, currentPrice);
         const slAgeMs = Date.now() - pos.openedAt;
 
-        // A. Hard Stop Loss untuk LONG
-        if (currentPrice <= pos.hardSlPrice && slAgeMs >= 3000) {
-          logger.log(
-            'WARN',
-            `🛑 [LONG HARD SL TRIGGERED] ${pos.symbol}: Harga $${formatCryptoPrice(currentPrice)} <= Hard SL $${formatCryptoPrice(pos.hardSlPrice)} (Avg Entry: $${formatCryptoPrice(pos.avgEntryPrice)}, SL%: ${(((pos.hardSlPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2)}%)`,
-            pos.symbol
-          );
-          this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
+        // A. Hard Stop Loss & Auto-BEP untuk LONG
+        if (currentPrice <= pos.hardSlPrice && (pos.isAutoBepDone || slAgeMs >= 3000)) {
+          if (pos.isAutoBepDone) {
+            const bepBufferPct = pos.strategyType === 'SMART_MONEY'
+              ? (this.config.smartMoney?.autoBepBufferPct ?? 0.3)
+              : 0.08;
+            logger.log(
+              'INFO',
+              `🛡️ [BEP DEFENSE TRIGGERED] ${pos.symbol}: Harga kembali ke BEP $${formatCryptoPrice(pos.hardSlPrice)}. Posisi LONG ditutup impas (+buffer ${bepBufferPct}%)!`,
+              pos.symbol
+            );
+            this.closePosition(pos, 'BEP_DEFENSE', currentPrice);
+          } else {
+            logger.log(
+              'WARN',
+              `🛑 [LONG HARD SL TRIGGERED] ${pos.symbol}: Harga $${formatCryptoPrice(currentPrice)} <= Hard SL $${formatCryptoPrice(pos.hardSlPrice)} (Avg Entry: $${formatCryptoPrice(pos.avgEntryPrice)}, SL%: ${(((pos.hardSlPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2)}%)`,
+              pos.symbol
+            );
+            this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
+          }
           continue;
         }
 
@@ -1930,11 +1944,14 @@ export class WickSniperEngine {
       // A. HARD STOP LOSS (Proteksi Runaway Pump)
       // Guard: Minimal 5 detik sejak posisi dibuka untuk menghindari false trigger akibat volatilitas awal
       const slAgeMs = Date.now() - pos.openedAt;
-      if (currentPrice >= pos.hardSlPrice && (pos.partialTpDone || slAgeMs >= 5000)) {
-        if (pos.partialTpDone) {
+      if (currentPrice >= pos.hardSlPrice && (pos.partialTpDone || pos.isAutoBepDone || slAgeMs >= 5000)) {
+        if (pos.partialTpDone || pos.isAutoBepDone) {
+          const bepBufferPct = pos.strategyType === 'SMART_MONEY'
+            ? (this.config.smartMoney?.autoBepBufferPct ?? 0.3)
+            : (this.config.exit.bepBufferPct ?? 0.08);
           logger.log(
             'INFO',
-            `🛡️ [BEP PROTECTION TRIGGERED] ${pos.symbol}: Harga kembali ke BEP $${pos.hardSlPrice.toFixed(6)}. Sisa posisi ditutup impas (0% rugi) setelah mengamankan Partial TP!`,
+            `🛡️ [BEP PROTECTION TRIGGERED] ${pos.symbol}: Harga kembali ke BEP $${pos.hardSlPrice.toFixed(6)}. Posisi SHORT ditutup impas (+buffer ${bepBufferPct}%)!`,
             pos.symbol
           );
           this.closePosition(pos, 'BEP_DEFENSE', currentPrice);
@@ -2326,7 +2343,9 @@ export class WickSniperEngine {
 
   private recalculatePositionSl(pos: ActivePosition) {
     if (pos.partialTpDone || pos.isAutoBepDone) {
-      const effectiveBufferPct = this.config.exit.bepBufferPct ?? 0.08;
+      const effectiveBufferPct = pos.strategyType === 'SMART_MONEY'
+        ? (this.config.smartMoney?.autoBepBufferPct ?? 0.3)
+        : (this.config.exit.bepBufferPct ?? 0.08);
       pos.hardSlPrice = pos.breakEvenPrice && pos.breakEvenPrice > 0
         ? pos.breakEvenPrice
         : (pos.side === 'LONG' ? pos.avgEntryPrice * (1 + effectiveBufferPct / 100) : pos.avgEntryPrice * (1 - effectiveBufferPct / 100));
@@ -4192,7 +4211,7 @@ export class WickSniperEngine {
                   if (bPrice > 0) detectedClosePrice = bPrice;
                   if (bPnl < 0) {
                     detectedReason = 'HARD_STOP_LOSS';
-                  } else if (pos.isBepDefenseActive) {
+                  } else if (pos.isBepDefenseActive || pos.isAutoBepDone) {
                     detectedReason = 'BEP_DEFENSE';
                   } else if (
                     (pos.tpOrderId && String(latestClose.orderId) === String(pos.tpOrderId)) ||
@@ -5580,6 +5599,7 @@ export class WickSniperEngine {
         atrFilterEnabled: smCfg.atrFilterEnabled !== false,
         atrDynamicSlTpEnabled: atrDynamic,
         autoBepEnabled: smCfg.autoBepEnabled !== false,
+        autoBepBufferPct: smCfg.autoBepBufferPct ?? 0.3,
         structuralSlEnabled: smCfg.structuralSlEnabled !== false,
         structuralSlBufferPct: smCfg.structuralSlBufferPct ?? 0.3,
         whaleDistanceFilterEnabled: smCfg.whaleDistanceFilterEnabled !== false,

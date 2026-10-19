@@ -978,7 +978,22 @@ function renderActivePositions(positions) {
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
-      if (pos.partialTpDone) {
+      if (isSm && pos.isAutoBepDone) {
+        const bepBuffer = pos.paramsSnapshot?.autoBepBufferPct ?? currentConfig?.smartMoney?.autoBepBufferPct ?? 0.3;
+        tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🛡️ AUTO BEP AKTIF (+${bepBuffer}%)</span>`;
+        tpBannerHtml = `
+          <div style="background: linear-gradient(90deg, rgba(56, 189, 248, 0.12), rgba(46, 213, 115, 0.08)); border: 1px dashed rgba(56, 189, 248, 0.35); border-radius: 6px; padding: 7px 12px; margin: 10px 0 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11.5px;">
+            <span style="color: #38bdf8; font-weight: 600;">
+              🛡️ <b>SMART MONEY AUTO BEP:</b> SL digeser ke <b>$${formatCryptoPrice(pos.hardSlPrice)}</b> (+${bepBuffer}% buffer profit terkunci)!
+            </span>
+            <span style="color: #30d158; font-weight: 600;">
+              🔒 Risk-Free Trade: Bebas risiko rugi modal!
+            </span>
+          </div>
+        `;
+        slMetricLabel = `🛡️ Stop Loss (Auto BEP +${bepBuffer}%)`;
+        slMetricHtml = `<span style="color: #38bdf8; font-weight: 600;">$${formatCryptoPrice(pos.hardSlPrice)} <small style="color: #30d158;">(+${bepBuffer}% Risk-Free)</small></span>`;
+      } else if (pos.partialTpDone) {
         tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">✅ TP 1 HIT (+${tp1RatioPct}%) • 🛡️ AUTO BEP AKTIF</span>`;
         tpBannerHtml = `
           <div style="background: linear-gradient(90deg, rgba(48, 209, 88, 0.12), rgba(0, 240, 255, 0.08)); border: 1px dashed rgba(48, 209, 88, 0.35); border-radius: 6px; padding: 7px 12px; margin: 10px 0 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11.5px;">
@@ -3166,6 +3181,7 @@ function populateSettingsForm(cfg) {
   const smAutoBepCb = document.getElementById('cfg-sm-auto-bep');
   if (smAutoBepCb) smAutoBepCb.checked = smCfg.autoBepEnabled !== false;
   setVal('cfg-sm-atr-bep-mult', smCfg.atrBepTriggerMultiplier ?? 1.0);
+  setVal('cfg-sm-auto-bep-buffer-pct', smCfg.autoBepBufferPct ?? 0.3);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3490,6 +3506,7 @@ function getSettingsFormData() {
       atrTpMultiplier: parseFloat(getVal('cfg-sm-atr-tp-mult', '1.8')) || 1.8,
       autoBepEnabled: !!document.getElementById('cfg-sm-auto-bep')?.checked,
       atrBepTriggerMultiplier: parseFloat(getVal('cfg-sm-atr-bep-mult', '1.0')) || 1.0,
+      autoBepBufferPct: parseFloat(getVal('cfg-sm-auto-bep-buffer-pct', '0.3')) || 0.3,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
