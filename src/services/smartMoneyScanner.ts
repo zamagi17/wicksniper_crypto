@@ -271,6 +271,11 @@ export class SmartMoneyScanner {
             detectedSide = 'SHORT';
             smartTraderAligned = true;
             reason = `Smart Trader Short ${(smartShort * 100).toFixed(1)}% | Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+          } else {
+            logger.log(
+              'INFO',
+              `🧠 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Smart Trader Short ${(smartShort * 100).toFixed(1)}% tapi Retail tidak tersangkut Long (Retail Long hanya ${(metrics.retailLongRatio * 100).toFixed(1)}% < min 50%). Konfirmasi Retail Trap gagal.`
+            );
           }
         }
 
@@ -287,6 +292,11 @@ export class SmartMoneyScanner {
             detectedSide = 'LONG';
             smartTraderAligned = true;
             reason = `Smart Trader Long ${(smartLong * 100).toFixed(1)}% | Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          } else {
+            logger.log(
+              'INFO',
+              `🧠 [SMART MONEY SKIP] ${symbol} LONG dilewati: Smart Trader Long ${(smartLong * 100).toFixed(1)}% tapi Retail tidak tersangkut Short (Retail Short hanya ${(metrics.retailShortRatio * 100).toFixed(1)}% < min 50%). Konfirmasi Retail Trap gagal.`
+            );
           }
         }
       } else if (driver === 'DUAL_CONFLUENCE') {
@@ -297,6 +307,8 @@ export class SmartMoneyScanner {
             detectedSide = 'SHORT';
             smartTraderAligned = true;
             reason = `Dual Confluence Short: Paus ${(metrics.whaleShortRatio * 100).toFixed(1)}% + Smart Trader ${(smartShort * 100).toFixed(1)}% | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+          } else {
+            logger.log('INFO', `🎯 [DUAL CONFLUENCE SKIP] ${symbol} SHORT dilewati: Paus & Smart Trader Short, tapi Retail tidak tersangkut Long (${(metrics.retailLongRatio * 100).toFixed(1)}% < 50%).`);
           }
         }
 
@@ -306,6 +318,8 @@ export class SmartMoneyScanner {
             detectedSide = 'LONG';
             smartTraderAligned = true;
             reason = `Dual Confluence Long: Paus ${(metrics.whaleLongRatio * 100).toFixed(1)}% + Smart Trader ${(smartLong * 100).toFixed(1)}% | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          } else {
+            logger.log('INFO', `🎯 [DUAL CONFLUENCE SKIP] ${symbol} LONG dilewati: Paus & Smart Trader Long, tapi Retail tidak tersangkut Short (${(metrics.retailShortRatio * 100).toFixed(1)}% < 50%).`);
           }
         }
       } else {
@@ -325,6 +339,8 @@ export class SmartMoneyScanner {
               ? ` | Smart Trader Short ${(smartShort * 100).toFixed(1)}%`
               : '';
             reason = `Whale Short ${(metrics.whaleShortRatio * 100).toFixed(1)}%${smartTag} | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
+          } else {
+            logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% tapi Retail tidak tersangkut Long (${(metrics.retailLongRatio * 100).toFixed(1)}% < 50%).`);
           }
         }
 
@@ -343,6 +359,8 @@ export class SmartMoneyScanner {
               ? ` | Smart Trader Long ${(smartLong * 100).toFixed(1)}%`
               : '';
             reason = `Whale Long ${(metrics.whaleLongRatio * 100).toFixed(1)}%${smartTag} | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
+          } else {
+            logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% tapi Retail tidak tersangkut Short (${(metrics.retailShortRatio * 100).toFixed(1)}% < 50%).`);
           }
         }
       }
