@@ -182,6 +182,8 @@ export class WickSniperEngine {
       autoBepEnabled: true,
       atrBepTriggerMultiplier: 1.0,
       autoBepBufferPct: 0.3,
+      smartTraderFilterEnabled: true,
+      smartTraderMinRatio: 50,
       entryOrderType: 'LIMIT', // Default LIMIT Maker (0.02% Fee)
       limitWaitSeconds: 15,
     };
@@ -5600,6 +5602,11 @@ export class WickSniperEngine {
         atrDynamicSlTpEnabled: atrDynamic,
         autoBepEnabled: smCfg.autoBepEnabled !== false,
         autoBepBufferPct: smCfg.autoBepBufferPct ?? 0.3,
+        smartTraderFilterEnabled: smCfg.smartTraderFilterEnabled !== false,
+        smartTraderMinRatio: smCfg.smartTraderMinRatio ?? 50,
+        smartTraderLongRatio: signal.smartTraderLongRatio,
+        smartTraderShortRatio: signal.smartTraderShortRatio,
+        smartTraderAligned: signal.smartTraderAligned,
         structuralSlEnabled: smCfg.structuralSlEnabled !== false,
         structuralSlBufferPct: smCfg.structuralSlBufferPct ?? 0.3,
         whaleDistanceFilterEnabled: smCfg.whaleDistanceFilterEnabled !== false,
@@ -5627,6 +5634,9 @@ export class WickSniperEngine {
       whaleWinratePct: signal.whaleWinratePct,
       whaleProfitWhales: signal.whaleProfitWhales,
       whaleTotalWhales: signal.whaleTotalWhales,
+      smartTraderLongRatio: signal.smartTraderLongRatio,
+      smartTraderShortRatio: signal.smartTraderShortRatio,
+      smartTraderAligned: signal.smartTraderAligned,
       aligned: true,
       reversalDetected: false,
       label: `🐋 Paus ${signal.side} (${((signal.side === 'LONG' ? signal.whaleLongRatio : signal.whaleShortRatio) * 100).toFixed(0)}%) • Searah`,
@@ -5716,11 +5726,16 @@ export class WickSniperEngine {
         const sameSideWinrate = isLong ? metrics.longWhaleWinratePct : metrics.shortWhaleWinratePct;
         const sameSideProfit = isLong ? metrics.longProfitWhales : metrics.shortProfitWhales;
         const sameSideTotal = isLong ? metrics.longWhales : metrics.shortWhales;
+        const stSameRatio = isLong ? metrics.smartTraderLongRatio : metrics.smartTraderShortRatio;
+        const stAligned = (stSameRatio || 0) >= 0.5;
 
         pos.smartMoneyFlowStatus = {
           whaleLongRatio: metrics.whaleLongRatio,
           whaleShortRatio: metrics.whaleShortRatio,
           whaleLongShortRatio: metrics.whaleLongShortRatio,
+          smartTraderLongRatio: metrics.smartTraderLongRatio,
+          smartTraderShortRatio: metrics.smartTraderShortRatio,
+          smartTraderAligned: stAligned,
           retailLongRatio: metrics.retailLongRatio,
           retailShortRatio: metrics.retailShortRatio,
           whaleAvgEntry,
@@ -5733,7 +5748,7 @@ export class WickSniperEngine {
           aligned,
           reversalDetected,
           label,
-          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : ''),
+          detail: detail + (whaleAvgEntry ? ` | Modal: $${formatCryptoPrice(whaleAvgEntry)} (${(whaleDistancePct || 0) >= 0 ? '+' : ''}${(whaleDistancePct || 0).toFixed(1)}%)` : '') + (sameSideWinrate !== undefined ? ` | Laba: ${sameSideWinrate.toFixed(0)}% (${sameSideProfit ?? 0}/${sameSideTotal ?? 0})` : '') + (metrics.smartTraderLongRatio !== undefined ? ` | Smart Trader: ${(metrics.smartTraderLongRatio * 100).toFixed(0)}% L / ${(metrics.smartTraderShortRatio * 100).toFixed(0)}% S` : ''),
           updatedAt: now,
         };
 

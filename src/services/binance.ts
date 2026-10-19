@@ -1545,6 +1545,11 @@ export class BinanceFuturesClient {
     whaleLongRatio: number;
     whaleShortRatio: number;
     whaleLongShortRatio: number;
+    smartTraderLongRatio: number;
+    smartTraderShortRatio: number;
+    smartTraderLongShortRatio: number;
+    smartTraderLongAvgEntry?: number;
+    smartTraderShortAvgEntry?: number;
     retailLongRatio: number;
     retailShortRatio: number;
     whaleLongAvgEntry?: number;
@@ -1570,8 +1575,12 @@ export class BinanceFuturesClient {
       const client = await this.getHttpClient();
       const dohAgent = await this.getOrCreateDohAgent();
 
-      const [posRes, globalRes, bapiStatsRes, bapiListRes, bapiOverviewRes] = await Promise.all([
+      const [posRes, topAccRes, globalRes, bapiStatsRes, bapiListRes, bapiOverviewRes] = await Promise.all([
         client.get('/futures/data/topLongShortPositionRatio', {
+          params: { symbol, period, limit: 1 },
+          timeout: 4000,
+        }).catch(() => null),
+        client.get('/futures/data/topLongShortAccountRatio', {
           params: { symbol, period, limit: 1 },
           timeout: 4000,
         }).catch(() => null),
@@ -1610,8 +1619,20 @@ export class BinanceFuturesClient {
       let whaleShortRatio = parseFloat(posData?.shortAccount || '0');
       let whaleLongShortRatio = parseFloat(posData?.longShortRatio || '1');
 
+      let smartTraderLongRatio = 0.5;
+      let smartTraderShortRatio = 0.5;
+      let smartTraderLongShortRatio = 1.0;
+      const topAccData = topAccRes?.data?.[0];
+      if (topAccData) {
+        smartTraderLongRatio = parseFloat(topAccData.longAccount || '0.5');
+        smartTraderShortRatio = parseFloat(topAccData.shortAccount || '0.5');
+        smartTraderLongShortRatio = parseFloat(topAccData.longShortRatio || '1.0');
+      }
+
       let whaleLongAvgEntry: number | undefined;
       let whaleShortAvgEntry: number | undefined;
+      let smartTraderLongAvgEntry: number | undefined;
+      let smartTraderShortAvgEntry: number | undefined;
       let longWhalePositionsUsdt: number | undefined;
       let shortWhalePositionsUsdt: number | undefined;
       let longWhales: number | undefined;
@@ -1646,6 +1667,14 @@ export class BinanceFuturesClient {
         if (sellItem?.avgEntryPrice) {
           whaleShortAvgEntry = parseFloat(sellItem.avgEntryPrice);
         }
+        const smartBuyItem = bapiList.find((x: any) => x.side === 'BUY' && x.userType === 1);
+        const smartSellItem = bapiList.find((x: any) => x.side === 'SELL' && x.userType === 1);
+        if (smartBuyItem?.avgEntryPrice) {
+          smartTraderLongAvgEntry = parseFloat(smartBuyItem.avgEntryPrice);
+        }
+        if (smartSellItem?.avgEntryPrice) {
+          smartTraderShortAvgEntry = parseFloat(smartSellItem.avgEntryPrice);
+        }
       }
 
       const bapiOverview = bapiOverviewRes?.data?.data;
@@ -1678,7 +1707,7 @@ export class BinanceFuturesClient {
         }
       }
 
-      if (!posData && !bapiStats && !bapiOverview) return null;
+      if (!posData && !bapiStats && !bapiOverview && !topAccData) return null;
 
       let retailLongRatio = 0.5;
       let retailShortRatio = 0.5;
@@ -1692,6 +1721,11 @@ export class BinanceFuturesClient {
         whaleLongRatio,
         whaleShortRatio,
         whaleLongShortRatio,
+        smartTraderLongRatio,
+        smartTraderShortRatio,
+        smartTraderLongShortRatio,
+        smartTraderLongAvgEntry,
+        smartTraderShortAvgEntry,
         retailLongRatio,
         retailShortRatio,
         whaleLongAvgEntry,

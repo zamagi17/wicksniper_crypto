@@ -165,6 +165,8 @@ export interface SmartMoneyConfig {
   autoBepEnabled?: boolean;    // Auto pindah SL ke BEP (impas) saat posisi mencapai target profit awal
   atrBepTriggerMultiplier?: number; // Pengali ATR untuk memicu Auto-BEP (default: 1.0x)
   autoBepBufferPct?: number;   // Buffer profit di atas/bawah entry saat Auto-BEP aktif (%, default: 0.3%)
+  smartTraderFilterEnabled?: boolean; // Filter konfluensi: Wajib searah dengan Smart Trader (Top Accounts)
+  smartTraderMinRatio?: number;      // Ambang minimal rasio Smart Trader (%, default: 50%)
   entryOrderType?: 'LIMIT' | 'MARKET'; // Tipe order entry: LIMIT (Maker 0.02% murah) vs MARKET (Taker 0.05%)
   limitWaitSeconds?: number;   // Batas waktu tunggu fill order limit sebelum dibatalkan (default: 15 detik)
 }
@@ -186,6 +188,9 @@ export interface SmartMoneySignal {
   whaleWinratePct?: number;
   whaleProfitWhales?: number;
   whaleTotalWhales?: number;
+  smartTraderLongRatio?: number;
+  smartTraderShortRatio?: number;
+  smartTraderAligned?: boolean;
   atr?: number;
   atrPct?: number;
   timestamp: number;
@@ -341,6 +346,9 @@ export interface SmartMoneyFlowStatus {
   whaleWinratePct?: number;
   whaleProfitWhales?: number;
   whaleTotalWhales?: number;
+  smartTraderLongRatio?: number;
+  smartTraderShortRatio?: number;
+  smartTraderAligned?: boolean;
   aligned: boolean;
   reversalDetected: boolean;
   label: string;

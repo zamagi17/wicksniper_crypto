@@ -659,6 +659,11 @@ function formatSmartMoneyReasonChips(rawReason) {
       bg = 'rgba(48, 209, 88, 0.14)';
       border = 'rgba(48, 209, 88, 0.35)';
       color = '#30d158';
+    } else if (part.includes('Smart Trader')) {
+      icon = '🧠';
+      bg = 'rgba(192, 132, 252, 0.14)';
+      border = 'rgba(192, 132, 252, 0.35)';
+      color = '#c084fc';
     } else if (part.includes('Retail')) {
       icon = '👥';
       bg = 'rgba(255, 159, 10, 0.12)';
@@ -1059,6 +1064,18 @@ function renderActivePositions(positions) {
           whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Kesehatan Paus: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
         }
 
+        let smartTraderTag = '';
+        if (smFlow.smartTraderLongRatio !== undefined || smFlow.smartTraderShortRatio !== undefined) {
+          const isLong = pos.side === 'LONG';
+          const myRatio = ((isLong ? smFlow.smartTraderLongRatio : smFlow.smartTraderShortRatio) || 0) * 100;
+          const isAligned = smFlow.smartTraderAligned !== undefined ? smFlow.smartTraderAligned : myRatio >= 50;
+          const stColor = isAligned ? '#c084fc' : '#ff453a';
+          const stBg = isAligned ? 'rgba(192, 132, 252, 0.12)' : 'rgba(255, 69, 58, 0.12)';
+          const stBorder = isAligned ? 'rgba(192, 132, 252, 0.35)' : 'rgba(255, 69, 58, 0.35)';
+          const stIcon = isAligned ? 'Searah ✅' : 'Beda Arah ⚠️';
+          smartTraderTag = `<span class="badge-tag" style="background: ${stBg}; border: 1px solid ${stBorder}; color: ${stColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Proporsi Akun Top Trader: ${myRatio.toFixed(1)}% ${pos.side}">🧠 Smart Trader: ${myRatio.toFixed(0)}% (${stIcon})</span>`;
+        }
+
         if (smFlow.reversalDetected) {
           const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
           const oppRatio = ((pos.side === 'LONG' ? smFlow.whaleShortRatio : smFlow.whaleLongRatio) * 100).toFixed(0);
@@ -1104,6 +1121,7 @@ function renderActivePositions(positions) {
               ${smFlowBadgeHtml}
               ${modalPausTag}
               ${whaleHealthTag}
+              ${smartTraderTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -3182,6 +3200,9 @@ function populateSettingsForm(cfg) {
   if (smAutoBepCb) smAutoBepCb.checked = smCfg.autoBepEnabled !== false;
   setVal('cfg-sm-atr-bep-mult', smCfg.atrBepTriggerMultiplier ?? 1.0);
   setVal('cfg-sm-auto-bep-buffer-pct', smCfg.autoBepBufferPct ?? 0.3);
+  const smSmartTraderCb = document.getElementById('cfg-sm-smart-trader-filter');
+  if (smSmartTraderCb) smSmartTraderCb.checked = smCfg.smartTraderFilterEnabled !== false;
+  setVal('cfg-sm-smart-trader-min-ratio', smCfg.smartTraderMinRatio ?? 50);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3189,6 +3210,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmPullbackInput === 'function') toggleSmPullbackInput();
   if (typeof toggleSmWhaleDistInput === 'function') toggleSmWhaleDistInput();
   if (typeof toggleSmWhaleHealthInput === 'function') toggleSmWhaleHealthInput();
+  if (typeof toggleSmSmartTraderInput === 'function') toggleSmSmartTraderInput();
   if (typeof toggleSmStructuralSlInput === 'function') toggleSmStructuralSlInput();
   if (typeof toggleSmAtrInput === 'function') toggleSmAtrInput();
   if (typeof toggleSmAtrDynamicInputs === 'function') toggleSmAtrDynamicInputs();
@@ -3507,6 +3529,8 @@ function getSettingsFormData() {
       autoBepEnabled: !!document.getElementById('cfg-sm-auto-bep')?.checked,
       atrBepTriggerMultiplier: parseFloat(getVal('cfg-sm-atr-bep-mult', '1.0')) || 1.0,
       autoBepBufferPct: parseFloat(getVal('cfg-sm-auto-bep-buffer-pct', '0.3')) || 0.3,
+      smartTraderFilterEnabled: !!document.getElementById('cfg-sm-smart-trader-filter')?.checked,
+      smartTraderMinRatio: parseFloat(getVal('cfg-sm-smart-trader-min-ratio', '50')) || 50,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -4262,6 +4286,16 @@ function toggleSmAutoBepInput() {
   }
 }
 window.toggleSmAutoBepInput = toggleSmAutoBepInput;
+
+function toggleSmSmartTraderInput() {
+  const cb = document.getElementById('cfg-sm-smart-trader-filter');
+  const box = document.getElementById('cfg-sm-smart-trader-box');
+  if (box) {
+    box.style.opacity = cb && cb.checked ? '1' : '0.4';
+    box.style.pointerEvents = cb && cb.checked ? 'auto' : 'none';
+  }
+}
+window.toggleSmSmartTraderInput = toggleSmSmartTraderInput;
 
 // ==========================================
 // TELEGRAM NOTIFICATIONS CONTROLLER

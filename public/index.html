@@ -684,6 +684,20 @@
             </div>
           </div>
 
+          <div class="form-group" style="grid-column: span 2; background: rgba(192, 132, 252, 0.05); border: 1px solid rgba(192, 132, 252, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #c084fc; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-smart-trader-filter" style="width: 16px; height: 16px; accent-color: #c084fc;" checked onchange="toggleSmSmartTraderInput()">
+              <span>🧠 Filter Konfluensi Smart Trader (Wajib Searah Akun Top Trader) <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-smart-trader-box" style="display: flex; gap: 14px; margin-top: 8px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Min. % Rasio Searah Smart Trader (%)</label>
+                <input type="number" id="cfg-sm-smart-trader-min-ratio" min="40" max="80" step="1" class="form-control" placeholder="50" style="padding: 4px 8px;">
+                <small class="form-hint">Dilarang entry jika akun Smart Trader (Top 20% Accounts) tidak searah dengan Paus (Standar: 50%). Mencegah false signal akibat hedging paus.</small>
+              </div>
+            </div>
+          </div>
+
           <div class="form-group" style="grid-column: span 2; background: rgba(52, 199, 89, 0.05); border: 1px solid rgba(52, 199, 89, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #34c759; margin: 0; cursor: pointer;">
               <input type="checkbox" id="cfg-sm-structural-sl-enabled" style="width: 16px; height: 16px; accent-color: #34c759;" checked onchange="toggleSmStructuralSlInput()">

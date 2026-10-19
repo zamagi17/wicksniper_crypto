@@ -169,6 +169,14 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       if (whaleWin !== undefined) {
         triggerLine += `\n🩺 <b>Kesehatan Paus:</b> <b>${whaleWin.toFixed(0)}% Laba</b>`;
       }
+      const stLong = smFlow.smartTraderLongRatio ?? snap.smartTraderLongRatio;
+      const stShort = smFlow.smartTraderShortRatio ?? snap.smartTraderShortRatio;
+      if (stLong !== undefined && stShort !== undefined) {
+        const myRatio = (isLong ? stLong : stShort) * 100;
+        const isAligned = smFlow.smartTraderAligned !== undefined ? smFlow.smartTraderAligned : myRatio >= 50;
+        const stTag = isAligned ? 'Searah ✅' : 'Beda Arah ⚠️';
+        triggerLine += `\n🧠 <b>Smart Trader (Akun):</b> <b>${(stLong * 100).toFixed(0)}% L / ${(stShort * 100).toFixed(0)}% S</b> (${stTag})`;
+      }
       if (pos.atrPct) {
         triggerLine += `\n📊 <b>ATR:</b> <b>${pos.atrPct.toFixed(2)}%</b> ($${formatCryptoPrice(pos.atr || 0)})`;
       }
