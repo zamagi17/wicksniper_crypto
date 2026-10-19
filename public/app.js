@@ -1040,6 +1040,23 @@ function renderActivePositions(positions) {
       let smReversalBannerHtml = '';
       let modalPausTag = '';
       let whaleHealthTag = '';
+      let smartTraderTag = '';
+
+      const stLongRatio = smFlow?.smartTraderLongRatio ?? pos.paramsSnapshot?.smartTraderLongRatio;
+      const stShortRatio = smFlow?.smartTraderShortRatio ?? pos.paramsSnapshot?.smartTraderShortRatio;
+      if (stLongRatio !== undefined || stShortRatio !== undefined) {
+        const isLong = pos.side === 'LONG';
+        const myRatio = ((isLong ? stLongRatio : stShortRatio) || 0) * 100;
+        const isAligned = (smFlow?.smartTraderAligned ?? pos.paramsSnapshot?.smartTraderAligned) !== undefined
+          ? (smFlow?.smartTraderAligned ?? pos.paramsSnapshot?.smartTraderAligned)
+          : myRatio >= 50;
+        const stColor = isAligned ? '#c084fc' : '#ff453a';
+        const stBg = isAligned ? 'rgba(192, 132, 252, 0.12)' : 'rgba(255, 69, 58, 0.12)';
+        const stBorder = isAligned ? 'rgba(192, 132, 252, 0.35)' : 'rgba(255, 69, 58, 0.35)';
+        const stIcon = isAligned ? 'Searah ✅' : 'Beda Arah ⚠️';
+        smartTraderTag = `<span class="badge-tag" style="background: ${stBg}; border: 1px solid ${stBorder}; color: ${stColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Proporsi Akun Top Trader: ${myRatio.toFixed(1)}% ${pos.side}">🧠 Smart Trader: ${myRatio.toFixed(0)}% (${stIcon})</span>`;
+      }
+
       if (smFlow) {
         const flowClass = smFlow.reversalDetected ? 'sm-reversal' : smFlow.aligned ? 'sm-aligned' : 'sm-neutral';
         const flowBg = smFlow.reversalDetected
@@ -1062,18 +1079,6 @@ function renderActivePositions(positions) {
           const winBg = winrate >= 50 ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)';
           const winBorder = winrate >= 50 ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
           whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Kesehatan Paus: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
-        }
-
-        let smartTraderTag = '';
-        if (smFlow.smartTraderLongRatio !== undefined || smFlow.smartTraderShortRatio !== undefined) {
-          const isLong = pos.side === 'LONG';
-          const myRatio = ((isLong ? smFlow.smartTraderLongRatio : smFlow.smartTraderShortRatio) || 0) * 100;
-          const isAligned = smFlow.smartTraderAligned !== undefined ? smFlow.smartTraderAligned : myRatio >= 50;
-          const stColor = isAligned ? '#c084fc' : '#ff453a';
-          const stBg = isAligned ? 'rgba(192, 132, 252, 0.12)' : 'rgba(255, 69, 58, 0.12)';
-          const stBorder = isAligned ? 'rgba(192, 132, 252, 0.35)' : 'rgba(255, 69, 58, 0.35)';
-          const stIcon = isAligned ? 'Searah ✅' : 'Beda Arah ⚠️';
-          smartTraderTag = `<span class="badge-tag" style="background: ${stBg}; border: 1px solid ${stBorder}; color: ${stColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Proporsi Akun Top Trader: ${myRatio.toFixed(1)}% ${pos.side}">🧠 Smart Trader: ${myRatio.toFixed(0)}% (${stIcon})</span>`;
         }
 
         if (smFlow.reversalDetected) {
