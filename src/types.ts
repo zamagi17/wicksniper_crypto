@@ -172,6 +172,9 @@ export interface SmartMoneyConfig {
   smartTraderMinRatio?: number;      // Ambang minimal rasio Smart Trader (%, default: 50%)
   entryOrderType?: 'LIMIT' | 'MARKET'; // Tipe order entry: LIMIT (Maker 0.02% murah) vs MARKET (Taker 0.05%)
   limitWaitSeconds?: number;   // Batas waktu tunggu fill order limit sebelum dibatalkan (default: 15 detik)
+  emaFilterEnabled?: boolean;  // Filter Konfirmasi Tren EMA (e.g. EMA 50 15m)
+  emaTimeframe?: '5m' | '15m' | '1h'; // Timeframe EMA (default: '15m')
+  emaPeriod?: number;          // Periode EMA (default: 50)
 }
 
 export interface SmartMoneySignal {

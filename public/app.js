@@ -3263,6 +3263,10 @@ function populateSettingsForm(cfg) {
   if (smSmartTraderCb) smSmartTraderCb.checked = smCfg.smartTraderFilterEnabled !== false;
   setVal('cfg-sm-smart-trader-min-ratio', smCfg.smartTraderMinRatio ?? 30);
   setVal('cfg-sm-min-whale-ratio', smCfg.minWhaleRatio ?? 30);
+  const smEmaCb = document.getElementById('cfg-sm-ema-filter-enabled');
+  if (smEmaCb) smEmaCb.checked = !!smCfg.emaFilterEnabled;
+  setVal('cfg-sm-ema-timeframe', smCfg.emaTimeframe || '15m');
+  setVal('cfg-sm-ema-period', smCfg.emaPeriod ?? 50);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3276,6 +3280,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmAtrInput === 'function') toggleSmAtrInput();
   if (typeof toggleSmAtrDynamicInputs === 'function') toggleSmAtrDynamicInputs();
   if (typeof toggleSmAutoBepInput === 'function') toggleSmAutoBepInput();
+  if (typeof toggleSmEmaInput === 'function') toggleSmEmaInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -3599,6 +3604,9 @@ function getSettingsFormData() {
       smartTraderFilterEnabled: !!document.getElementById('cfg-sm-smart-trader-filter')?.checked,
       smartTraderMinRatio: parseFloat(getVal('cfg-sm-smart-trader-min-ratio', '30')) || 30,
       minWhaleRatio: parseFloat(getVal('cfg-sm-min-whale-ratio', '30')) || 30,
+      emaFilterEnabled: !!document.getElementById('cfg-sm-ema-filter-enabled')?.checked,
+      emaTimeframe: getVal('cfg-sm-ema-timeframe', '15m'),
+      emaPeriod: parseInt(getVal('cfg-sm-ema-period', '50'), 10) || 50,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -4335,6 +4343,15 @@ function toggleSmAtrInput() {
   }
 }
 window.toggleSmAtrInput = toggleSmAtrInput;
+
+function toggleSmEmaInput() {
+  const cb = document.getElementById('cfg-sm-ema-filter-enabled');
+  const box = document.getElementById('cfg-sm-ema-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmEmaInput = toggleSmEmaInput;
 
 function toggleSmAtrDynamicInputs() {
   const cb = document.getElementById('cfg-sm-atr-dynamic-sltp');

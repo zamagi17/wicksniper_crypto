@@ -1855,6 +1855,42 @@ export class BinanceFuturesClient {
     return undefined;
   }
 
+  private emaCache: Map<string, { timestamp: number; ema: number }> = new Map();
+
+  public async getSymbolEma(
+    symbol: string,
+    interval: string = '15m',
+    period: number = 50
+  ): Promise<number | undefined> {
+    const cacheKey = `${symbol}_${interval}_${period}`;
+    const cached = this.emaCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 30_000) {
+      return cached.ema;
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      const limit = Math.max(period + 30, 80);
+      const res = await client.get('/fapi/v1/klines', {
+        params: { symbol, interval, limit },
+        timeout: 4000,
+      });
+
+      if (res && Array.isArray(res.data) && res.data.length >= period) {
+        const closes = res.data.map((k: any) => parseFloat(k[4]));
+        const multiplier = 2 / (period + 1);
+        let ema = closes[0];
+        for (let i = 1; i < closes.length; i++) {
+          ema = (closes[i] - ema) * multiplier + ema;
+        }
+        this.emaCache.set(cacheKey, { timestamp: now, ema });
+        return ema;
+      }
+    } catch {}
+    return undefined;
+  }
+
   public isUserStreamActive(): boolean {
     return this.isUserWsConnected;
   }

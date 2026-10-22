@@ -813,6 +813,30 @@
               </div>
             </div>
           </div>
+
+          <!-- EMA Trend Confirmation Filter Section -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #38bdf8; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-ema-filter-enabled" style="width: 16px; height: 16px; accent-color: #38bdf8;" onchange="toggleSmEmaInput()">
+              <span>📈 Filter Konfirmasi Tren EMA <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-ema-box" style="margin-top: 10px; display: flex; gap: 14px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Timeframe EMA</label>
+                <select id="cfg-sm-ema-timeframe" class="form-control" style="padding: 4px 8px;">
+                  <option value="5m">5 Menit (5m)</option>
+                  <option value="15m" selected>15 Menit (15m - Rekomendasi)</option>
+                  <option value="1h">1 Jam (1h)</option>
+                </select>
+                <small class="form-hint">Timeframe chart untuk mengukur garis rata-rata EMA.</small>
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Periode EMA</label>
+                <input type="number" id="cfg-sm-ema-period" min="10" max="200" step="1" class="form-control" placeholder="50" style="padding: 4px 8px;">
+                <small class="form-hint">Long hanya jika Harga &gt; EMA, Short hanya jika Harga &lt; EMA (Standar: 50).</small>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="form-row">

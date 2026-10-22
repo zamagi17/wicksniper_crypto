@@ -189,6 +189,9 @@ export class WickSniperEngine {
       smartTraderMinRatio: 30,
       entryOrderType: 'LIMIT', // Default LIMIT Maker (0.02% Fee)
       limitWaitSeconds: 15,
+      emaFilterEnabled: false,
+      emaTimeframe: '15m',
+      emaPeriod: 50,
     };
   }
 
