@@ -3253,8 +3253,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-max-atr-pct', smCfg.maxAtrPct ?? 3.0);
   const smAtrDynCb = document.getElementById('cfg-sm-atr-dynamic-sltp');
   if (smAtrDynCb) smAtrDynCb.checked = smCfg.atrDynamicSlTpEnabled !== false;
-  setVal('cfg-sm-atr-sl-mult', smCfg.atrSlMultiplier ?? 1.2);
-  setVal('cfg-sm-atr-tp-mult', smCfg.atrTpMultiplier ?? 1.8);
+  setVal('cfg-sm-atr-sl-mult', smCfg.atrSlMultiplier ?? 2.0);
+  setVal('cfg-sm-atr-tp-mult', smCfg.atrTpMultiplier ?? 1.0);
   const smAutoBepCb = document.getElementById('cfg-sm-auto-bep');
   if (smAutoBepCb) smAutoBepCb.checked = smCfg.autoBepEnabled !== false;
   setVal('cfg-sm-atr-bep-mult', smCfg.atrBepTriggerMultiplier ?? 0.6);
@@ -3303,7 +3303,7 @@ function populateSettingsForm(cfg) {
   }
   setVal('cfg-quality-threshold', cfg.scanner?.tradeQualityThreshold ?? 60);
 
-  setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.2);
+  setVal('cfg-tp-pct', cfg.exit?.takeProfitPct || 1.0);
   setVal('cfg-sl-pct', cfg.exit?.hardStopLossPct || 4.5);
   setVal('cfg-max-hold', cfg.exit?.maxHoldMinutes || 60);
 
@@ -3312,8 +3312,8 @@ function populateSettingsForm(cfg) {
     atrCheckbox.checked = !!cfg.exit?.atrDynamicSlTpEnabled;
   }
   setVal('cfg-atr-period', cfg.exit?.atrPeriod ?? 14);
-  setVal('cfg-atr-sl-multiplier', cfg.exit?.atrSlMultiplier ?? 1.5);
-  setVal('cfg-atr-tp-multiplier', cfg.exit?.atrTpMultiplier ?? 2.5);
+  setVal('cfg-atr-sl-multiplier', cfg.exit?.atrSlMultiplier ?? 2.0);
+  setVal('cfg-atr-tp-multiplier', cfg.exit?.atrTpMultiplier ?? 1.0);
   const atrDeferCheckbox = document.getElementById('cfg-atr-defer-hard-stop');
   if (atrDeferCheckbox) {
     atrDeferCheckbox.checked = cfg.exit?.atrDeferHardStopBeforeLastLayer !== false;
@@ -3371,8 +3371,8 @@ function populateSettingsForm(cfg) {
     ptCheckbox.checked = !!cfg.exit?.partialTpEnabled;
     togglePartialTpInput();
   }
-  setVal('cfg-tp2-pct', cfg.exit?.takeProfit2Pct ?? (cfg.exit?.takeProfitPct ? Math.round(cfg.exit.takeProfitPct * 2 * 10) / 10 : 2.4));
-  setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 70);
+  setVal('cfg-tp2-pct', cfg.exit?.takeProfit2Pct ?? (cfg.exit?.takeProfitPct ? Math.round(cfg.exit.takeProfitPct * 2.2 * 10) / 10 : 2.2));
+  setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 65);
   if (typeof updateTpPortionHint === 'function') updateTpPortionHint();
 
   // Emergency BEP Defense

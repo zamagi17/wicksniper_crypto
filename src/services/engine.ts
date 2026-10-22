@@ -162,10 +162,10 @@ export class WickSniperEngine {
       layerSpacingPct: 0.8,
       marginUsdt: 5.0,
       leverage: 5,
-      takeProfitPct: 1.5,
+      takeProfitPct: 1.0,
       trailingTpEnabled: false, // Default false agar Take Profit dipasang sebagai Limit Order Maker langsung di Binance (0.02% Fee)!
       trailingCallbackPct: 0.3,
-      stopLossPct: 1.2,
+      stopLossPct: 2.5,
       structuralSlEnabled: true,
       structuralSlBufferPct: 0.3,
       cooldownMinutes: 30,
@@ -178,8 +178,8 @@ export class WickSniperEngine {
       minAtrPct: 0.8,
       maxAtrPct: 3.0,
       atrDynamicSlTpEnabled: true,
-      atrSlMultiplier: 1.2,
-      atrTpMultiplier: 1.8,
+      atrSlMultiplier: 2.0,
+      atrTpMultiplier: 1.0,
       autoBepEnabled: true,
       atrBepTriggerMultiplier: 0.6,
       autoBepBufferPct: 0.3,
@@ -262,15 +262,15 @@ export class WickSniperEngine {
         maxTotalMarginPerCoin: 50.0,
       },
       exit: {
-        takeProfitPct: 1.2,
-        takeProfit2Pct: 2.4,
+        takeProfitPct: 1.0,
+        takeProfit2Pct: 2.2,
         trailingTpEnabled: false,
         trailingCallbackPct: 0.4,
         hardStopLossPct: 4.5,
         atrDynamicSlTpEnabled: false,
         atrPeriod: 14,
-        atrSlMultiplier: 1.5,
-        atrTpMultiplier: 2.5,
+        atrSlMultiplier: 2.0,
+        atrTpMultiplier: 1.0,
         atrDeferHardStopBeforeLastLayer: true,
         atrMinLayersToProtect: 0,
         trailingSlEnabled: false,
@@ -5443,11 +5443,11 @@ export class WickSniperEngine {
       let targetTp2Raw: number;
       const tp2Pct = (this.config.exit.takeProfit2Pct && this.config.exit.takeProfit2Pct > 0)
         ? this.config.exit.takeProfit2Pct
-        : (fallbackTpPct * 1.8);
+        : (fallbackTpPct * 2.2);
 
       if (atrDynamic) {
         const tpDist = atrVal * atrTpMult;
-        const tpDist2 = atrVal * (atrTpMult * 1.8);
+        const tpDist2 = atrVal * (atrTpMult * 2.2);
         targetTpRaw = isShort ? basePrice - tpDist : basePrice + tpDist;
         targetTp2Raw = isShort ? basePrice - tpDist2 : basePrice + tpDist2;
       } else {
@@ -5474,18 +5474,19 @@ export class WickSniperEngine {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;
         const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
         const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
+        const maxSlPctAllowed = Math.max(3.0, fallbackSlPct, atrDynamic ? (atrVal * atrSlMult / basePrice) * 100 : 0);
 
         if (isShort) {
           const structuralLevel = signal.whaleAvgEntry + effectiveBuffer;
           const minSl = basePrice * 1.008;
-          const maxSl = basePrice * (1 + Math.max(1.5, fallbackSlPct) / 100);
+          const maxSl = basePrice * (1 + maxSlPctAllowed / 100);
           slRaw = Math.max(minSl, Math.min(structuralLevel, maxSl));
           const slPctVal = ((slRaw - basePrice) / basePrice) * 100;
           desc = `Hybrid (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} + Buffer $${formatCryptoPrice(effectiveBuffer)} ➜ SL: +${slPctVal.toFixed(2)}%)`;
         } else {
           const structuralLevel = signal.whaleAvgEntry - effectiveBuffer;
           const minSl = basePrice * 0.992;
-          const maxSl = basePrice * (1 - Math.max(1.5, fallbackSlPct) / 100);
+          const maxSl = basePrice * (1 - maxSlPctAllowed / 100);
           slRaw = Math.min(minSl, Math.max(structuralLevel, maxSl));
           const slPctVal = ((basePrice - slRaw) / basePrice) * 100;
           desc = `Hybrid (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} - Buffer $${formatCryptoPrice(effectiveBuffer)} ➜ SL: -${slPctVal.toFixed(2)}%)`;
