@@ -381,7 +381,7 @@ export class SmartMoneyScanner {
           whaleTotalWhales = metrics.shortWhales;
 
           // 1. Cek Filter Kesehatan Paus (% Meraih Laba)
-          const checkWhaleHealthShort = driver !== 'SMART_TRADER' || metrics.whaleShortRatio >= 0.50;
+          const checkWhaleHealthShort = true;
           if (this.config.whaleHealthFilterEnabled !== false && checkWhaleHealthShort && whaleWinratePct !== undefined) {
             const minWinrate = this.config.minWhaleWinratePct ?? 50;
             if (whaleWinratePct < minWinrate) {
@@ -436,7 +436,7 @@ export class SmartMoneyScanner {
           whaleTotalWhales = metrics.longWhales;
 
           // 1. Cek Filter Kesehatan Paus (% Meraih Laba)
-          const checkWhaleHealthLong = driver !== 'SMART_TRADER' || metrics.whaleLongRatio >= 0.50;
+          const checkWhaleHealthLong = true;
           if (this.config.whaleHealthFilterEnabled !== false && checkWhaleHealthLong && whaleWinratePct !== undefined) {
             const minWinrate = this.config.minWhaleWinratePct ?? 50;
             if (whaleWinratePct < minWinrate) {

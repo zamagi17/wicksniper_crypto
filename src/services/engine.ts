@@ -5464,11 +5464,9 @@ export class WickSniperEngine {
       // 2. Stop Loss Hybrid
       let slRaw: number;
       let desc = '';
-      const isWhaleDominant = (isShort ? signal.whaleShortRatio : signal.whaleLongRatio) >= 0.50;
       const useWhaleStructuralSl = smCfg.structuralSlEnabled !== false &&
         signal.whaleAvgEntry &&
-        signal.whaleAvgEntry > 0 &&
-        (signal.signalDriver !== 'SMART_TRADER' || isWhaleDominant);
+        signal.whaleAvgEntry > 0;
 
       if (useWhaleStructuralSl && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;

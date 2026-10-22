@@ -4417,24 +4417,24 @@ function updateSmDriverLabels() {
 
     if (badgeDist) {
       badgeDist.style.display = 'inline-block';
-      badgeDist.style.background = 'rgba(255, 159, 10, 0.15)';
-      badgeDist.style.border = '1px solid rgba(255, 159, 10, 0.35)';
-      badgeDist.style.color = '#ff9f0a';
-      badgeDist.innerText = '🟡 Bersyarat (Aktif jika Paus dominan ≥50%)';
+      badgeDist.style.background = 'rgba(46, 213, 115, 0.15)';
+      badgeDist.style.border = '1px solid rgba(46, 213, 115, 0.35)';
+      badgeDist.style.color = '#2ed573';
+      badgeDist.innerText = '🟢 Aktif Penuh';
     }
     if (badgeHealth) {
       badgeHealth.style.display = 'inline-block';
-      badgeHealth.style.background = 'rgba(168, 85, 247, 0.15)';
-      badgeHealth.style.border = '1px solid rgba(168, 85, 247, 0.35)';
-      badgeHealth.style.color = '#c084fc';
-      badgeHealth.innerText = '🟡 Bersyarat (Aktif jika Paus dominan ≥50%)';
+      badgeHealth.style.background = 'rgba(46, 213, 115, 0.15)';
+      badgeHealth.style.border = '1px solid rgba(46, 213, 115, 0.35)';
+      badgeHealth.style.color = '#2ed573';
+      badgeHealth.innerText = '🟢 Aktif Penuh';
     }
     if (badgeStructSl) {
       badgeStructSl.style.display = 'inline-block';
       badgeStructSl.style.background = 'rgba(52, 199, 89, 0.15)';
       badgeStructSl.style.border = '1px solid rgba(52, 199, 89, 0.35)';
       badgeStructSl.style.color = '#34c759';
-      badgeStructSl.innerText = '🎯 Auto Fallback (Modal Paus jika dominan, atau 1.2x ATR)';
+      badgeStructSl.innerText = '🟢 Aktif: Kunci di Balik Modal Paus';
     }
   } else if (driver === 'WHALE') {
     if (lblShort) lblShort.innerHTML = '🐋 Dominasi Paus Short Min (%) <span class="badge-tag badge-smart-money">Smart Money</span>';
