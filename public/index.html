@@ -878,9 +878,9 @@
           </div>
 
           <div class="form-group">
-            <label>Target Take Profit (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
+            <label>Target Take Profit (%) / TP 1 <span class="badge-tag badge-shared">🌐 Global / Wick & Smart Money</span></label>
             <input type="number" id="cfg-tp-pct" step="0.1" class="form-control" placeholder="1.2">
-            <small class="form-hint">Exit saat harga koreksi X% di bawah harga rata-rata.</small>
+            <small class="form-hint">Target profit tahap 1 (atau single TP jika Dual TP dinonaktifkan).</small>
           </div>
         </div>
 
@@ -1233,7 +1233,7 @@
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: var(--color-cyan);">
               <input type="checkbox" id="cfg-partial-tp-enabled" onchange="togglePartialTpInput()" style="width: 16px; height: 16px; accent-color: var(--color-cyan);">
-              🎯 Aktifkan Stage 1 & Stage 2 Take Profit (Dual TP + Auto BEP Defense) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
+              🎯 Aktifkan Stage 1 & Stage 2 Take Profit (Dual TP + Auto BEP Defense) <span class="badge-tag badge-shared">🌐 Global / Wick & Smart Money</span>
             </label>
             <small class="form-hint">Saat TP 1 tercapai, cairkan sebagian posisi (misal 70%) untuk mengunci profit, lalu otomatis geser Stop-Loss sisa posisi (misal 30%) ke titik BEP (+ buffer parameter BEP). Sisa koin memburu TP 2 bebas risiko!</small>
           </div>
