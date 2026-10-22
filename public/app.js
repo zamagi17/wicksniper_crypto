@@ -961,8 +961,8 @@ function renderActivePositions(positions) {
         : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
 
       const isSm = pos.strategyType === 'SMART_MONEY';
-      const isDualTp = isSm ? false : currentConfig?.exit?.partialTpEnabled;
-      const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.7) * 100);
+      const isDualTp = !!currentConfig?.exit?.partialTpEnabled;
+      const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.5) * 100);
       const tp2RatioPct = 100 - tp1RatioPct;
 
       let tpStatusBadge = '';
