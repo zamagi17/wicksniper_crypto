@@ -582,7 +582,10 @@ function formatDurationHms(totalSeconds) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  return `${h} jam ${m} menit ${s} detik`;
+  if (h > 0) {
+    return `${h}j ${m}m ${s}s`;
+  }
+  return `${m}m ${s}s`;
 }
 
 function getPosEntryReason(pos) {
@@ -967,21 +970,51 @@ function renderActivePositions(positions) {
         const isProfit = (pos.unrealizedPnl || 0) >= 0;
       const pnlColor = isProfit ? 'text-green' : 'text-red';
       const pnlSign = isProfit ? '+' : '';
-      const remainingSeconds = Math.max(0, Number(pos.holdRemainingSeconds ?? 0));
-      const holdCountdown = formatDurationHms(remainingSeconds);
-      let holdAction = pos.holdAction === 'CLOSE_NOW' ? '⚠️ Jangan perpanjang' : '👀 Masih bisa dipantau';
-      if (pos.extensionCount && pos.extensionCount > 0) {
-        const extSec = currentConfig?.exit?.extendHoldSeconds || 30;
-        const maxExt = currentConfig?.exit?.maxHoldExtensions || 6;
-        holdAction = `🔄 Diperpanjang +${extSec * pos.extensionCount}s (${pos.extensionCount}/${maxExt})`;
-      } else if (currentConfig?.exit?.extendHoldOnRedCandleEnabled && remainingSeconds <= (currentConfig?.exit?.extendHoldSeconds || 30)) {
-        holdAction = pos.candle1mStatus === 'RED' ? '📉 Candle 1m Merah (Siap perpanjang)' : '⏳ Pantau 30s terakhir';
-      }
-      const holdClass = pos.extensionCount && pos.extensionCount > 0
-        ? 'text-green'
-        : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
-
       const isSm = pos.strategyType === 'SMART_MONEY';
+      const smMaxHours = Number(pos.paramsSnapshot?.maxHoldHours || currentConfig?.smartMoney?.maxHoldHours || 4);
+      let remainingSeconds = Math.max(0, Number(pos.holdRemainingSeconds ?? 0));
+      if (remainingSeconds === 0 && pos.openedAt) {
+        if (isSm) {
+          const deadline = pos.openedAt + smMaxHours * 3600 * 1000;
+          remainingSeconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        } else {
+          const maxHoldMinutes = Number(currentConfig?.exit?.maxHoldMinutes || 10);
+          const deadline = pos.openedAt + maxHoldMinutes * 60 * 1000 + Number(pos.extendedHoldMs || 0);
+          remainingSeconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        }
+      }
+      const holdCountdown = formatDurationHms(remainingSeconds);
+
+      let holdAction = '👀 Masih bisa dipantau';
+      let holdClass = 'text-cyan';
+
+      if (isSm) {
+        if (remainingSeconds <= 0) {
+          holdAction = `⏰ Limit ${smMaxHours} jam tercapai`;
+          holdClass = 'text-red';
+        } else if (remainingSeconds <= 300) {
+          holdAction = '⚠️ Batas hold hampir habis';
+          holdClass = 'text-red';
+        } else if (remainingSeconds <= 1800) {
+          holdAction = '⏳ Mendekati batas hold';
+          holdClass = 'text-yellow';
+        } else {
+          holdAction = `Maks ${smMaxHours} jam hold`;
+          holdClass = 'text-cyan';
+        }
+      } else {
+        holdAction = pos.holdAction === 'CLOSE_NOW' ? '⚠️ Jangan perpanjang' : '👀 Masih bisa dipantau';
+        if (pos.extensionCount && pos.extensionCount > 0) {
+          const extSec = currentConfig?.exit?.extendHoldSeconds || 30;
+          const maxExt = currentConfig?.exit?.maxHoldExtensions || 6;
+          holdAction = `🔄 Diperpanjang +${extSec * pos.extensionCount}s (${pos.extensionCount}/${maxExt})`;
+        } else if (currentConfig?.exit?.extendHoldOnRedCandleEnabled && remainingSeconds <= (currentConfig?.exit?.extendHoldSeconds || 30)) {
+          holdAction = pos.candle1mStatus === 'RED' ? '📉 Candle 1m Merah (Siap perpanjang)' : '⏳ Pantau 30s terakhir';
+        }
+        holdClass = pos.extensionCount && pos.extensionCount > 0
+          ? 'text-green'
+          : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
+      }
       const isDualTp = !!currentConfig?.exit?.partialTpEnabled;
       const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.5) * 100);
       const tp2RatioPct = 100 - tp1RatioPct;
@@ -1225,12 +1258,11 @@ function renderActivePositions(positions) {
               <small>Strategi</small>
               <span class="text-cyan"><b>${isSmartTraderDriven ? '🧠 Smart Trader Flow' : isDualDriven ? '🎯 Dual Confluence' : '🐋 Whale Flow'}</b> <small>${pos.trailingTpActive ? '🚀 Trailing TP Aktif' : '🎯 Sniper TP'}</small></span>
             </div>
-            ` : `
+            ` : ''}
             <div class="pos-metric-item">
               <small>Sisa Waktu Hold</small>
               <span class="${holdClass}"><b>${holdCountdown}</b> <small>${holdAction}</small></span>
             </div>
-            `}
           </div>
 
           <div class="grid-layers-bar">

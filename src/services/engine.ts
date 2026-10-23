@@ -4239,7 +4239,7 @@ export class WickSniperEngine {
       if (pos.status !== 'SNIPING') continue;
       // Evaluasi batas waktu hold untuk SMART_MONEY (Mencegah funding fee drain)
       if (pos.strategyType === 'SMART_MONEY') {
-        const maxHoldHours = this.config.smartMoney?.maxHoldHours ?? 8;
+        const maxHoldHours = Number(pos.paramsSnapshot?.maxHoldHours ?? this.config.smartMoney?.maxHoldHours ?? 8);
         if (maxHoldHours > 0) {
           const maxHoldMs = maxHoldHours * 3600 * 1000;
           const deadline = pos.openedAt + maxHoldMs;
@@ -5736,6 +5736,8 @@ export class WickSniperEngine {
       totalMarginUsed: effectiveMargin,
       layers,
       openedAt: Date.now(),
+      holdDeadlineAt: Date.now() + (smCfg.maxHoldHours ?? 8) * 3600 * 1000,
+      holdRemainingSeconds: (smCfg.maxHoldHours ?? 8) * 3600,
       targetTpPrice: effectiveTpPrice,
       targetTp2Price: effectiveTp2Price,
       partialTpDone: false,
