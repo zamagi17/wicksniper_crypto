@@ -847,6 +847,27 @@ function renderStatus(status) {
     }
   }
 
+  // Update Equity & Available Margin di kartu Saldo Akun
+  const metricEquitySub = document.getElementById('metric-equity-sub');
+  if (metricEquitySub) {
+    const isLive = status.tradingMode === 'LIVE';
+    const walletBal = isLive
+      ? (status.realBalance !== undefined && status.realBalance !== null ? status.realBalance : (status.liveAvailableBalance || 0))
+      : (status.virtualBalance || 0);
+    const equityVal = walletBal + totalFloatingPnl;
+    const availMargin = isLive && status.liveAvailableBalance !== undefined
+      ? status.liveAvailableBalance
+      : Math.max(0, walletBal - totalActiveMargin);
+
+    metricEquitySub.style.display = 'block';
+    if (status.activePositionsCount > 0) {
+      const eqColor = totalFloatingPnl >= 0 ? '#30d158' : '#ff453a';
+      metricEquitySub.innerHTML = `Equity: <span style="color: ${eqColor}; font-weight: 700;">$${equityVal.toFixed(2)}</span> • Bebas: <span style="color: #64d2ff; font-weight: 700;">$${availMargin.toFixed(2)}</span>`;
+    } else {
+      metricEquitySub.innerHTML = `Bebas: <span style="color: #64d2ff; font-weight: 700;">$${availMargin.toFixed(2)}</span> (Tanpa Beban Margin)`;
+    }
+  }
+
   document.getElementById('closed-count-tag').innerText = `${status.totalTrades} Trade`;
 
   // Render Cooldown Strip
