@@ -103,6 +103,7 @@ export class WickSniperEngine {
   private virtualBalance: number = 1000;
   private activePositions: Map<string, ActivePosition> = new Map();
   private deployingSymbols: Set<string> = new Set(); // Kunci slot konkurensi (Anti-Race Condition lonjakan bersamaan)
+  private symbolConsecutiveLosses: Map<string, number> = new Map(); // Pelacak kekalahan beruntun per simbol
   private priceMomentum: Map<string, { price: number; time: number }[]> = new Map();
   private closingSymbols: Set<string> = new Set();
   private syncingTpSymbols: Set<string> = new Set();
@@ -551,14 +552,19 @@ export class WickSniperEngine {
       const now = Date.now();
       for (const t of recentTrades) {
         if (!t.symbol || !t.timestamp) continue;
+        const isSmTrade = t.strategyType === 'SMART_MONEY' || (t.paramsSnapshot as any)?.strategy === 'SMART_MONEY';
         const cooldownMins =
-          t.exitReason === 'EARLY_MOMENTUM_EXIT'
-            ? this.config.exit.earlyExitCooldownMinutes || 60
-            : t.exitReason === 'HARD_STOP_LOSS'
-              ? this.config.exit.hardStopCooldownMinutes || 180
+          t.exitReason === 'HARD_STOP_LOSS'
+            ? (this.config.exit.hardStopCooldownMinutes || 60)
+            : t.exitReason === 'EARLY_MOMENTUM_EXIT'
+              ? (this.config.exit.earlyExitCooldownMinutes || 60)
               : t.exitReason === 'BEP_DEFENSE'
-                ? this.config.exit.bepCooldownMinutes || 15
-                : this.config.scanner.cooldownMinutes || 10;
+                ? (this.config.exit.bepCooldownMinutes || 15)
+                : isSmTrade
+                  ? (this.config.smartMoney?.cooldownMinutes || 30)
+                  : t.side === 'LONG'
+                    ? (this.config.momentumLong?.cooldownMinutes || 15)
+                    : (this.config.scanner.cooldownMinutes || 10);
         const expiry = t.timestamp + cooldownMins * 60 * 1000;
         if (expiry > now) {
           const remainingMinutes = Math.ceil((expiry - now) / 60000);
@@ -3802,19 +3808,37 @@ export class WickSniperEngine {
       }
 
       const isSmTrade = pos.strategyType === 'SMART_MONEY' || !!pos.smartMoneyFlowStatus || this.config.triggerStrategy === 'SMART_MONEY';
-      const isSpecialExit = trade.exitReason === 'HARD_STOP_LOSS' || trade.exitReason === 'EARLY_MOMENTUM_EXIT' || trade.exitReason === 'BEP_DEFENSE';
-      const cooldownMinutes =
-        isSmTrade && !isSpecialExit
-          ? (this.config.smartMoney?.cooldownMinutes || 30)
-          : pos.side === 'LONG'
-            ? (this.config.momentumLong?.cooldownMinutes || 15)
-            : (trade.exitReason === 'EARLY_MOMENTUM_EXIT'
-                ? this.config.exit.earlyExitCooldownMinutes || 60
-                : trade.exitReason === 'HARD_STOP_LOSS'
-                  ? this.config.exit.hardStopCooldownMinutes || 180
-                  : trade.exitReason === 'BEP_DEFENSE'
-                    ? this.config.exit.bepCooldownMinutes || 15
-                    : this.config.scanner.cooldownMinutes || 10);
+      let cooldownMinutes: number;
+
+      if (trade.exitReason === 'HARD_STOP_LOSS') {
+        cooldownMinutes = this.config.exit.hardStopCooldownMinutes || 60;
+      } else if (trade.exitReason === 'EARLY_MOMENTUM_EXIT') {
+        cooldownMinutes = this.config.exit.earlyExitCooldownMinutes || 60;
+      } else if (trade.exitReason === 'BEP_DEFENSE') {
+        cooldownMinutes = this.config.exit.bepCooldownMinutes || 15;
+      } else if (isSmTrade) {
+        cooldownMinutes = this.config.smartMoney?.cooldownMinutes || 30;
+      } else if (pos.strategyType === 'MOMENTUM_LONG' || (pos.side === 'LONG' && !isSmTrade)) {
+        cooldownMinutes = this.config.momentumLong?.cooldownMinutes || 15;
+      } else {
+        cooldownMinutes = this.config.scanner.cooldownMinutes || 10;
+      }
+
+      // Proteksi Consecutive Loss: Lipatkan hukuman jika koin yang sama kalah berturut-turut
+      if (trade.realizedPnl < 0 || trade.exitReason === 'HARD_STOP_LOSS') {
+        const streak = (this.symbolConsecutiveLosses.get(pos.symbol) || 0) + 1;
+        this.symbolConsecutiveLosses.set(pos.symbol, streak);
+        if (streak >= 2) {
+          cooldownMinutes = Math.max(cooldownMinutes * streak, 120);
+          logger.log(
+            'WARN',
+            `🛡️ [CONSECUTIVE LOSS SHIELD] ${pos.symbol} telah ${streak}x loss beruntun! Cooldown diperpanjang menjadi ${cooldownMinutes}m agar tidak terjebak pisau jatuh / revenge trade.`,
+            pos.symbol
+          );
+        }
+      } else if (trade.realizedPnl > 0) {
+        this.symbolConsecutiveLosses.delete(pos.symbol);
+      }
       this.scanner.setCooldown(pos.symbol, cooldownMinutes);
       this.smartMoneyScanner.setCooldown(pos.symbol, cooldownMinutes);
       logger.log(
