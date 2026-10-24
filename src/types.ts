@@ -229,6 +229,8 @@ export interface SmartMoneySignal {
     trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
     changePct?: number;
   };
+  rsi15m?: number;
+  fundingRatePct?: number;
   timestamp: number;
   status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
   reason?: string;
@@ -368,6 +370,14 @@ export interface ActivePosition {
   isAutoBepDone?: boolean;
   entryReason?: string;
   lastReversalNotifiedSide?: 'LONG' | 'SHORT';
+  btcTrendStatus?: {
+    btcPrice: number;
+    ema: number;
+    trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    changePct?: number;
+  };
+  fundingRatePct?: number;
+  rsi15m?: number;
 }
 
 export interface SmartMoneyFlowStatus {
@@ -448,6 +458,14 @@ export interface ClosedTrade {
   smartMoneyFlowStatus?: SmartMoneyFlowStatus;
   slDescription?: string;
   entryReason?: string;
+  btcTrendStatus?: {
+    btcPrice: number;
+    ema: number;
+    trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    changePct?: number;
+  };
+  fundingRatePct?: number;
+  rsi15m?: number;
 }
 
 export interface EngineStatus {

@@ -487,9 +487,12 @@ export class SmartMoneyScanner {
         }
 
         // Filter RSI 15m: Mencegah Short di dasar jurang (oversold), Long di pucuk, dan Short koin yang sedang pumping liar
+        let recordedRsi: number | undefined;
+        let recordedFunding: number | undefined;
         if (this.config.rsiFilterEnabled !== false) {
           const rsi = await binanceFutures.getSymbolRsi(symbol, '15m');
           if (rsi !== undefined) {
+            recordedRsi = rsi;
             const minRsiShort = this.config.minRsiShort ?? 48;
             const maxRsiShort = this.config.maxRsiShort ?? 65;
             const maxRsiLong = this.config.maxRsiLong ?? 62;
@@ -544,6 +547,7 @@ export class SmartMoneyScanner {
         if (this.config.fundingRateFilterEnabled !== false) {
           const fundingPct = await binanceFutures.getFundingRate(symbol);
           if (fundingPct !== undefined) {
+            recordedFunding = fundingPct;
             const minFrShort = this.config.minFundingRatePct ?? -0.02; // Default -0.02%
             const maxFrLong = this.config.maxFundingRatePct ?? 0.10;   // Default +0.10%
 
@@ -648,6 +652,8 @@ export class SmartMoneyScanner {
           smartTraderAligned,
           atr: atrData?.atr,
           atrPct: atrData?.atrPct,
+          rsi15m: recordedRsi,
+          fundingRatePct: recordedFunding,
           btcTrendStatus: btcTrendStatus
             ? {
                 btcPrice: btcTrendStatus.btcPrice,

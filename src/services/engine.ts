@@ -3790,6 +3790,9 @@ export class WickSniperEngine {
         targetTp2Price: pos.targetTp2Price,
         hardSlPrice: pos.hardSlPrice,
         partialTpDone: pos.partialTpDone || false,
+        btcTrendStatus: pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus,
+        fundingRatePct: pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct,
+        rsi15m: pos.rsi15m ?? pos.paramsSnapshot?.rsi15m,
       };
 
       this.closedTrades.unshift(trade);
@@ -5770,6 +5773,9 @@ export class WickSniperEngine {
       bepTriggerPrice: effectiveBepTrigger,
       isAutoBepDone: false,
       entryReason: signal.reason,
+      btcTrendStatus: signal.btcTrendStatus,
+      fundingRatePct: signal.fundingRatePct,
+      rsi15m: signal.rsi15m,
       paramsSnapshot: {
         strategy: 'SMART_MONEY',
         entryReason: signal.reason,
@@ -5822,6 +5828,9 @@ export class WickSniperEngine {
         leverage,
         signalReason: signal.reason,
         btcTrendStatus: signal.btcTrendStatus,
+        fundingRatePct: signal.fundingRatePct,
+        rsi15m: signal.rsi15m,
+        maxRsiShort: smCfg.maxRsiShort ?? 65,
       },
     };
 

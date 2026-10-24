@@ -692,6 +692,21 @@ function formatSmartMoneyReasonChips(rawReason) {
       bg = 'rgba(255, 214, 10, 0.12)';
       border = 'rgba(255, 214, 10, 0.32)';
       color = '#ffd60a';
+    } else if (part.includes('BTC')) {
+      icon = '🛡️';
+      bg = 'rgba(245, 158, 11, 0.14)';
+      border = 'rgba(245, 158, 11, 0.35)';
+      color = '#f59e0b';
+    } else if (part.includes('Funding')) {
+      icon = '⚡';
+      bg = 'rgba(0, 240, 255, 0.12)';
+      border = 'rgba(0, 240, 255, 0.35)';
+      color = '#00f0ff';
+    } else if (part.includes('EMA')) {
+      icon = '📈';
+      bg = 'rgba(56, 189, 248, 0.12)';
+      border = 'rgba(56, 189, 248, 0.35)';
+      color = '#38bdf8';
     }
 
     return `<span class="sm-reason-chip" style="background: ${bg}; border: 1px solid ${border}; color: ${color}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; line-height: 1.4;">${icon} ${escapeHtml(part)}</span>`;
@@ -1149,6 +1164,22 @@ function renderActivePositions(positions) {
           whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="${healthTitle}: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
         }
 
+        let btcTag = '';
+        const btc = pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus;
+        if (btc) {
+          const btcTrendColor = btc.trend === 'BULLISH' ? '#30d158' : btc.trend === 'BEARISH' ? '#ff453a' : '#ffd60a';
+          const btcTrendBg = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.12)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.12)' : 'rgba(255, 214, 10, 0.12)';
+          const btcTrendBorder = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.35)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.35)' : 'rgba(255, 214, 10, 0.35)';
+          btcTag = `<span class="badge-tag" style="background: ${btcTrendBg}; border: 1px solid ${btcTrendBorder}; color: ${btcTrendColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Tren Macro BTC saat Entry: $${Number(btc.btcPrice || 0).toFixed(0)} (${btc.trend} vs EMA $${Number(btc.ema || 0).toFixed(0)})">🛡️ BTC: ${btc.trend}</span>`;
+        }
+
+        let fundingTag = '';
+        const fr = pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct;
+        if (fr !== undefined && fr !== null) {
+          const frColor = fr < -0.02 ? '#ff453a' : '#00f0ff';
+          fundingTag = `<span class="badge-tag" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: ${frColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Funding Rate saat Entry: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(4)}%">⚡ FR: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(3)}%</span>`;
+        }
+
         if (smFlow.reversalDetected) {
           const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
           let oppRatio = '0';
@@ -1203,6 +1234,8 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
               ${isSmartTraderDriven ? smartTraderTag + smFlowBadgeHtml + modalPausTag + whaleHealthTag : smFlowBadgeHtml + modalPausTag + whaleHealthTag + smartTraderTag}
+              ${btcTag}
+              ${fundingTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -1895,11 +1928,15 @@ function renderClosedTradesTable(trades) {
       const safeTradeId = t.id ? String(t.id).replace(/'/g, "\\'") : '';
 
       const rowSide = (t.side || t.paramsSnapshot?.side || 'SHORT').toUpperCase();
+      const rowBtc = t.btcTrendStatus || t.paramsSnapshot?.btcTrendStatus;
+      const btcBadge = rowBtc
+        ? `<span class="badge-tag" style="font-size: 9px; padding: 1px 4px; margin-left: 3px; font-weight: 600; background: ${rowBtc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)'}; color: ${rowBtc.trend === 'BULLISH' ? '#30d158' : '#ff453a'}; border: 1px solid ${rowBtc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)'};" title="BTC saat Entry: $${Number(rowBtc.btcPrice || 0).toFixed(0)} (${rowBtc.trend})">BTC ${rowBtc.trend === 'BULLISH' ? '▲' : '▼'}</span>`
+        : '';
 
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
-          <td><b>${t.symbol}</b> <span class="badge-side ${rowSide === 'LONG' ? 'long' : 'short'}">${rowSide}</span> ${stratBadge} ${layerBadge}</td>
+          <td><b>${t.symbol}</b> <span class="badge-side ${rowSide === 'LONG' ? 'long' : 'short'}">${rowSide}</span> ${stratBadge} ${btcBadge} ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
           <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
@@ -2629,6 +2666,39 @@ function openTradeDetailModal(tradeId, tradeIndex) {
                 <div class="td-kpi-label">👥 Rasio Trader Ritel</div>
                 <div class="td-kpi-val" style="font-size: 11.5px;">${(Number(retailLong) * 100).toFixed(0)}% Long / ${(Number(retailShort) * 100).toFixed(0)}% Short</div>
               </div>` : ''}
+
+              ${(() => {
+                const btc = snap?.btcTrendStatus || t.btcTrendStatus;
+                if (!btc) return '';
+                const btcColor = btc.trend === 'BULLISH' ? 'text-green' : btc.trend === 'BEARISH' ? 'text-red' : 'text-yellow';
+                return `
+                <div class="td-kpi-card">
+                  <div class="td-kpi-label">🛡️ Tren Macro BTC Saat Entry</div>
+                  <div class="td-kpi-val ${btcColor}"><b>${btc.trend}</b> <small style="font-size:10.5px; color:var(--text-muted); font-weight:normal;">($${Number(btc.btcPrice || 0).toFixed(0)} / EMA $${Number(btc.ema || 0).toFixed(0)})</small></div>
+                </div>`;
+              })()}
+
+              ${(() => {
+                const fr = snap?.fundingRatePct ?? t.fundingRatePct;
+                if (fr === undefined || fr === null) return '';
+                const frColor = fr < -0.02 ? 'text-red' : fr > 0.05 ? 'text-yellow' : 'text-cyan';
+                return `
+                <div class="td-kpi-card">
+                  <div class="td-kpi-label">⚡ Funding Rate Saat Entry</div>
+                  <div class="td-kpi-val ${frColor}"><b>${fr >= 0 ? '+' : ''}${Number(fr).toFixed(4)}%</b> <small style="font-size:10.5px; color:var(--text-muted); font-weight:normal;">(${fr < 0 ? 'Crowded Short' : 'Crowded Long'})</small></div>
+                </div>`;
+              })()}
+
+              ${(() => {
+                const rsiVal = snap?.rsi15m ?? t.rsi15m;
+                if (rsiVal === undefined || rsiVal === null) return '';
+                const rsiColor = rsiVal > 65 ? 'text-red' : rsiVal < 45 ? 'text-cyan' : 'text-green';
+                return `
+                <div class="td-kpi-card">
+                  <div class="td-kpi-label">📊 RSI 15m Saat Entry</div>
+                  <div class="td-kpi-val ${rsiColor}"><b>${Number(rsiVal).toFixed(1)}</b> <small style="font-size:10.5px; color:var(--text-muted); font-weight:normal;">(Batas Short: ${snap?.maxRsiShort ?? 65})</small></div>
+                </div>`;
+              })()}
 
               ${slDesc ? `
               <div class="td-kpi-card" style="grid-column: span 2;">
