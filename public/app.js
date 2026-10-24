@@ -1116,6 +1116,22 @@ function renderActivePositions(positions) {
       let whaleHealthTag = '';
       let smartTraderTag = '';
 
+      let btcTag = '';
+      const btc = pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus;
+      if (btc) {
+        const btcTrendColor = btc.trend === 'BULLISH' ? '#30d158' : btc.trend === 'BEARISH' ? '#ff453a' : '#ffd60a';
+        const btcTrendBg = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.12)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.12)' : 'rgba(255, 214, 10, 0.12)';
+        const btcTrendBorder = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.35)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.35)' : 'rgba(255, 214, 10, 0.35)';
+        btcTag = `<span class="badge-tag" style="background: ${btcTrendBg}; border: 1px solid ${btcTrendBorder}; color: ${btcTrendColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Tren Macro BTC saat Entry: $${Number(btc.btcPrice || 0).toFixed(0)} (${btc.trend} vs EMA $${Number(btc.ema || 0).toFixed(0)})">🛡️ BTC: ${btc.trend}</span>`;
+      }
+
+      let fundingTag = '';
+      const fr = pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct;
+      if (fr !== undefined && fr !== null) {
+        const frColor = fr < -0.02 ? '#ff453a' : '#00f0ff';
+        fundingTag = `<span class="badge-tag" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: ${frColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Funding Rate saat Entry: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(4)}%">⚡ FR: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(3)}%</span>`;
+      }
+
       const posDriver = pos.paramsSnapshot?.signalDriver || currentConfig?.smartMoney?.signalDriver || 'SMART_TRADER';
       const isSmartTraderDriven = posDriver === 'SMART_TRADER';
       const isWhaleDriven = posDriver === 'WHALE';
@@ -1161,24 +1177,7 @@ function renderActivePositions(positions) {
           const winBg = winrate >= 50 ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)';
           const winBorder = winrate >= 50 ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
           const healthTitle = isSmartTraderDriven ? 'Kesehatan Paus (Guard)' : 'Kesehatan Paus';
-          whaleHealthTag = `<span class="badge-tag" style="background: ${winBg}; border: 1px solid ${winBorder}; color: ${winColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="${healthTitle}: ${winrate.toFixed(1)}% Paus Meraih Laba (${smFlow.whaleProfitWhales ?? 0}/${smFlow.whaleTotalWhales ?? 0} Paus)">🩺 ${winrate.toFixed(0)}% Laba</span>`;
-        }
-
-        let btcTag = '';
-        const btc = pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus;
-        if (btc) {
-          const btcTrendColor = btc.trend === 'BULLISH' ? '#30d158' : btc.trend === 'BEARISH' ? '#ff453a' : '#ffd60a';
-          const btcTrendBg = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.12)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.12)' : 'rgba(255, 214, 10, 0.12)';
-          const btcTrendBorder = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.35)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.35)' : 'rgba(255, 214, 10, 0.35)';
-          btcTag = `<span class="badge-tag" style="background: ${btcTrendBg}; border: 1px solid ${btcTrendBorder}; color: ${btcTrendColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Tren Macro BTC saat Entry: $${Number(btc.btcPrice || 0).toFixed(0)} (${btc.trend} vs EMA $${Number(btc.ema || 0).toFixed(0)})">🛡️ BTC: ${btc.trend}</span>`;
-        }
-
-        let fundingTag = '';
-        const fr = pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct;
-        if (fr !== undefined && fr !== null) {
-          const frColor = fr < -0.02 ? '#ff453a' : '#00f0ff';
-          fundingTag = `<span class="badge-tag" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: ${frColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Funding Rate saat Entry: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(4)}%">⚡ FR: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(3)}%</span>`;
-        }
+          }
 
         if (smFlow.reversalDetected) {
           const oppSide = pos.side === 'LONG' ? 'SHORT' : 'LONG';
