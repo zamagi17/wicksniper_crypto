@@ -842,6 +842,35 @@
               </div>
             </div>
           </div>
+
+          <!-- BTC Trend Guard (Macro Anti-Dump & Anti-Pump) Section -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #f59e0b; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-btc-trend-enabled" style="width: 16px; height: 16px; accent-color: #f59e0b;" onchange="toggleSmBtcTrendInput()">
+              <span>🛡️ Pelindung Tren Macro BTC (Anti-Dump & Anti-Pump) <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-btc-trend-box" style="margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Timeframe BTC</label>
+                <select id="cfg-sm-btc-trend-tf" class="form-control" style="padding: 4px 8px;">
+                  <option value="15m">15 Menit (15m)</option>
+                  <option value="1h" selected>1 Jam (1h - Rekomendasi)</option>
+                  <option value="4h">4 Jam (4h - Tren Kuat)</option>
+                </select>
+                <small class="form-hint">Timeframe chart BTC untuk membaca arah tren pasar global.</small>
+              </div>
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Periode EMA BTC</label>
+                <input type="number" id="cfg-sm-btc-trend-ema" min="10" max="200" step="1" class="form-control" placeholder="50" style="padding: 4px 8px;">
+                <small class="form-hint">Long dilarang jika BTC &lt; EMA; Short dilarang jika BTC &gt; EMA (Standar: 50).</small>
+              </div>
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Ambang Flash Dump/Surge (%)</label>
+                <input type="number" id="cfg-sm-btc-drop-threshold" min="0.3" max="5.0" step="0.1" class="form-control" placeholder="1.0" style="padding: 4px 8px;">
+                <small class="form-hint">Blokir Long saat BTC drop &ge; X%, blokir Short saat BTC surge &ge; X% (Standar: 1.0%).</small>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="form-row">

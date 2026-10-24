@@ -176,6 +176,22 @@ export interface SmartMoneyConfig {
   emaFilterEnabled?: boolean;  // Filter Konfirmasi Tren EMA (e.g. EMA 50 15m)
   emaTimeframe?: '5m' | '15m' | '1h'; // Timeframe EMA (default: '15m')
   emaPeriod?: number;          // Periode EMA (default: 50)
+  btcTrendFilterEnabled?: boolean; // Filter Arah Tren Macro BTC (Anti-Dump & Anti-Pump Market Wide)
+  btcTrendTimeframe?: '15m' | '1h' | '4h'; // Timeframe tren BTC (default: '1h')
+  btcTrendEmaPeriod?: number;  // Periode EMA BTC (default: 50)
+  btcDropThresholdPct?: number; // Ambang flash dump/surge BTC (%) (default: 1.0%)
+}
+
+export interface BtcTrendStatus {
+  btcPrice: number;
+  ema: number;
+  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  changePct: number;
+  isFlashDump: boolean;
+  isFlashSurge: boolean;
+  canLong: boolean;
+  canShort: boolean;
+  reason: string;
 }
 
 export interface SmartMoneySignal {
@@ -203,6 +219,12 @@ export interface SmartMoneySignal {
   smartTraderAligned?: boolean;
   atr?: number;
   atrPct?: number;
+  btcTrendStatus?: {
+    btcPrice: number;
+    ema: number;
+    trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    changePct?: number;
+  };
   timestamp: number;
   status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
   reason?: string;

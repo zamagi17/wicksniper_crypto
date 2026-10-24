@@ -3321,6 +3321,11 @@ function populateSettingsForm(cfg) {
   if (smEmaCb) smEmaCb.checked = !!smCfg.emaFilterEnabled;
   setVal('cfg-sm-ema-timeframe', smCfg.emaTimeframe || '15m');
   setVal('cfg-sm-ema-period', smCfg.emaPeriod ?? 50);
+  const smBtcTrendCb = document.getElementById('cfg-sm-btc-trend-enabled');
+  if (smBtcTrendCb) smBtcTrendCb.checked = smCfg.btcTrendFilterEnabled !== false;
+  setVal('cfg-sm-btc-trend-tf', smCfg.btcTrendTimeframe || '1h');
+  setVal('cfg-sm-btc-trend-ema', smCfg.btcTrendEmaPeriod ?? 50);
+  setVal('cfg-sm-btc-drop-threshold', smCfg.btcDropThresholdPct ?? 1.0);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3335,6 +3340,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmAtrDynamicInputs === 'function') toggleSmAtrDynamicInputs();
   if (typeof toggleSmAutoBepInput === 'function') toggleSmAutoBepInput();
   if (typeof toggleSmEmaInput === 'function') toggleSmEmaInput();
+  if (typeof toggleSmBtcTrendInput === 'function') toggleSmBtcTrendInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -3662,6 +3668,10 @@ function getSettingsFormData() {
       emaFilterEnabled: !!document.getElementById('cfg-sm-ema-filter-enabled')?.checked,
       emaTimeframe: getVal('cfg-sm-ema-timeframe', '15m'),
       emaPeriod: parseInt(getVal('cfg-sm-ema-period', '50'), 10) || 50,
+      btcTrendFilterEnabled: !!document.getElementById('cfg-sm-btc-trend-enabled')?.checked,
+      btcTrendTimeframe: getVal('cfg-sm-btc-trend-tf', '1h'),
+      btcTrendEmaPeriod: parseInt(getVal('cfg-sm-btc-trend-ema', '50'), 10) || 50,
+      btcDropThresholdPct: parseFloat(getVal('cfg-sm-btc-drop-threshold', '1.0')) || 1.0,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -4407,6 +4417,15 @@ function toggleSmEmaInput() {
   }
 }
 window.toggleSmEmaInput = toggleSmEmaInput;
+
+function toggleSmBtcTrendInput() {
+  const cb = document.getElementById('cfg-sm-btc-trend-enabled');
+  const box = document.getElementById('cfg-sm-btc-trend-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmBtcTrendInput = toggleSmBtcTrendInput;
 
 function toggleSmAtrDynamicInputs() {
   const cb = document.getElementById('cfg-sm-atr-dynamic-sltp');

@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import https from 'https';
 import dns from 'dns';
 import { logger } from './logger';
+import { BtcTrendStatus } from '../types';
 
 export interface SymbolPrecision {
   symbol: string;
@@ -1889,6 +1890,87 @@ export class BinanceFuturesClient {
       }
     } catch {}
     return undefined;
+  }
+
+  private btcTrendCache: Map<string, { timestamp: number; data: BtcTrendStatus }> = new Map();
+
+  public async getBtcTrendStatus(
+    interval: string = '1h',
+    period: number = 50,
+    dropThresholdPct: number = 1.0
+  ): Promise<BtcTrendStatus | null> {
+    const cacheKey = `${interval}_${period}_${dropThresholdPct}`;
+    const cached = this.btcTrendCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 20_000) {
+      return cached.data;
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      const limit = Math.max(period + 30, 80);
+      const res = await client.get('/fapi/v1/klines', {
+        params: { symbol: 'BTCUSDT', interval, limit },
+        timeout: 4000,
+      });
+
+      if (res && Array.isArray(res.data) && res.data.length >= period) {
+        const klines = res.data;
+        const closes = klines.map((k: any) => parseFloat(k[4]));
+        const currentCandle = klines[klines.length - 1];
+        const openPrice = parseFloat(currentCandle[1]);
+        const currentPrice = parseFloat(currentCandle[4]);
+
+        const multiplier = 2 / (period + 1);
+        let ema = closes[0];
+        for (let i = 1; i < closes.length; i++) {
+          ema = (closes[i] - ema) * multiplier + ema;
+        }
+
+        const candleChangePct = ((currentPrice - openPrice) / openPrice) * 100;
+        const prevCandle = klines.length >= 2 ? klines[klines.length - 2] : null;
+        const prevClose = prevCandle ? parseFloat(prevCandle[4]) : openPrice;
+        const changeFromPrevClose = ((currentPrice - prevClose) / prevClose) * 100;
+
+        const thresh = Math.abs(dropThresholdPct);
+        const isFlashDump = candleChangePct <= -thresh || changeFromPrevClose <= -thresh;
+        const isFlashSurge = candleChangePct >= thresh || changeFromPrevClose >= thresh;
+
+        const isBullish = currentPrice >= ema;
+        const isBearish = currentPrice < ema;
+        const trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = isBullish ? 'BULLISH' : 'BEARISH';
+
+        // Pelindung Dua Arah:
+        // - LONG aman jika: BTC tidak sedang Flash Dump DAN BTC berada di atas garis EMA (Trend Bullish)
+        // - SHORT aman jika: BTC tidak sedang Flash Surge DAN BTC berada di bawah garis EMA (Trend Bearish)
+        const canLong = !isFlashDump && isBullish;
+        const canShort = !isFlashSurge && isBearish;
+
+        let reason = `BTC $${currentPrice.toFixed(0)} (${trend} vs EMA${period} $${ema.toFixed(0)}) | 1-Candle Δ: ${candleChangePct >= 0 ? '+' : ''}${candleChangePct.toFixed(2)}%`;
+        if (isFlashDump) reason += ' | ⚠️ FLASH DUMP';
+        if (isFlashSurge) reason += ' | 🚀 FLASH SURGE';
+
+        const result: BtcTrendStatus = {
+          btcPrice: currentPrice,
+          ema,
+          trend,
+          changePct: candleChangePct,
+          isFlashDump,
+          isFlashSurge,
+          canLong,
+          canShort,
+          reason,
+        };
+
+        this.btcTrendCache.set(cacheKey, { timestamp: now, data: result });
+        return result;
+      }
+    } catch {
+      if (cached) {
+        return cached.data;
+      }
+    }
+    return null;
   }
 
   public isUserStreamActive(): boolean {

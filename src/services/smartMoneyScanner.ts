@@ -1,4 +1,4 @@
-import { BotConfig, SmartMoneyConfig, SmartMoneySignal } from '../types';
+import { BotConfig, BtcTrendStatus, SmartMoneyConfig, SmartMoneySignal } from '../types';
 import { binanceFutures } from './binance';
 import { logger } from './logger';
 
@@ -556,6 +556,37 @@ export class SmartMoneyScanner {
           }
         }
 
+        // Filter Pelindung Tren Macro BTC (Anti-Dump & Anti-Pump Market Wide)
+        let btcTrendStatus: BtcTrendStatus | null = null;
+        if (this.config.btcTrendFilterEnabled !== false) {
+          const btcTf = this.config.btcTrendTimeframe || '1h';
+          const btcPeriod = this.config.btcTrendEmaPeriod || 50;
+          const dropThresh = this.config.btcDropThresholdPct ?? 1.0;
+          btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh);
+
+          if (btcTrendStatus) {
+            if (detectedSide === 'LONG' && !btcTrendStatus.canLong) {
+              const dumpDetail = btcTrendStatus.isFlashDump ? ' (FLASH DUMP)' : '';
+              logger.log(
+                'INFO',
+                `🛡️ [BTC GUARD SKIP] ${symbol} LONG dibatalkan: BTC sedang ${btcTrendStatus.trend}${dumpDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko pisau jatuh pasar.`
+              );
+              return;
+            }
+
+            if (detectedSide === 'SHORT' && !btcTrendStatus.canShort) {
+              const surgeDetail = btcTrendStatus.isFlashSurge ? ' (FLASH SURGE)' : '';
+              logger.log(
+                'INFO',
+                `🛡️ [BTC GUARD SKIP] ${symbol} SHORT dibatalkan: BTC sedang ${btcTrendStatus.trend}${surgeDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko kena squeeze pump pasar.`
+              );
+              return;
+            }
+
+            reason += ` | BTC ${btcTrendStatus.trend} ($${btcTrendStatus.btcPrice.toFixed(0)}/EMA $${btcTrendStatus.ema.toFixed(0)})`;
+          }
+        }
+
         const signalId = `sm_${symbol}_${Date.now()}`;
         const signal: SmartMoneySignal = {
           id: signalId,
@@ -582,6 +613,14 @@ export class SmartMoneyScanner {
           smartTraderAligned,
           atr: atrData?.atr,
           atrPct: atrData?.atrPct,
+          btcTrendStatus: btcTrendStatus
+            ? {
+                btcPrice: btcTrendStatus.btcPrice,
+                ema: btcTrendStatus.ema,
+                trend: btcTrendStatus.trend,
+                changePct: btcTrendStatus.changePct,
+              }
+            : undefined,
           timestamp: Date.now(),
           status: 'PENDING',
           reason,

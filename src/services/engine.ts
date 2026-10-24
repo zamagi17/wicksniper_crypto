@@ -194,6 +194,10 @@ export class WickSniperEngine {
       emaFilterEnabled: false,
       emaTimeframe: '15m',
       emaPeriod: 50,
+      btcTrendFilterEnabled: true,
+      btcTrendTimeframe: '1h',
+      btcTrendEmaPeriod: 50,
+      btcDropThresholdPct: 1.0,
     };
   }
 
@@ -5813,6 +5817,7 @@ export class WickSniperEngine {
         marginUsdt: actualMargin,
         leverage,
         signalReason: signal.reason,
+        btcTrendStatus: signal.btcTrendStatus,
       },
     };
 
