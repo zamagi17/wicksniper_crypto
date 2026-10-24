@@ -3282,7 +3282,12 @@ function populateSettingsForm(cfg) {
   const smRsiCb = document.getElementById('cfg-sm-rsi-filter');
   if (smRsiCb) smRsiCb.checked = smCfg.rsiFilterEnabled !== false;
   setVal('cfg-sm-min-rsi-short', smCfg.minRsiShort ?? 48);
+  setVal('cfg-sm-max-rsi-short', smCfg.maxRsiShort ?? 65);
   setVal('cfg-sm-max-rsi-long', smCfg.maxRsiLong ?? 62);
+  const smFundingCb = document.getElementById('cfg-sm-funding-filter-enabled');
+  if (smFundingCb) smFundingCb.checked = smCfg.fundingRateFilterEnabled !== false;
+  setVal('cfg-sm-min-funding-short', smCfg.minFundingRatePct ?? -0.02);
+  setVal('cfg-sm-max-funding-long', smCfg.maxFundingRatePct ?? 0.10);
   const smPullbackCb = document.getElementById('cfg-sm-pullback-enabled');
   if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false;
   setVal('cfg-sm-pullback-min', smCfg.pullbackMinPct ?? 0.3);
@@ -3341,6 +3346,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmAutoBepInput === 'function') toggleSmAutoBepInput();
   if (typeof toggleSmEmaInput === 'function') toggleSmEmaInput();
   if (typeof toggleSmBtcTrendInput === 'function') toggleSmBtcTrendInput();
+  if (typeof toggleSmFundingInput === 'function') toggleSmFundingInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
   setVal('cfg-mode', cfg.tradingMode || 'PAPER');
@@ -3641,7 +3647,11 @@ function getSettingsFormData() {
       trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
       rsiFilterEnabled: !!document.getElementById('cfg-sm-rsi-filter')?.checked,
       minRsiShort: parseFloat(getVal('cfg-sm-min-rsi-short', '48')) || 48,
+      maxRsiShort: parseFloat(getVal('cfg-sm-max-rsi-short', '65')) || 65,
       maxRsiLong: parseFloat(getVal('cfg-sm-max-rsi-long', '62')) || 62,
+      fundingRateFilterEnabled: !!document.getElementById('cfg-sm-funding-filter-enabled')?.checked,
+      minFundingRatePct: parseFloat(getVal('cfg-sm-min-funding-short', '-0.02')) ?? -0.02,
+      maxFundingRatePct: parseFloat(getVal('cfg-sm-max-funding-long', '0.10')) ?? 0.10,
       pullbackConfirmationEnabled: !!document.getElementById('cfg-sm-pullback-enabled')?.checked,
       pullbackMinPct: parseFloat(getVal('cfg-sm-pullback-min', '0.3')) || 0.3,
       pullbackMaxWaitSeconds: parseInt(getVal('cfg-sm-pullback-wait', '12'), 10) || 12,
@@ -4426,6 +4436,15 @@ function toggleSmBtcTrendInput() {
   }
 }
 window.toggleSmBtcTrendInput = toggleSmBtcTrendInput;
+
+function toggleSmFundingInput() {
+  const cb = document.getElementById('cfg-sm-funding-filter-enabled');
+  const box = document.getElementById('cfg-sm-funding-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmFundingInput = toggleSmFundingInput;
 
 function toggleSmAtrDynamicInputs() {
   const cb = document.getElementById('cfg-sm-atr-dynamic-sltp');

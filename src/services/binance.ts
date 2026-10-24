@@ -1973,6 +1973,33 @@ export class BinanceFuturesClient {
     return null;
   }
 
+  private fundingRateCache: Map<string, { timestamp: number; ratePct: number }> = new Map();
+
+  public async getFundingRate(symbol: string): Promise<number | undefined> {
+    const cached = this.fundingRateCache.get(symbol);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 30_000) {
+      return cached.ratePct;
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get('/fapi/v1/premiumIndex', {
+        params: { symbol },
+        timeout: 3000,
+      });
+      if (res?.data?.lastFundingRate) {
+        const fr = parseFloat(res.data.lastFundingRate);
+        if (!isNaN(fr)) {
+          const ratePct = fr * 100;
+          this.fundingRateCache.set(symbol, { timestamp: now, ratePct });
+          return ratePct;
+        }
+      }
+    } catch {}
+    return undefined;
+  }
+
   public isUserStreamActive(): boolean {
     return this.isUserWsConnected;
   }

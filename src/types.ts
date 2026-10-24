@@ -132,7 +132,11 @@ export interface SmartMoneyConfig {
   retailTrapFilter: boolean;   // Konfirmasi retail di sisi berlawanan
   rsiFilterEnabled?: boolean;  // Filter RSI Anti-Pucuk/Lembah
   minRsiShort?: number;        // Batas minimal RSI untuk Short (e.g. 48)
+  maxRsiShort?: number;        // Batas maksimal RSI untuk Short (e.g. 65 - Anti-Parabolic Pump/Squeeze)
   maxRsiLong?: number;         // Batas maksimal RSI untuk Long (e.g. 62)
+  fundingRateFilterEnabled?: boolean; // Filter Funding Rate (Anti-Negative Funding Squeeze)
+  minFundingRatePct?: number;         // Ambang batas minimal funding rate untuk Short (%, default -0.02%)
+  maxFundingRatePct?: number;         // Ambang batas maksimal funding rate untuk Long (%, default +0.10%)
   whaleDistanceFilterEnabled?: boolean; // Filter Jarak Modal Paus (Anti-FOMO)
   maxWhaleDistancePct?: number;         // Maksimal toleransi jarak harga dari modal paus (%, default 1.5%)
   whaleHealthFilterEnabled?: boolean;   // Filter Kesehatan Paus: Hanya ikuti paus yang sehat/meraih laba (Anti-Nyangkut)

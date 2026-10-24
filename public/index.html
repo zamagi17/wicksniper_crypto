@@ -634,16 +634,41 @@
               <input type="checkbox" id="cfg-sm-rsi-filter" style="width: 16px; height: 16px; accent-color: #a855f7;" checked onchange="toggleSmRsiInput()">
               <span>📊 Aktifkan Filter RSI 15m (Anti-Pucuk & Anti-Dasar Jurang) <span class="badge-tag badge-smart-money">Smart Money</span></span>
             </label>
-            <div id="cfg-sm-rsi-box" style="display: flex; gap: 14px; margin-top: 8px;">
-              <div style="flex: 1;">
-                <label style="font-size: 11px; margin-bottom: 2px;">Min RSI SHORT (Standar: 48)</label>
+            <div id="cfg-sm-rsi-box" style="display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 130px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Min RSI SHORT</label>
                 <input type="number" id="cfg-sm-min-rsi-short" min="30" max="70" step="1" class="form-control" placeholder="48" style="padding: 4px 8px;">
-                <small class="form-hint">Dilarang SHORT jika RSI &lt; 48 (koin sudah oversold di dasar).</small>
+                <small class="form-hint">Dilarang SHORT jika RSI &lt; 48 (oversold di dasar jurang).</small>
               </div>
-              <div style="flex: 1;">
-                <label style="font-size: 11px; margin-bottom: 2px;">Max RSI LONG (Standar: 62)</label>
+              <div style="flex: 1; min-width: 130px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Max RSI SHORT (Anti-Squeeze)</label>
+                <input type="number" id="cfg-sm-max-rsi-short" min="50" max="85" step="1" class="form-control" placeholder="65" style="padding: 4px 8px;">
+                <small class="form-hint">Dilarang SHORT jika RSI &gt; 65 (koin sedang pump parabolik).</small>
+              </div>
+              <div style="flex: 1; min-width: 130px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Max RSI LONG</label>
                 <input type="number" id="cfg-sm-max-rsi-long" min="40" max="80" step="1" class="form-control" placeholder="62" style="padding: 4px 8px;">
-                <small class="form-hint">Dilarang LONG jika RSI &gt; 62 (koin sudah overbought di pucuk).</small>
+                <small class="form-hint">Dilarang LONG jika RSI &gt; 62 (overbought di pucuk).</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Funding Rate Squeeze Guard Section -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #f87171; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-sm-funding-filter-enabled" style="width: 16px; height: 16px; accent-color: #f87171;" checked onchange="toggleSmFundingInput()">
+              <span>⚡ Filter Funding Rate (Anti-Short Squeeze & Anti-Crowded Trade) <span class="badge-tag badge-smart-money">Smart Money</span></span>
+            </label>
+            <div id="cfg-sm-funding-box" style="margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Min Funding Rate SHORT (Standar: -0.02%)</label>
+                <input type="number" id="cfg-sm-min-funding-short" min="-0.5" max="0.0" step="0.005" class="form-control" placeholder="-0.02" style="padding: 4px 8px;">
+                <small class="form-hint">Dilarang SHORT jika Funding &lt; -0.02% (pasar crowded short, rawan squeeze bandar).</small>
+              </div>
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Max Funding Rate LONG (Standar: +0.10%)</label>
+                <input type="number" id="cfg-sm-max-funding-long" min="0.01" max="0.5" step="0.01" class="form-control" placeholder="0.10" style="padding: 4px 8px;">
+                <small class="form-hint">Dilarang LONG jika Funding &gt; +0.10% (biaya long mahal & rawan long flush).</small>
               </div>
             </div>
           </div>

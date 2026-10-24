@@ -486,15 +486,23 @@ export class SmartMoneyScanner {
           }
         }
 
-        // Filter RSI 15m: Mencegah Short di dasar jurang (oversold) & Long di pucuk (overbought)
+        // Filter RSI 15m: Mencegah Short di dasar jurang (oversold), Long di pucuk, dan Short koin yang sedang pumping liar
         if (this.config.rsiFilterEnabled !== false) {
           const rsi = await binanceFutures.getSymbolRsi(symbol, '15m');
           if (rsi !== undefined) {
             const minRsiShort = this.config.minRsiShort ?? 48;
+            const maxRsiShort = this.config.maxRsiShort ?? 65;
             const maxRsiLong = this.config.maxRsiLong ?? 62;
 
             if (detectedSide === 'SHORT' && rsi < minRsiShort) {
               logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: RSI 15m (${rsi}) < ${minRsiShort} (Koin sudah oversold di dasar jurang).`);
+              return;
+            }
+            if (detectedSide === 'SHORT' && rsi > maxRsiShort) {
+              logger.log(
+                'INFO',
+                `🛡️ [RSI SHORT SKIP] ${symbol} SHORT dilewati: RSI 15m (${rsi}) > ${maxRsiShort} (Koin sedang overbought / parabolic pump, dilarang short agar tidak tergulung squeeze).`
+              );
               return;
             }
             if (detectedSide === 'LONG' && rsi > maxRsiLong) {
@@ -529,6 +537,33 @@ export class SmartMoneyScanner {
               return;
             }
             reason += ` | ATR ${tf}: ${atrData.atrPct.toFixed(2)}% ($${formatCryptoPrice(atrData.atr)})`;
+          }
+        }
+
+        // Filter Funding Rate: Cegah Short saat Negative Funding Squeeze & Long saat pasar Overheated
+        if (this.config.fundingRateFilterEnabled !== false) {
+          const fundingPct = await binanceFutures.getFundingRate(symbol);
+          if (fundingPct !== undefined) {
+            const minFrShort = this.config.minFundingRatePct ?? -0.02; // Default -0.02%
+            const maxFrLong = this.config.maxFundingRatePct ?? 0.10;   // Default +0.10%
+
+            if (detectedSide === 'SHORT' && fundingPct < minFrShort) {
+              logger.log(
+                'INFO',
+                `🛡️ [FUNDING RATE SKIP] ${symbol} SHORT dilewati: Funding Rate (${fundingPct.toFixed(4)}%) < min ${minFrShort}%. Pasar crowded short & rawan short squeeze bandar.`
+              );
+              return;
+            }
+
+            if (detectedSide === 'LONG' && fundingPct > maxFrLong) {
+              logger.log(
+                'INFO',
+                `🛡️ [FUNDING RATE SKIP] ${symbol} LONG dilewati: Funding Rate (${fundingPct.toFixed(4)}%) > max ${maxFrLong}%. Biaya Long terlalu mahal & rawan long flush.`
+              );
+              return;
+            }
+
+            reason += ` | Funding: ${fundingPct >= 0 ? '+' : ''}${fundingPct.toFixed(4)}%`;
           }
         }
 
