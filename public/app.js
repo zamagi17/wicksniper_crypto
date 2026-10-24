@@ -3307,6 +3307,7 @@ function populateSettingsForm(cfg) {
   const smAtrDynCb = document.getElementById('cfg-sm-atr-dynamic-sltp');
   if (smAtrDynCb) smAtrDynCb.checked = smCfg.atrDynamicSlTpEnabled !== false;
   setVal('cfg-sm-atr-sl-mult', smCfg.atrSlMultiplier ?? 2.0);
+  setVal('cfg-sm-max-sl-pct', smCfg.maxStopLossPct ?? 2.5);
   setVal('cfg-sm-atr-tp-mult', smCfg.atrTpMultiplier ?? 1.0);
   const smAutoBepCb = document.getElementById('cfg-sm-auto-bep');
   if (smAutoBepCb) smAutoBepCb.checked = smCfg.autoBepEnabled !== false;
@@ -3650,6 +3651,7 @@ function getSettingsFormData() {
       maxAtrPct: parseFloat(getVal('cfg-sm-max-atr-pct', '3.0')) || 3.0,
       atrDynamicSlTpEnabled: !!document.getElementById('cfg-sm-atr-dynamic-sltp')?.checked,
       atrSlMultiplier: parseFloat(getVal('cfg-sm-atr-sl-mult', '1.2')) || 1.2,
+      maxStopLossPct: parseFloat(getVal('cfg-sm-max-sl-pct', '2.5')) || 2.5,
       atrTpMultiplier: parseFloat(getVal('cfg-sm-atr-tp-mult', '1.8')) || 1.8,
       autoBepEnabled: !!document.getElementById('cfg-sm-auto-bep')?.checked,
       atrBepTriggerMultiplier: parseFloat(getVal('cfg-sm-atr-bep-mult', '0.6')) || 0.6,

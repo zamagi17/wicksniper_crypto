@@ -162,6 +162,7 @@ export interface SmartMoneyConfig {
   maxAtrPct?: number;          // Maksimal % ATR terhadap harga (default: 3.0%)
   atrDynamicSlTpEnabled?: boolean; // TP/SL Dinamis berbasis ATR
   atrSlMultiplier?: number;    // Pengali ATR untuk SL (default: 1.2x)
+  maxStopLossPct?: number;     // Batas atas maksimal Stop Loss (%) agar tidak melebar berlebihan saat volatilitas tinggi (default: 2.5%)
   atrTpMultiplier?: number;    // Pengali ATR untuk TP (default: 1.8x)
   autoBepEnabled?: boolean;    // Auto pindah SL ke BEP (impas) saat posisi mencapai target profit awal
   atrBepTriggerMultiplier?: number; // Pengali ATR untuk memicu Auto-BEP (default: 1.0x)

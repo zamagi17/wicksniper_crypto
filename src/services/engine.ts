@@ -180,6 +180,7 @@ export class WickSniperEngine {
       maxAtrPct: 3.0,
       atrDynamicSlTpEnabled: true,
       atrSlMultiplier: 2.0,
+      maxStopLossPct: 2.5,
       atrTpMultiplier: 1.0,
       autoBepEnabled: true,
       atrBepTriggerMultiplier: 0.6,
@@ -5499,7 +5500,9 @@ export class WickSniperEngine {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;
         const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
         const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
-        const maxSlPctAllowed = Math.max(3.0, fallbackSlPct, atrDynamic ? (atrVal * atrSlMult / basePrice) * 100 : 0);
+        const maxSlPctAllowed = (smCfg.maxStopLossPct && smCfg.maxStopLossPct > 0)
+          ? smCfg.maxStopLossPct
+          : Math.max(3.0, fallbackSlPct, atrDynamic ? (atrVal * atrSlMult / basePrice) * 100 : 0);
 
         if (isShort) {
           const structuralLevel = signal.whaleAvgEntry + effectiveBuffer;
@@ -5517,10 +5520,17 @@ export class WickSniperEngine {
           desc = `Hybrid (Modal $${formatCryptoPrice(signal.whaleAvgEntry)} - Buffer $${formatCryptoPrice(effectiveBuffer)} ➜ SL: -${slPctVal.toFixed(2)}%)`;
         }
       } else if (atrDynamic) {
-        const atrDist = atrVal * atrSlMult;
+        let atrDist = atrVal * atrSlMult;
+        let slPctVal = (atrDist / basePrice) * 100;
+        const maxSlCap = smCfg.maxStopLossPct;
+        if (maxSlCap && maxSlCap > 0 && slPctVal > maxSlCap) {
+          atrDist = basePrice * (maxSlCap / 100);
+          slPctVal = maxSlCap;
+          desc = `ATR Dynamic SL (Capped ${maxSlCap.toFixed(2)}% [Max Limit])`;
+        } else {
+          desc = `ATR Dynamic SL (±${slPctVal.toFixed(2)}% [${atrSlMult}x ATR])`;
+        }
         slRaw = isShort ? basePrice + atrDist : basePrice - atrDist;
-        const slPctVal = (atrDist / basePrice) * 100;
-        desc = `ATR Dynamic SL (±${slPctVal.toFixed(2)}% [${atrSlMult}x ATR])`;
       } else {
         slRaw = isShort
           ? basePrice * (1 + fallbackSlPct / 100)
@@ -5770,6 +5780,7 @@ export class WickSniperEngine {
         retailShortRatio: signal.retailShortRatio,
         takeProfitPct: fallbackTpPct,
         stopLossPct: parseFloat((Math.abs((slPrice - currentPrice) / currentPrice) * 100).toFixed(2)),
+        maxStopLossPct: smCfg.maxStopLossPct,
         slDescription: slLogDesc,
         atr: signal.atr,
         atrPct: signal.atrPct,

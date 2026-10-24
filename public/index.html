@@ -781,10 +781,14 @@
                     <input type="checkbox" id="cfg-sm-atr-dynamic-sltp" style="accent-color: #eab308;" checked onchange="toggleSmAtrDynamicInputs()">
                     TP/SL Dinamis Multiplier ATR
                   </label>
-                  <div id="cfg-sm-atr-mult-row" style="display: flex; gap: 8px; margin-top: 4px;">
+                  <div id="cfg-sm-atr-mult-row" style="display: flex; gap: 8px; margin-top: 4px; align-items: flex-end;">
                     <div>
                       <small style="font-size: 10px; color: var(--text-muted);">SL (x ATR):</small>
                       <input type="number" id="cfg-sm-atr-sl-mult" min="0.5" max="5.0" step="0.1" class="form-control" placeholder="2.0" style="padding: 3px 6px; width: 70px;">
+                    </div>
+                    <div>
+                      <small style="font-size: 10px; color: #f87171; font-weight: 600;" title="Batas maksimal Stop Loss (%) agar tidak melebar saat volatilitas tinggi">Max SL (%):</small>
+                      <input type="number" id="cfg-sm-max-sl-pct" min="0.5" max="10.0" step="0.1" class="form-control" placeholder="2.5" style="padding: 3px 6px; width: 75px; border-color: rgba(248, 113, 113, 0.4);" title="Batas maksimal Stop Loss (%) agar tidak rugi terlalu dalam">
                     </div>
                     <div>
                       <small style="font-size: 10px; color: var(--text-muted);">TP (x ATR):</small>
