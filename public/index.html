@@ -186,9 +186,65 @@
               <h2>Posisi Aktif & Jaring Grid Ladder</h2>
             </div>
             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <span class="badge-btc-header-tag" id="btc-header-quick-tag" style="display: none;" title="BTC Macro Trend Status">BTC: $--</span>
               <span class="badge-margin-tag" id="active-margin-tag" style="display: none;">Margin Aktif: $0.00 USDT</span>
               <span class="badge-floating-tag" id="active-floating-pnl-tag" style="display: none; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">Floating: +$0.00</span>
               <span class="tag-counter" id="active-count-tag">0 Posisi</span>
+            </div>
+          </div>
+
+          <!-- BTC TREND & EMA FILTER STRIP -->
+          <div id="btc-filter-card" class="btc-filter-card">
+            <div class="btc-filter-inner">
+              <div class="btc-filter-left">
+                <div class="btc-symbol-box">
+                  <span class="btc-symbol-logo">₿</span>
+                  <div class="btc-beacon-pulse" id="btc-beacon-pulse"></div>
+                </div>
+                <div class="btc-meta-col">
+                  <div class="btc-title-badge-row">
+                    <span class="btc-label-main">BTC FILTER</span>
+                    <span class="btc-tf-pill" id="btc-tf-badge">1h • EMA 50</span>
+                    <span class="btc-trend-pill" id="btc-trend-badge">BULLISH 🟢</span>
+                  </div>
+                  <div class="btc-detail-text" id="btc-guard-summary">
+                    Mengambil data tren makro BTC...
+                  </div>
+                </div>
+              </div>
+
+              <div class="btc-filter-metrics">
+                <div class="btc-metric-item">
+                  <span class="btc-metric-label">HARGA BTC</span>
+                  <span class="btc-metric-val font-mono" id="btc-metric-price">$--,---</span>
+                </div>
+                <div class="btc-metric-sep"></div>
+                <div class="btc-metric-item">
+                  <span class="btc-metric-label" id="btc-metric-ema-label">EMA 50 (1h)</span>
+                  <span class="btc-metric-val font-mono text-muted" id="btc-metric-ema">$--,---</span>
+                </div>
+                <div class="btc-metric-sep"></div>
+                <div class="btc-metric-item">
+                  <span class="btc-metric-label">JARAK / DELTA</span>
+                  <span class="btc-metric-val font-mono" id="btc-metric-delta">--</span>
+                </div>
+                <div class="btc-metric-sep"></div>
+                <div class="btc-metric-item">
+                  <span class="btc-metric-label">1-CANDLE Δ</span>
+                  <span class="btc-metric-val font-mono" id="btc-metric-candle">--</span>
+                </div>
+              </div>
+
+              <div class="btc-filter-right">
+                <div class="btc-guard-badge" id="btc-guard-status-badge" title="Status Filter Keamanan Trade">
+                  <span class="guard-icon">🛡️</span>
+                  <span class="guard-label" id="btc-guard-label">LONG Aman ✅</span>
+                </div>
+                <button type="button" class="btn-btc-sync" id="btn-btc-sync" onclick="refreshBtcFilterNow()" title="Perbarui tren BTC sekarang (Auto-sync tiap 20 detik)">
+                  <span class="sync-icon" id="btc-sync-icon">🔄</span>
+                  <span class="sync-timer" id="btc-sync-timer">20s</span>
+                </button>
+              </div>
             </div>
           </div>
 

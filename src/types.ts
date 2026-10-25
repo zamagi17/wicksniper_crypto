@@ -196,6 +196,11 @@ export interface BtcTrendStatus {
   canLong: boolean;
   canShort: boolean;
   reason: string;
+  timeframe?: string;
+  period?: number;
+  diffUsdt?: number;
+  diffPct?: number;
+  updatedAt?: number;
 }
 
 export interface SmartMoneySignal {
@@ -497,6 +502,7 @@ export interface EngineStatus {
   usedWeight1m?: number;
   orderCount10s?: number;
   wsConnected?: boolean;
+  btcTrendStatus?: BtcTrendStatus;
 }
 
 export interface LogEntry {

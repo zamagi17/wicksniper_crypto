@@ -915,10 +915,15 @@ function renderStatus(status) {
     }
   }
 
-  // 4. Render Active Positions
+  // 4. Render BTC Macro Filter
+  if (status.btcTrendStatus) {
+    renderBtcFilter(status.btcTrendStatus);
+  }
+
+  // 5. Render Active Positions
   renderActivePositions(status.activePositions || []);
 
-  // 5. Render Spikes Radar
+  // 6. Render Spikes Radar
   if (radarState.page === 1 && !radarState.symbol && radarState.status === 'ALL') {
     const totalSpikes = typeof status.totalSpikes === 'number' && status.totalSpikes > 0
       ? status.totalSpikes
@@ -929,7 +934,7 @@ function renderStatus(status) {
     updateRadarPaginationUI();
   }
 
-  // 6. Render Closed Trades
+  // 7. Render Closed Trades
   if (tradesState.page === 1 && !tradesState.symbol && tradesState.outcome === 'ALL' && tradesState.mode === 'ALL') {
     tradesState.total = status.totalTrades;
     tradesState.totalPages = Math.ceil(status.totalTrades / tradesState.limit) || 1;
@@ -937,6 +942,159 @@ function renderStatus(status) {
     updateTradesPaginationUI();
   }
 }
+
+let lastBtcTrendTs = 0;
+let btcSyncCountdownInterval = null;
+let isBtcSyncing = false;
+
+function renderBtcFilter(btc) {
+  if (!btc || typeof btc !== 'object') return;
+
+  const card = document.getElementById('btc-filter-card');
+  if (!card) return;
+
+  const tf = btc.timeframe || currentConfig?.smartMoney?.btcTrendTimeframe || '1h';
+  const period = btc.period || currentConfig?.smartMoney?.btcTrendEmaPeriod || 50;
+  const isBullish = btc.trend === 'BULLISH';
+
+  // Header quick tag
+  const quickTag = document.getElementById('btc-header-quick-tag');
+  if (quickTag) {
+    quickTag.style.display = 'inline-block';
+    const quickSign = isBullish ? '🟢' : '🔴';
+    const priceFmt = btc.btcPrice ? `$${Math.round(btc.btcPrice).toLocaleString('en-US')}` : '$--';
+    quickTag.innerText = `BTC: ${priceFmt} ${quickSign}`;
+    quickTag.title = `BTC: $${(btc.btcPrice || 0).toFixed(2)} | EMA${period}: $${(btc.ema || 0).toFixed(2)} (${btc.trend})`;
+  }
+
+  // 1. Timeframe & Trend Badge
+  const tfBadge = document.getElementById('btc-tf-badge');
+  if (tfBadge) tfBadge.innerText = `${tf} • EMA ${period}`;
+
+  const trendBadge = document.getElementById('btc-trend-badge');
+  if (trendBadge) {
+    trendBadge.className = `btc-trend-pill ${isBullish ? 'bullish' : 'bearish'}`;
+    trendBadge.innerHTML = isBullish ? 'BULLISH 🟢' : 'BEARISH 🔴';
+  }
+
+  // 2. Pulse Beacon
+  const beacon = document.getElementById('btc-beacon-pulse');
+  if (beacon) {
+    beacon.className = `btc-beacon-pulse ${isBullish ? 'bullish' : 'bearish'}`;
+  }
+
+  // 3. Metrics (Harga BTC, EMA, Delta vs EMA, 1-Candle Change)
+  const priceValEl = document.getElementById('btc-metric-price');
+  if (priceValEl) {
+    priceValEl.innerText = btc.btcPrice
+      ? `$${btc.btcPrice.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}`
+      : '$--';
+    priceValEl.className = `btc-metric-val font-mono ${isBullish ? 'text-green' : 'text-red'}`;
+  }
+
+  const emaLabelEl = document.getElementById('btc-metric-ema-label');
+  if (emaLabelEl) {
+    emaLabelEl.innerText = `EMA ${period} (${tf})`;
+  }
+
+  const emaValEl = document.getElementById('btc-metric-ema');
+  if (emaValEl) {
+    emaValEl.innerText = btc.ema
+      ? `$${btc.ema.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}`
+      : '$--';
+  }
+
+  // Delta vs EMA
+  const diffUsdt = btc.diffUsdt !== undefined ? btc.diffUsdt : ((btc.btcPrice || 0) - (btc.ema || 0));
+  const diffPct = btc.diffPct !== undefined ? btc.diffPct : (btc.ema > 0 ? (diffUsdt / btc.ema) * 100 : 0);
+  const diffDeltaEl = document.getElementById('btc-metric-delta');
+  if (diffDeltaEl) {
+    const deltaArrow = diffUsdt >= 0 ? '▲' : '▼';
+    const deltaSign = diffUsdt >= 0 ? '+' : '';
+    const deltaClass = isBullish ? 'text-green' : 'text-red';
+    diffDeltaEl.innerHTML = `<span class="${deltaClass}" style="font-weight: 700;">${deltaArrow} ${deltaSign}$${Math.abs(diffUsdt).toFixed(1)} (${deltaSign}${diffPct.toFixed(2)}%)</span>`;
+  }
+
+  // 1-Candle Change
+  const candleValEl = document.getElementById('btc-metric-candle');
+  if (candleValEl) {
+    const cPct = Number(btc.changePct || 0);
+    const cSign = cPct >= 0 ? '+' : '';
+    const cColor = cPct >= 0 ? 'text-green' : 'text-red';
+    let cHtml = `<span class="${cColor}" style="font-weight: 700;">${cSign}${cPct.toFixed(2)}%</span>`;
+    if (btc.isFlashDump) {
+      cHtml += ` <span style="background: rgba(255, 51, 102, 0.25); color: #ff3366; font-size: 9.5px; padding: 1px 5px; border-radius: 3px; font-weight: 800; border: 1px solid rgba(255, 51, 102, 0.4);">DUMP ⚠️</span>`;
+    } else if (btc.isFlashSurge) {
+      cHtml += ` <span style="background: rgba(0, 240, 255, 0.25); color: #00f0ff; font-size: 9.5px; padding: 1px 5px; border-radius: 3px; font-weight: 800; border: 1px solid rgba(0, 240, 255, 0.4);">SURGE 🚀</span>`;
+    }
+    candleValEl.innerHTML = cHtml;
+  }
+
+  // 4. Guard Status Badge & Action Summary
+  const summaryEl = document.getElementById('btc-guard-summary');
+  const guardBadge = document.getElementById('btc-guard-status-badge');
+  const guardLabel = document.getElementById('btc-guard-label');
+
+  if (btc.isFlashDump) {
+    if (summaryEl) summaryEl.innerHTML = `<b style="color: #ff3366;">⚠️ Flash Dump Pasar:</b> BTC anjlok cepat. Filter memblokir sinyal LONG agar terhindar dari pisau jatuh.`;
+    if (guardBadge) guardBadge.className = 'btc-guard-badge danger';
+    if (guardLabel) guardLabel.innerText = 'LONG Diblokir (Flash Dump) ⚠️';
+  } else if (btc.isFlashSurge) {
+    if (summaryEl) summaryEl.innerHTML = `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa tiba-tiba. Filter memblokir sinyal SHORT agar terhindar dari squeeze.`;
+    if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
+    if (guardLabel) guardLabel.innerText = 'SHORT Diblokir (Flash Surge) ⚠️';
+  } else if (isBullish) {
+    const shortStatus = btc.canShort ? 'SHORT Aman' : 'SHORT Ditahan';
+    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b>. Entry LONG aman & terlindungi dari dump pasar (${shortStatus}).`;
+    if (guardBadge) guardBadge.className = 'btc-guard-badge success';
+    if (guardLabel) guardLabel.innerText = 'LONG Aman ✅';
+  } else {
+    const longStatus = btc.canLong ? 'LONG Aman' : 'LONG Ditahan';
+    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #ff3366;">bawah EMA ${period}</b>. Entry SHORT diizinkan, waspada pembalikan tren (${longStatus}).`;
+    if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
+    if (guardLabel) guardLabel.innerText = 'SHORT Aman ✅';
+  }
+
+  lastBtcTrendTs = btc.updatedAt || Date.now();
+  startBtcSyncCountdown();
+}
+
+function startBtcSyncCountdown() {
+  if (btcSyncCountdownInterval) return;
+  btcSyncCountdownInterval = setInterval(() => {
+    const timerEl = document.getElementById('btc-sync-timer');
+    if (!timerEl) return;
+    if (isBtcSyncing) {
+      timerEl.innerText = 'Sync...';
+      return;
+    }
+    const elapsedSec = Math.floor((Date.now() - lastBtcTrendTs) / 1000);
+    const remainSec = Math.max(0, 20 - (elapsedSec % 20));
+    timerEl.innerText = `${remainSec}s`;
+  }, 1000);
+}
+
+async function refreshBtcFilterNow() {
+  if (isBtcSyncing) return;
+  isBtcSyncing = true;
+  const icon = document.getElementById('btc-sync-icon');
+  const timer = document.getElementById('btc-sync-timer');
+  if (icon) icon.classList.add('btc-spinning');
+  if (timer) timer.innerText = 'Sync...';
+
+  try {
+    const res = await authFetch('/api/btc-trend?_t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+    if (res && res.success && res.data) {
+      renderBtcFilter(res.data);
+    }
+  } catch (err) {
+    console.error('Gagal memperbarui BTC Trend:', err);
+  } finally {
+    isBtcSyncing = false;
+    if (icon) icon.classList.remove('btc-spinning');
+  }
+}
+window.refreshBtcFilterNow = refreshBtcFilterNow;
 
 function renderActivePositions(positions) {
   const container = document.getElementById('active-positions-container');

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult } from '../types';
+import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -138,6 +138,7 @@ export class WickSniperEngine {
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
   private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
+  private lastBtcTrendStatus: BtcTrendStatus | null = null;
 
   public getDefaultSmartMoneyConfig(): SmartMoneyConfig {
     return {
@@ -216,6 +217,7 @@ export class WickSniperEngine {
       binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
     }
     this.initListeners();
+    this.updateBtcTrendStatus().catch(() => {});
     if (this.config.tradingMode === 'LIVE') {
       setTimeout(() => {
         this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => { });
@@ -610,6 +612,11 @@ export class WickSniperEngine {
         await this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
         tickCount++;
+        // Update status tren BTC tiap 20 detik (selaras dengan TTL cache Binance 20s)
+        if (tickCount % 20 === 0 || !this.lastBtcTrendStatus) {
+          this.updateBtcTrendStatus().catch(() => {});
+        }
+
         // Update simulasi koin yang ditolak (Shadow Trading) tiap 2 detik
         if (tickCount % 2 === 0 && this.activeSimSpikes.size > 0) {
           this.updateActiveSimSpikes();
@@ -4736,7 +4743,27 @@ export class WickSniperEngine {
       usedWeight1m: binanceFutures.lastUsedWeight,
       orderCount10s: binanceFutures.getOrderCount10s(),
       wsConnected: this.isRunning && (this.config.scanner?.dataSource === 'POLLING' || binanceFutures.isConnected()),
+      btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
     };
+  }
+
+  public async updateBtcTrendStatus(): Promise<BtcTrendStatus | null> {
+    try {
+      const btcTf = this.config.smartMoney?.btcTrendTimeframe || '1h';
+      const btcPeriod = this.config.smartMoney?.btcTrendEmaPeriod || 50;
+      const dropThresh = this.config.smartMoney?.btcDropThresholdPct ?? 1.0;
+      const res = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh);
+      if (res) {
+        this.lastBtcTrendStatus = res;
+      }
+      return this.lastBtcTrendStatus;
+    } catch {
+      return this.lastBtcTrendStatus;
+    }
+  }
+
+  public getBtcTrendStatus(): BtcTrendStatus | null {
+    return this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus();
   }
 
   private getMergedCooldowns(): { symbol: string; until: number }[] {

@@ -237,6 +237,15 @@ app.get('/api/smart-money/metrics', requireAuth, (req, res) => {
   }
 });
 
+app.get('/api/btc-trend', async (req, res) => {
+  try {
+    const trend = await engine.updateBtcTrendStatus();
+    res.json({ success: true, data: trend });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/check-binance', requireAuth, async (req, res) => {
   try {
     const { apiKey, apiSecret, isTestnet } = req.body || {};

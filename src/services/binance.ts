@@ -1893,6 +1893,11 @@ export class BinanceFuturesClient {
   }
 
   private btcTrendCache: Map<string, { timestamp: number; data: BtcTrendStatus }> = new Map();
+  private lastBtcTrendStatus: BtcTrendStatus | null = null;
+
+  public getLastBtcTrendStatus(): BtcTrendStatus | null {
+    return this.lastBtcTrendStatus;
+  }
 
   public async getBtcTrendStatus(
     interval: string = '1h',
@@ -1950,6 +1955,9 @@ export class BinanceFuturesClient {
         if (isFlashDump) reason += ' | ⚠️ FLASH DUMP';
         if (isFlashSurge) reason += ' | 🚀 FLASH SURGE';
 
+        const diffUsdt = currentPrice - ema;
+        const diffPct = ema > 0 ? (diffUsdt / ema) * 100 : 0;
+
         const result: BtcTrendStatus = {
           btcPrice: currentPrice,
           ema,
@@ -1960,8 +1968,14 @@ export class BinanceFuturesClient {
           canLong,
           canShort,
           reason,
+          timeframe: interval,
+          period,
+          diffUsdt,
+          diffPct,
+          updatedAt: now,
         };
 
+        this.lastBtcTrendStatus = result;
         this.btcTrendCache.set(cacheKey, { timestamp: now, data: result });
         return result;
       }
