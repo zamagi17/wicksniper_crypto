@@ -203,6 +203,10 @@ export class WickSniperEngine {
       btcTrendTimeframe: '1h',
       btcTrendEmaPeriod: 50,
       btcDropThresholdPct: 1.0,
+      lowVolumeAdaptiveEnabled: true,
+      lowVolumeThresholdUsdt: 20_000_000,
+      lowVolumeMarginDivisor: 2,
+      lowVolumeSlTpMultiplier: 2.0,
     };
   }
 
@@ -1259,7 +1263,18 @@ export class WickSniperEngine {
     const longCfg = this.config.momentumLong || { enabled: true };
     const leverage = longCfg.leverage || this.config.leverage || 5;
     const prec = binanceFutures.getPrecision(symbol);
-    const margin = longCfg.marginUsdt || 3;
+
+    const currentTickerStats = this.scanner.getTickerStats(symbol);
+    const initial24hVol = currentTickerStats?.vol24hUsdt;
+
+    const lowVolEnabled = this.config.exit?.lowVolumeAdaptiveEnabled ?? true;
+    const lowVolThreshold = this.config.exit?.lowVolumeThresholdUsdt ?? 20_000_000;
+    const lowVolMarginDivisor = Math.max(1, this.config.exit?.lowVolumeMarginDivisor ?? 2);
+    const lowVolSlTpMultiplier = Math.max(1, this.config.exit?.lowVolumeSlTpMultiplier ?? 2.0);
+    const isLowVolume = lowVolEnabled && (initial24hVol || 0) > 0 && (initial24hVol || 0) < lowVolThreshold;
+
+    const baseMargin = longCfg.marginUsdt || 3;
+    const margin = isLowVolume ? (baseMargin / lowVolMarginDivisor) : baseMargin;
 
     let plannedQty = (margin * leverage) / currentPrice;
     if (plannedQty * currentPrice < prec.minNotional) {
@@ -1268,13 +1283,11 @@ export class WickSniperEngine {
     const qty = parseFloat(binanceFutures.formatQty(symbol, plannedQty));
     const actualMargin = (qty * currentPrice) / leverage;
 
-    const tpPct = longCfg.takeProfitPct || 6.0;
-    const slPct = longCfg.stopLossPct || 2.5;
+    const slTpMult = isLowVolume ? lowVolSlTpMultiplier : 1.0;
+    const tpPct = (longCfg.takeProfitPct || 6.0) * slTpMult;
+    const slPct = (longCfg.stopLossPct || 2.5) * slTpMult;
     const tpPrice = parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 + tpPct / 100)));
     const slPrice = parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - slPct / 100)));
-
-    const currentTickerStats = this.scanner.getTickerStats(symbol);
-    const initial24hVol = currentTickerStats?.vol24hUsdt;
 
     const layer0: GridLayer = {
       layerIndex: 0,
@@ -1383,8 +1396,18 @@ export class WickSniperEngine {
     let leverage = this.config.leverage || 5;
     const prec = binanceFutures.getPrecision(symbol);
 
+    const currentTickerStats = this.scanner.getTickerStats(symbol);
+    const initial24hVol = currentTickerStats?.vol24hUsdt;
+
+    const lowVolEnabled = exitCfg.lowVolumeAdaptiveEnabled ?? true;
+    const lowVolThreshold = exitCfg.lowVolumeThresholdUsdt ?? 20_000_000;
+    const lowVolMarginDivisor = Math.max(1, exitCfg.lowVolumeMarginDivisor ?? 2);
+    const lowVolSlTpMultiplier = Math.max(1, exitCfg.lowVolumeSlTpMultiplier ?? 2.0);
+    const isLowVolume = lowVolEnabled && (initial24hVol || 0) > 0 && (initial24hVol || 0) < lowVolThreshold;
+
     const layers: GridLayer[] = [];
-    let currentMargin = gridCfg.marginPerLayerUsdt;
+    const baseMargin = gridCfg.marginPerLayerUsdt;
+    let currentMargin = isLowVolume ? (baseMargin / lowVolMarginDivisor) : baseMargin;
     let totalPlannedMargin = 0;
 
     // Layer 0: Langsung terisi di harga pasar saat spike (Market / Immediate entry)
@@ -1403,9 +1426,6 @@ export class WickSniperEngine {
       );
       return;
     }
-
-    const currentTickerStats = this.scanner.getTickerStats(symbol);
-    const initial24hVol = currentTickerStats?.vol24hUsdt;
 
     const layer0VolumeUsdt = parseFloat((layer0Qty * currentPrice).toFixed(2));
     layers.push({
@@ -1464,11 +1484,18 @@ export class WickSniperEngine {
       totalMarginUsed: layers[0].marginUsdt,
       layers,
       openedAt: Date.now(),
-      targetTpPrice: currentPrice * (1 - exitCfg.takeProfitPct / 100),
-      targetTp2Price: currentPrice * (1 - (exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) / 100),
-      hardSlPrice: currentPrice * (1 + exitCfg.hardStopLossPct / 100),
+      targetTpPrice: currentPrice * (1 - (exitCfg.takeProfitPct * (isLowVolume ? lowVolSlTpMultiplier : 1.0)) / 100),
+      targetTp2Price: currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolSlTpMultiplier : 1.0)) / 100),
+      hardSlPrice: currentPrice * (1 + (exitCfg.hardStopLossPct * (isLowVolume ? lowVolSlTpMultiplier : 1.0)) / 100),
       status: 'SNIPING',
-      paramsSnapshot: this.captureParamsSnapshot(),
+      paramsSnapshot: {
+        ...this.captureParamsSnapshot(),
+        isLowVolumeAdjusted: isLowVolume,
+        vol24hUsdt: initial24hVol,
+        lowVolumeThresholdUsdt: lowVolThreshold,
+        lowVolumeMarginDivisor: lowVolMarginDivisor,
+        lowVolumeSlTpMultiplier: lowVolSlTpMultiplier,
+      },
     };
 
     if (this.config.exit.atrDynamicSlTpEnabled) {
@@ -3224,6 +3251,10 @@ export class WickSniperEngine {
       earlyExitMinLayersPct: this.config.exit?.earlyExitMinLayersPct,
       earlyExitMinLossSlPct: this.config.exit?.earlyExitMinLossSlPct,
       hardStopCooldownMinutes: this.config.exit?.hardStopCooldownMinutes,
+      lowVolumeAdaptiveEnabled: this.config.smartMoney?.lowVolumeAdaptiveEnabled ?? this.config.exit?.lowVolumeAdaptiveEnabled ?? true,
+      lowVolumeThresholdUsdt: this.config.smartMoney?.lowVolumeThresholdUsdt ?? this.config.exit?.lowVolumeThresholdUsdt ?? 20_000_000,
+      lowVolumeMarginDivisor: this.config.smartMoney?.lowVolumeMarginDivisor ?? this.config.exit?.lowVolumeMarginDivisor ?? 2,
+      lowVolumeSlTpMultiplier: this.config.smartMoney?.lowVolumeSlTpMultiplier ?? this.config.exit?.lowVolumeSlTpMultiplier ?? 2.0,
 
       // Scanner & Filters
       momentumLongEnabled: this.config.momentumLong?.enabled,
@@ -3992,13 +4023,14 @@ export class WickSniperEngine {
     const atr = await this.fetchAtrForSymbol(pos.symbol, this.config.exit.atrPeriod ?? 14);
     if (!atr || !(atr > 0)) return;
 
+    const slTpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeSlTpMultiplier || 2.0) : 1.0;
     const atrPct = (atr / entryPrice) * 100;
-    const tpPct = Math.max(this.config.exit.takeProfitPct, atrPct * (this.config.exit.atrTpMultiplier ?? 2.5));
-    const slPct = Math.max(this.config.exit.hardStopLossPct, atrPct * (this.config.exit.atrSlMultiplier ?? 1.5));
+    const tpPct = Math.max(this.config.exit.takeProfitPct * slTpMult, atrPct * (this.config.exit.atrTpMultiplier ?? 2.5) * slTpMult);
+    const slPct = Math.max(this.config.exit.hardStopLossPct * slTpMult, atrPct * (this.config.exit.atrSlMultiplier ?? 1.5) * slTpMult);
 
     pos.targetTpPrice = entryPrice * (1 - tpPct / 100);
     const tp2Pct = this.config.exit.takeProfit2Pct && this.config.exit.takeProfit2Pct > 0
-      ? this.config.exit.takeProfit2Pct
+      ? this.config.exit.takeProfit2Pct * slTpMult
       : tpPct * 2;
     pos.targetTp2Price = entryPrice * (1 - tp2Pct / 100);
     pos.hardSlPrice = entryPrice * (1 + slPct / 100);
@@ -5484,7 +5516,20 @@ export class WickSniperEngine {
     const currentPrice = signal.currentPrice;
     const leverage = smCfg.leverage || this.config.leverage || 5;
     const numLayers = Math.max(1, Math.min(3, smCfg.entryLayers || 1));
-    const totalMargin = smCfg.marginUsdt || this.config.grid?.marginPerLayerUsdt || 5.0;
+    // Evaluasi Volume 24 Jam & Adaptasi Koin Volume Rendah (< 20M USDT)
+    const vol24h = this.scanner.getTickerStats(symbol)?.vol24hUsdt
+      || this.smartMoneyScanner.get24hVolume(symbol)
+      || signal.vol24hUsdt
+      || 0;
+
+    const lowVolEnabled = smCfg.lowVolumeAdaptiveEnabled ?? true;
+    const lowVolThreshold = smCfg.lowVolumeThresholdUsdt ?? 20_000_000;
+    const lowVolMarginDivisor = Math.max(1, smCfg.lowVolumeMarginDivisor ?? 2);
+    const lowVolSlTpMultiplier = Math.max(1, smCfg.lowVolumeSlTpMultiplier ?? 2.0);
+    const isLowVolume = lowVolEnabled && vol24h > 0 && vol24h < lowVolThreshold;
+
+    const baseMargin = smCfg.marginUsdt || this.config.grid?.marginPerLayerUsdt || 5.0;
+    const totalMargin = isLowVolume ? (baseMargin / lowVolMarginDivisor) : baseMargin;
     const marginPerLayer = numLayers > 1 ? totalMargin / numLayers : totalMargin;
     const prec = binanceFutures.getPrecision(symbol);
 
@@ -5495,13 +5540,16 @@ export class WickSniperEngine {
     const qty = parseFloat(binanceFutures.formatQty(symbol, plannedQty));
     const actualMargin = (qty * currentPrice) / leverage;
 
-    const fallbackTpPct = smCfg.takeProfitPct || 1.5;
-    const fallbackSlPct = smCfg.stopLossPct || 1.2;
-    const bufferPct = (smCfg.structuralSlBufferPct ?? 0.3) / 100;
+    // Pengali jarak SL & TP untuk koin volume rendah agar resiko $ tetap sama namun toleransi fluktuasi lebih luas
+    const slTpMult = isLowVolume ? lowVolSlTpMultiplier : 1.0;
+    const fallbackTpPct = (smCfg.takeProfitPct || 1.5) * slTpMult;
+    const fallbackSlPct = (smCfg.stopLossPct || 1.2) * slTpMult;
+    const bufferPct = ((smCfg.structuralSlBufferPct ?? 0.3) / 100) * slTpMult;
     const atrDynamic = smCfg.atrDynamicSlTpEnabled !== false && (signal.atr || 0) > 0;
     const atrVal = signal.atr || 0;
-    const atrSlMult = smCfg.atrSlMultiplier ?? 1.2;
-    const atrTpMult = smCfg.atrTpMultiplier ?? 1.8;
+    const atrSlMult = (smCfg.atrSlMultiplier ?? 1.2) * slTpMult;
+    const atrTpMult = (smCfg.atrTpMultiplier ?? 1.8) * slTpMult;
+    const effectiveMaxStopLossPct = smCfg.maxStopLossPct ? (smCfg.maxStopLossPct * slTpMult) : undefined;
 
     const calcSmLevels = (basePrice: number) => {
       // 1. Take Profit (TP1 & TP2)
@@ -5538,9 +5586,9 @@ export class WickSniperEngine {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;
         const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
         const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
-        const maxSlPctAllowed = (smCfg.maxStopLossPct && smCfg.maxStopLossPct > 0)
-          ? smCfg.maxStopLossPct
-          : Math.max(3.0, fallbackSlPct, atrDynamic ? (atrVal * atrSlMult / basePrice) * 100 : 0);
+        const maxSlPctAllowed = (effectiveMaxStopLossPct && effectiveMaxStopLossPct > 0)
+          ? effectiveMaxStopLossPct
+          : Math.max(3.0 * slTpMult, fallbackSlPct, atrDynamic ? (atrVal * atrSlMult / basePrice) * 100 : 0);
 
         if (isShort) {
           const structuralLevel = signal.whaleAvgEntry + effectiveBuffer;
@@ -5560,7 +5608,7 @@ export class WickSniperEngine {
       } else if (atrDynamic) {
         let atrDist = atrVal * atrSlMult;
         let slPctVal = (atrDist / basePrice) * 100;
-        const maxSlCap = smCfg.maxStopLossPct;
+        const maxSlCap = effectiveMaxStopLossPct;
         if (maxSlCap && maxSlCap > 0 && slPctVal > maxSlCap) {
           atrDist = basePrice * (maxSlCap / 100);
           slPctVal = maxSlCap;
@@ -5575,13 +5623,16 @@ export class WickSniperEngine {
           : basePrice * (1 - fallbackSlPct / 100);
         desc = `Fixed SL -${fallbackSlPct}%`;
       }
+      if (isLowVolume) {
+        desc += ` [🛡️ Vol < ${(lowVolThreshold / 1e6).toFixed(0)}M: Mgn ÷${lowVolMarginDivisor}, SL/TP ${slTpMult}x]`;
+      }
       const slTarget = parseFloat(binanceFutures.formatPrice(symbol, slRaw));
 
       // 3. BEP Trigger Price
       let bepTrigger: number | undefined = undefined;
       if (smCfg.autoBepEnabled !== false) {
         if (atrDynamic) {
-          const bepMult = smCfg.atrBepTriggerMultiplier ?? 0.6;
+          const bepMult = (smCfg.atrBepTriggerMultiplier ?? 0.6) * slTpMult;
           const bepDist = atrVal * bepMult;
           bepTrigger = parseFloat(binanceFutures.formatPrice(
             symbol,
@@ -5858,6 +5909,11 @@ export class WickSniperEngine {
         fundingRatePct: signal.fundingRatePct,
         rsi15m: signal.rsi15m,
         maxRsiShort: smCfg.maxRsiShort ?? 65,
+        isLowVolumeAdjusted: isLowVolume,
+        vol24hUsdt: vol24h,
+        lowVolumeThresholdUsdt: lowVolThreshold,
+        lowVolumeMarginDivisor: lowVolMarginDivisor,
+        lowVolumeSlTpMultiplier: lowVolSlTpMultiplier,
       },
     };
 

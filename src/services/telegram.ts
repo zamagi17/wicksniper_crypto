@@ -214,6 +214,10 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       ? `🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}% • ${pos.slDescription})`
       : `🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}%)`;
 
+    const lowVolLine = pos.paramsSnapshot?.isLowVolumeAdjusted
+      ? `\n🛡️ <b>Adaptasi Vol Rendah:</b> 24h Vol $${((pos.paramsSnapshot.vol24hUsdt || 0) / 1e6).toFixed(1)}M < $${((pos.paramsSnapshot.lowVolumeThresholdUsdt || 20000000) / 1e6).toFixed(0)}M (Margin ÷${pos.paramsSnapshot.lowVolumeMarginDivisor || 2}, SL/TP ${pos.paramsSnapshot.lowVolumeSlTpMultiplier || 2}x)`
+      : '';
+
     const msg =
 `🚀 <b>[ORDER BARU DITERBITKAN]</b> 🎯
 
@@ -222,7 +226,7 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
 ${triggerLine}
 💵 <b>Entry Rata-rata:</b> <code>$${formatCryptoPrice(pos.avgEntryPrice)}</code>
 ${layersLine}
-${marginLine}
+${marginLine}${lowVolLine}
 🎯 <b>Target TP:</b> <code>$${formatCryptoPrice(pos.targetTpPrice)}</code> (${tpSign}${tpPct}%)
 ${slLine}
 ⚙️ <b>Mode:</b> ${modeTag}`;

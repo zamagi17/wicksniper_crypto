@@ -2269,8 +2269,9 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
     // Header Title & Badge
     const detailSide = (t.side || snap?.side || 'SHORT').toUpperCase();
+    const lowVolTag = snap?.isLowVolumeAdjusted ? ' • 🛡️ Low-Vol' : '';
     const titleEl = document.getElementById('td-title');
-    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${detailSide} [${stratName}] (${t.isPaper ? 'Paper' : 'Live'})`;
+    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${detailSide} [${stratName}${lowVolTag}] (${t.isPaper ? 'Paper' : 'Live'})`;
     const badge = document.getElementById('td-pnl-badge');
     if (badge) {
       badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
@@ -2508,6 +2509,11 @@ function openTradeDetailModal(tradeId, tradeIndex) {
         snap.hardStopLossPct ?? snap.stopLossPct,
         isSm ? (curr.smartMoney?.stopLossPct || 3.0) : currExit.hardStopLossPct,
         '%'
+      )}
+      ${renderCompareRow(
+        'Adaptasi Vol Rendah (< 20M)',
+        snap.isLowVolumeAdjusted ? `Aktif (÷${snap.lowVolumeMarginDivisor || 2} Mgn, ${snap.lowVolumeSlTpMultiplier || 2}x SL/TP)` : (snap.lowVolumeAdaptiveEnabled !== undefined ? (snap.lowVolumeAdaptiveEnabled ? 'Aktif' : 'Nonaktif') : undefined),
+        (curr.smartMoney?.lowVolumeAdaptiveEnabled ?? currExit.lowVolumeAdaptiveEnabled ?? true) ? `Aktif (÷${curr.smartMoney?.lowVolumeMarginDivisor ?? currExit.lowVolumeMarginDivisor ?? 2} Mgn, ${curr.smartMoney?.lowVolumeSlTpMultiplier ?? currExit.lowVolumeSlTpMultiplier ?? 2}x SL/TP)` : 'Nonaktif'
       )}
       ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes, currExit.maxHoldMinutes, ' Menit')}
       ${renderCompareRow(
@@ -3558,6 +3564,11 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-btc-trend-tf', smCfg.btcTrendTimeframe || '1h');
   setVal('cfg-sm-btc-trend-ema', smCfg.btcTrendEmaPeriod ?? 50);
   setVal('cfg-sm-btc-drop-threshold', smCfg.btcDropThresholdPct ?? 1.0);
+  const smLowVolCb = document.getElementById('cfg-sm-low-vol-enabled');
+  if (smLowVolCb) smLowVolCb.checked = smCfg.lowVolumeAdaptiveEnabled !== false;
+  setVal('cfg-sm-low-vol-thresh', smCfg.lowVolumeThresholdUsdt ?? 20000000);
+  setVal('cfg-sm-low-vol-margin-divisor', smCfg.lowVolumeMarginDivisor ?? 2);
+  setVal('cfg-sm-low-vol-sltp-mult', smCfg.lowVolumeSlTpMultiplier ?? 2.0);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3573,6 +3584,7 @@ function populateSettingsForm(cfg) {
   if (typeof toggleSmAutoBepInput === 'function') toggleSmAutoBepInput();
   if (typeof toggleSmEmaInput === 'function') toggleSmEmaInput();
   if (typeof toggleSmBtcTrendInput === 'function') toggleSmBtcTrendInput();
+  if (typeof toggleSmLowVolInput === 'function') toggleSmLowVolInput();
   if (typeof toggleSmFundingInput === 'function') toggleSmFundingInput();
   if (typeof toggleStrategySettingsView === 'function') toggleStrategySettingsView();
 
@@ -3909,6 +3921,10 @@ function getSettingsFormData() {
       btcTrendTimeframe: getVal('cfg-sm-btc-trend-tf', '1h'),
       btcTrendEmaPeriod: parseInt(getVal('cfg-sm-btc-trend-ema', '50'), 10) || 50,
       btcDropThresholdPct: parseFloat(getVal('cfg-sm-btc-drop-threshold', '1.0')) || 1.0,
+      lowVolumeAdaptiveEnabled: !!document.getElementById('cfg-sm-low-vol-enabled')?.checked,
+      lowVolumeThresholdUsdt: parseFloat(getVal('cfg-sm-low-vol-thresh', '20000000')) || 20000000,
+      lowVolumeMarginDivisor: parseFloat(getVal('cfg-sm-low-vol-margin-divisor', '2')) || 2,
+      lowVolumeSlTpMultiplier: parseFloat(getVal('cfg-sm-low-vol-sltp-mult', '2.0')) || 2.0,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
@@ -4663,6 +4679,15 @@ function toggleSmBtcTrendInput() {
   }
 }
 window.toggleSmBtcTrendInput = toggleSmBtcTrendInput;
+
+function toggleSmLowVolInput() {
+  const cb = document.getElementById('cfg-sm-low-vol-enabled');
+  const box = document.getElementById('cfg-sm-low-vol-box');
+  if (box) {
+    box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+}
+window.toggleSmLowVolInput = toggleSmLowVolInput;
 
 function toggleSmFundingInput() {
   const cb = document.getElementById('cfg-sm-funding-filter-enabled');

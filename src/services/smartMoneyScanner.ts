@@ -61,6 +61,10 @@ export class SmartMoneyScanner {
     }
   }
 
+  public get24hVolume(symbol: string): number {
+    return this.tickerVol24h.get(symbol) || 0;
+  }
+
   public isCoolingDown(symbol: string): boolean {
     const expiresAt = this.cooldowns.get(symbol);
     if (!expiresAt) return false;
@@ -654,6 +658,7 @@ export class SmartMoneyScanner {
           atrPct: atrData?.atrPct,
           rsi15m: recordedRsi,
           fundingRatePct: recordedFunding,
+          vol24hUsdt: this.tickerVol24h.get(symbol) || 0,
           btcTrendStatus: btcTrendStatus
             ? {
                 btcPrice: btcTrendStatus.btcPrice,
