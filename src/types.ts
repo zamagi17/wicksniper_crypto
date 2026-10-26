@@ -96,6 +96,11 @@ export interface BotConfig {
     lowVolumeSlTpMultiplier?: number;
     lowVolumeSlMultiplier?: number;
     lowVolumeTpMultiplier?: number;
+    portfolioTpEnabled?: boolean;
+    portfolioTpTargetPct?: number; // Target floating profit seluruh koin (%) (default: 10.0%)
+    portfolioTpMinProfitPct?: number; // Minimal profit pergerakan harga koin yang ditutup (%) (default: 0.5%)
+    trendShiftExitEnabled?: boolean; // Tutup segera saat trend bergeser (default: true)
+    trendShiftMinProfitPct?: number; // Minimal profit pergerakan harga saat trend bergeser (%) (default: 0.5%)
   };
   paperTrading: {
     initialVirtualBalance: number;
@@ -398,6 +403,7 @@ export interface ActivePosition {
   };
   fundingRatePct?: number;
   rsi15m?: number;
+  entryTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
 }
 
 export interface SmartMoneyFlowStatus {
@@ -449,7 +455,7 @@ export interface ClosedTrade {
   fee?: number;
   pnlPct: number;
   durationSeconds: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'MANUAL_CLOSE';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'MANUAL_CLOSE' | 'TOTAL_PROFIT_TARGET' | 'TREND_SHIFT_EXIT';
   isPaper: boolean;
   closedAt: string;
   timestamp: number;

@@ -324,6 +324,11 @@ export class WickSniperEngine {
         extendHoldOnRedCandleEnabled: true,
         extendHoldSeconds: 30,
         maxHoldExtensions: 6,
+        portfolioTpEnabled: true,
+        portfolioTpTargetPct: 10.0,
+        portfolioTpMinProfitPct: 0.5,
+        trendShiftExitEnabled: true,
+        trendShiftMinProfitPct: 0.5,
       },
       paperTrading: {
         initialVirtualBalance: 245.0,
@@ -1327,6 +1332,8 @@ export class WickSniperEngine {
       status: 'SNIPING',
       trailingTpActive: false,
       highestPrice: currentPrice,
+      entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
+      btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
       paramsSnapshot: {
         strategy: 'MOMENTUM_LONG',
         surgePct: alert.surgePct,
@@ -1494,6 +1501,8 @@ export class WickSniperEngine {
       targetTp2Price: currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolTpMult : 1.0)) / 100),
       hardSlPrice: currentPrice * (1 + (exitCfg.hardStopLossPct * (isLowVolume ? lowVolSlMult : 1.0)) / 100),
       status: 'SNIPING',
+      entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
+      btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
       paramsSnapshot: {
         ...this.captureParamsSnapshot(),
         isLowVolumeAdjusted: isLowVolume,
@@ -1880,6 +1889,37 @@ export class WickSniperEngine {
         pos.maxAdversePnlPct = pos.pnlPct;
       }
 
+      // Evaluasi Tutup Segera saat Trend Bergeser (Regime Shift Exit):
+      // Jika posisi dibuka saat market Sideways lalu bergeser ke Bearish, atau Bullish ke Sideways/Bearish (LONG),
+      // atau sebaliknya (SHORT), posisi yang sudah profit minimal 0.5% harga langsung ditutup segera.
+      if (this.config.exit.trendShiftExitEnabled !== false) {
+        const entryTrend = pos.entryTrend || pos.btcTrendStatus?.trend || 'SIDEWAYS';
+        const currentTrend = this.lastBtcTrendStatus?.trend || binanceFutures.getLastBtcTrendStatus()?.trend;
+        if (currentTrend && currentTrend !== entryTrend) {
+          const isLongShift = (entryTrend === 'SIDEWAYS' && currentTrend === 'BEARISH') ||
+                              (entryTrend === 'BULLISH' && (currentTrend === 'SIDEWAYS' || currentTrend === 'BEARISH'));
+          const isShortShift = (entryTrend === 'SIDEWAYS' && currentTrend === 'BULLISH') ||
+                               (entryTrend === 'BEARISH' && (currentTrend === 'SIDEWAYS' || currentTrend === 'BULLISH'));
+
+          if ((isLong && isLongShift) || (!isLong && isShortShift)) {
+            const minProfit = this.config.exit.trendShiftMinProfitPct ?? 0.5;
+            const priceProfitPct = isLong
+              ? ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100
+              : ((pos.avgEntryPrice - currentPrice) / pos.avgEntryPrice) * 100;
+
+            if (priceProfitPct >= minProfit) {
+              logger.log(
+                'SUCCESS',
+                `🔄 [TREND SHIFT EXIT] ${pos.symbol} (${pos.side}): Trend Macro BTC bergeser ${entryTrend} ➜ ${currentTrend}! Menutup posisi segera karena sudah profit pergerakan harga +${priceProfitPct.toFixed(2)}% (>= min ${minProfit}%) @ $${formatCryptoPrice(currentPrice)}.`,
+                pos.symbol
+              );
+              this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
+              continue;
+            }
+          }
+        }
+      }
+
       // Auto Break-Even (BEP) untuk SMART_MONEY saat profit mencapai bepTriggerPrice
       if (
         pos.strategyType === 'SMART_MONEY' &&
@@ -2180,6 +2220,67 @@ export class WickSniperEngine {
           this.closePosition(pos, 'TRAILING_TP', currentPrice);
           continue;
         }
+      }
+    }
+
+    // 5. Evaluasi Total Floating Profit Target (Portfolio TP):
+    // Jika akumulasi floating profit seluruh koin mencapai target (default 10% dari total margin),
+    // tutup seluruh posisi yang sudah profit minimal 0.5% pergerakan harga. Posisi < 0.5% / loss dibiarkan.
+    this.evaluatePortfolioTakeProfit().catch(() => {});
+  }
+
+  /**
+   * Evaluasi Total Floating Profit Target (Portfolio TP)
+   * Jika total floating profit seluruh koin mencapai target % (default 10% dari total margin),
+   * bot menutup seluruh posisi yang sedang profit minimal 0.5% pergerakan harga.
+   * Posisi dengan profit di bawah 0.5% atau yang sedang loss dibiarkan tetap berjalan.
+   */
+  private async evaluatePortfolioTakeProfit() {
+    if (this.activePositions.size === 0) return;
+    if (this.config.exit.portfolioTpEnabled === false) return;
+
+    const targetPct = this.config.exit.portfolioTpTargetPct ?? 10.0;
+    const minPriceProfitPct = this.config.exit.portfolioTpMinProfitPct ?? 0.5;
+
+    let totalFloatingPnl = 0;
+    let totalActiveMargin = 0;
+    const eligiblePositions: Array<{ pos: ActivePosition; priceProfitPct: number }> = [];
+
+    for (const pos of this.activePositions.values()) {
+      if (pos.status === 'CLOSING' || pos.status === 'CLOSED') continue;
+      totalFloatingPnl += (pos.unrealizedPnl || 0);
+      totalActiveMargin += (pos.totalMarginUsed || 0);
+
+      const isLong = pos.side === 'LONG';
+      const price = pos.currentPrice || pos.avgEntryPrice;
+      const priceProfitPct = isLong
+        ? ((price - pos.avgEntryPrice) / pos.avgEntryPrice) * 100
+        : ((pos.avgEntryPrice - price) / pos.avgEntryPrice) * 100;
+
+      if (priceProfitPct >= minPriceProfitPct) {
+        eligiblePositions.push({ pos, priceProfitPct });
+      }
+    }
+
+    if (totalActiveMargin <= 0) return;
+    const totalFloatingPct = (totalFloatingPnl / totalActiveMargin) * 100;
+
+    if (totalFloatingPct >= targetPct && eligiblePositions.length > 0) {
+      logger.log(
+        'SUCCESS',
+        `🎯 [TOTAL FLOATING TP TARGET] Total floating profit seluruh koin mencapai +${totalFloatingPct.toFixed(2)}% (Target: +${targetPct}% | Floating PnL: $${totalFloatingPnl.toFixed(2)} / Total Margin: $${totalActiveMargin.toFixed(2)}). Menutup ${eligiblePositions.length} posisi yang profit >= ${minPriceProfitPct}% pergerakan harga!`
+      );
+
+      for (const item of eligiblePositions) {
+        if (this.closingSymbols.has(item.pos.symbol) || item.pos.status === 'CLOSING' || item.pos.status === 'CLOSED') {
+          continue;
+        }
+        logger.log(
+          'SUCCESS',
+          `🎯 [PORTFOLIO TP CLOSE] ${item.pos.symbol} (${item.pos.side}): Mengamankan profit harga +${item.priceProfitPct.toFixed(2)}% (PnL: +$${(item.pos.unrealizedPnl || 0).toFixed(2)}) saat total floating profit portfolio +${totalFloatingPct.toFixed(2)}%. Posisi lain di bawah ${minPriceProfitPct}% atau yang sedang loss tetap dibiarkan berjalan.`,
+          item.pos.symbol
+        );
+        this.closePosition(item.pos, 'TOTAL_PROFIT_TARGET', item.pos.currentPrice);
       }
     }
   }
@@ -3915,6 +4016,10 @@ export class WickSniperEngine {
             ? '📈 Trailing Take Profit'
             : trade.exitReason === 'BEP_DEFENSE'
               ? '🛡️ BEP Defense (Penyelamatan Modal)'
+            : trade.exitReason === 'TOTAL_PROFIT_TARGET'
+              ? '🎯 Total Floating Profit Target (Portfolio TP)'
+            : trade.exitReason === 'TREND_SHIFT_EXIT'
+              ? '🔄 Trend Shift Exit (Regime Change)'
             : trade.exitReason === 'HARD_STOP_LOSS'
               ? '🛑 Hard Stop Loss (Cut-Off)'
                   : trade.exitReason === 'EARLY_MOMENTUM_EXIT'
@@ -4605,6 +4710,8 @@ export class WickSniperEngine {
             hardSlPrice,
             status: 'SNIPING',
             entryReason: isSm ? 'Posisi Binance Live Diadopsi Otomatis' : undefined,
+            entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
+            btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
             paramsSnapshot: {
               ...this.captureParamsSnapshot(),
               ...(isSm ? { entryReason: 'Posisi Binance Live Diadopsi Otomatis', signalReason: 'Posisi Binance Live Diadopsi Otomatis' } : {}),
@@ -4622,6 +4729,7 @@ export class WickSniperEngine {
           db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
         }
       }
+      this.evaluatePortfolioTakeProfit().catch(() => { });
     } catch (err: any) {
       console.error('Gagal syncLivePositions:', err.message);
     }
@@ -5865,6 +5973,7 @@ export class WickSniperEngine {
       bepTriggerPrice: effectiveBepTrigger,
       isAutoBepDone: false,
       entryReason: signal.reason,
+      entryTrend: signal.btcTrendStatus?.trend || this.lastBtcTrendStatus?.trend || 'SIDEWAYS',
       btcTrendStatus: signal.btcTrendStatus,
       fundingRatePct: signal.fundingRatePct,
       rsi15m: signal.rsi15m,

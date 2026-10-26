@@ -2112,6 +2112,8 @@ function renderClosedTradesTable(trades) {
                 t.exitReason === 'TAKE_PROFIT' ? '🎯 TP' :
                 t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
                 t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense' :
+                t.exitReason === 'TOTAL_PROFIT_TARGET' ? '🎯 Portfolio TP' :
+                t.exitReason === 'TREND_SHIFT_EXIT' ? '🔄 Trend Shift' :
                 t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard SL' :
                 t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
                 t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
@@ -2648,7 +2650,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           <div class="td-kpi-card">
             <div class="td-kpi-label">Alasan Selesai</div>
             <div class="td-kpi-val" style="font-size: 12px; color: ${
-              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' ? 'var(--green)' :
+              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' || t.exitReason === 'TOTAL_PROFIT_TARGET' || t.exitReason === 'TREND_SHIFT_EXIT' ? 'var(--green)' :
               t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
               t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
               'var(--text-muted)'
@@ -2656,6 +2658,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               t.exitReason === 'TAKE_PROFIT' ? '🎯 Take Profit' :
               t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
               t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense (Penyelamatan Modal)' :
+              t.exitReason === 'TOTAL_PROFIT_TARGET' ? '🎯 Total Floating Profit Target' :
+              t.exitReason === 'TREND_SHIFT_EXIT' ? '🔄 Exit Pergeseran Trend (Regime Shift)' :
               t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
               t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
               t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
@@ -3695,6 +3699,21 @@ function populateSettingsForm(cfg) {
   setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 65);
   if (typeof updateTpPortionHint === 'function') updateTpPortionHint();
 
+  // Total Floating Profit Target (Portfolio TP)
+  const portTpCheckbox = document.getElementById('cfg-portfolio-tp-enabled');
+  if (portTpCheckbox) {
+    portTpCheckbox.checked = cfg.exit?.portfolioTpEnabled !== false;
+  }
+  setVal('cfg-portfolio-tp-target', cfg.exit?.portfolioTpTargetPct ?? 10.0);
+  setVal('cfg-portfolio-tp-min-profit', cfg.exit?.portfolioTpMinProfitPct ?? 0.5);
+
+  // Regime Shift / Trend Shift Exit
+  const trendShiftCheckbox = document.getElementById('cfg-trend-shift-exit-enabled');
+  if (trendShiftCheckbox) {
+    trendShiftCheckbox.checked = cfg.exit?.trendShiftExitEnabled !== false;
+  }
+  setVal('cfg-trend-shift-min-profit', cfg.exit?.trendShiftMinProfitPct ?? 0.5);
+
   // Emergency BEP Defense
   const bepDefCheckbox = document.getElementById('cfg-bep-defense-enabled');
   if (bepDefCheckbox) {
@@ -4013,6 +4032,11 @@ function getSettingsFormData() {
       takeProfit2Pct: parseFloat(getVal('cfg-tp2-pct', '2.4')) || 2.4,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '70')) || 70) / 100,
+      portfolioTpEnabled: document.getElementById('cfg-portfolio-tp-enabled') ? !!document.getElementById('cfg-portfolio-tp-enabled').checked : true,
+      portfolioTpTargetPct: parseFloat(getVal('cfg-portfolio-tp-target', '10.0')) || 10.0,
+      portfolioTpMinProfitPct: parseFloat(getVal('cfg-portfolio-tp-min-profit', '0.5')) || 0.5,
+      trendShiftExitEnabled: document.getElementById('cfg-trend-shift-exit-enabled') ? !!document.getElementById('cfg-trend-shift-exit-enabled').checked : true,
+      trendShiftMinProfitPct: parseFloat(getVal('cfg-trend-shift-min-profit', '0.5')) || 0.5,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
       trailingTpEnabled: !!document.getElementById('cfg-trailing-tp-enabled')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-trailing-tp-callback', '0.4')) || 0.4,
@@ -5385,6 +5409,8 @@ async function executeBacktest() {
           if (t.exitReason === 'TAKE_PROFIT') exitReasonLabel = '🎯 Take Profit';
           else if (t.exitReason === 'TRAILING_TP') exitReasonLabel = t.partialTpTaken ? '🎯 Stage 2 TP / BEP' : '📈 Trailing TP';
           else if (t.exitReason === 'BEP_DEFENSE') exitReasonLabel = '🛡️ BEP Defense';
+          else if (t.exitReason === 'TOTAL_PROFIT_TARGET') exitReasonLabel = '🎯 Portfolio TP';
+          else if (t.exitReason === 'TREND_SHIFT_EXIT') exitReasonLabel = '🔄 Trend Shift';
           else if (t.exitReason === 'HARD_STOP_LOSS') exitReasonLabel = '🛑 Hard SL';
           else if (t.exitReason === 'TIME_LIMIT_EXIT') exitReasonLabel = '⏰ Batas Waktu';
           else if (t.exitReason === 'EARLY_MOMENTUM_EXIT') exitReasonLabel = '⚠️ Early Momentum';

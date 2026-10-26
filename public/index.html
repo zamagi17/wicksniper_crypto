@@ -1432,6 +1432,50 @@
           </div>
         </div>
 
+        <!-- TOTAL FLOATING PROFIT PORTFOLIO EXIT (10% TARGET) -->
+        <div class="form-row" style="background: rgba(48, 209, 88, 0.04); border: 1px dashed rgba(48, 209, 88, 0.35); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #30d158;">
+              <input type="checkbox" id="cfg-portfolio-tp-enabled" style="width: 16px; height: 16px; accent-color: #30d158;">
+              🎯 Aktifkan Exit Target Floating Profit Seluruh Koin (Portfolio TP) <span class="badge-tag badge-shared">🌐 Global / Seluruh Posisi</span>
+            </label>
+            <small class="form-hint">Saat akumulasi floating profit seluruh koin mencapai target (misal 10% dari total margin), bot otomatis menutup seluruh posisi yang sedang profit minimal 0.5% pergerakan harga. Posisi di bawah 0.5% atau yang sedang loss tetap dibiarkan berjalan.</small>
+          </div>
+
+          <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Target Floating Profit Seluruh Koin (%)</label>
+              <input type="number" id="cfg-portfolio-tp-target" step="0.5" class="form-control" placeholder="10.0">
+              <small class="form-hint">Ambang total floating profit terhadap total margin aktif (Default: 10.0%).</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Minimal Profit Pergerakan Harga Koin (%)</label>
+              <input type="number" id="cfg-portfolio-tp-min-profit" step="0.1" class="form-control" placeholder="0.5">
+              <small class="form-hint">Hanya posisi dengan profit &ge; X% harga yang ditutup (Default: 0.5%). Posisi &lt; X% / loss dibiarkan.</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- REGIME SHIFT / PERGESERAN TREND EXIT -->
+        <div class="form-row" style="background: rgba(255, 159, 10, 0.04); border: 1px dashed rgba(255, 159, 10, 0.35); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #ff9f0a;">
+              <input type="checkbox" id="cfg-trend-shift-exit-enabled" style="width: 16px; height: 16px; accent-color: #ff9f0a;">
+              🔄 Tutup Segera saat Trend Bergeser (Regime Shift Exit) <span class="badge-tag badge-shared">🌐 Global / Seluruh Posisi</span>
+            </label>
+            <small class="form-hint">Jika posisi dibuka saat pasar Sideways lalu tiba-tiba bergeser ke Bearish (atau Bullish ke Sideways/Bearish untuk LONG; dan sebaliknya untuk SHORT), posisi yang sudah profit minimal 0.5% harga langsung ditutup segera demi mengamankan keuntungan sebelum tergerus.</small>
+          </div>
+
+          <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Minimal Profit Pergerakan Harga saat Trend Geser (%)</label>
+              <input type="number" id="cfg-trend-shift-min-profit" step="0.1" class="form-control" placeholder="0.5">
+              <small class="form-hint">Hanya menutup jika sudah untung minimal X% pergerakan harga (Default: 0.5%).</small>
+            </div>
+          </div>
+        </div>
+
         <!-- EMERGENCY BEP DEFENSE (MAX LAYER & VELOCITY SHOCK) -->
         <div class="form-row" style="background: rgba(255, 69, 58, 0.04); border: 1px dashed rgba(255, 69, 58, 0.35); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
           <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
