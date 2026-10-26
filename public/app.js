@@ -956,12 +956,14 @@ function renderBtcFilter(btc) {
   const tf = btc.timeframe || currentConfig?.smartMoney?.btcTrendTimeframe || '1h';
   const period = btc.period || currentConfig?.smartMoney?.btcTrendEmaPeriod || 50;
   const isBullish = btc.trend === 'BULLISH';
+  const isBearish = btc.trend === 'BEARISH';
+  const isSideways = btc.trend === 'SIDEWAYS';
 
   // Header quick tag
   const quickTag = document.getElementById('btc-header-quick-tag');
   if (quickTag) {
     quickTag.style.display = 'inline-block';
-    const quickSign = isBullish ? '🟢' : '🔴';
+    const quickSign = isBullish ? '🟢' : (isBearish ? '🔴' : '🟡');
     const priceFmt = btc.btcPrice ? `$${Math.round(btc.btcPrice).toLocaleString('en-US')}` : '$--';
     quickTag.innerText = `BTC: ${priceFmt} ${quickSign}`;
     quickTag.title = `BTC: $${(btc.btcPrice || 0).toFixed(2)} | EMA${period}: $${(btc.ema || 0).toFixed(2)} (${btc.trend})`;
@@ -973,14 +975,14 @@ function renderBtcFilter(btc) {
 
   const trendBadge = document.getElementById('btc-trend-badge');
   if (trendBadge) {
-    trendBadge.className = `btc-trend-pill ${isBullish ? 'bullish' : 'bearish'}`;
-    trendBadge.innerHTML = isBullish ? 'BULLISH 🟢' : 'BEARISH 🔴';
+    trendBadge.className = `btc-trend-pill ${isBullish ? 'bullish' : (isBearish ? 'bearish' : 'sideways')}`;
+    trendBadge.innerHTML = isBullish ? 'BULLISH 🟢' : (isBearish ? 'BEARISH 🔴' : 'SIDEWAYS 🟡');
   }
 
   // 2. Pulse Beacon
   const beacon = document.getElementById('btc-beacon-pulse');
   if (beacon) {
-    beacon.className = `btc-beacon-pulse ${isBullish ? 'bullish' : 'bearish'}`;
+    beacon.className = `btc-beacon-pulse ${isBullish ? 'bullish' : (isBearish ? 'bearish' : 'sideways')}`;
   }
 
   // 3. Metrics (Harga BTC, EMA, Delta vs EMA, 1-Candle Change)
@@ -989,7 +991,7 @@ function renderBtcFilter(btc) {
     priceValEl.innerText = btc.btcPrice
       ? `$${btc.btcPrice.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}`
       : '$--';
-    priceValEl.className = `btc-metric-val font-mono ${isBullish ? 'text-green' : 'text-red'}`;
+    priceValEl.className = `btc-metric-val font-mono ${isBullish ? 'text-green' : (isBearish ? 'text-red' : 'text-yellow')}`;
   }
 
   const emaLabelEl = document.getElementById('btc-metric-ema-label');
@@ -1011,7 +1013,7 @@ function renderBtcFilter(btc) {
   if (diffDeltaEl) {
     const deltaArrow = diffUsdt >= 0 ? '▲' : '▼';
     const deltaSign = diffUsdt >= 0 ? '+' : '';
-    const deltaClass = isBullish ? 'text-green' : 'text-red';
+    const deltaClass = isBullish ? 'text-green' : (isBearish ? 'text-red' : 'text-yellow');
     diffDeltaEl.innerHTML = `<span class="${deltaClass}" style="font-weight: 700;">${deltaArrow} ${deltaSign}$${Math.abs(diffUsdt).toFixed(1)} (${deltaSign}${diffPct.toFixed(2)}%)</span>`;
   }
 
@@ -1045,14 +1047,20 @@ function renderBtcFilter(btc) {
     if (guardLabel) guardLabel.innerText = 'SHORT Diblokir (Flash Surge) ⚠️';
   } else if (isBullish) {
     const shortStatus = btc.canShort ? 'SHORT Aman' : 'SHORT Ditahan';
-    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b>. Entry LONG aman & terlindungi dari dump pasar (${shortStatus}).`;
+    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish terkonfirmasi, sinyal LONG aman (${shortStatus}).`;
     if (guardBadge) guardBadge.className = 'btc-guard-badge success';
-    if (guardLabel) guardLabel.innerText = 'LONG Aman ✅';
-  } else {
+    if (guardLabel) guardLabel.innerText = 'BULLISH (LONG Aman) ✅';
+  } else if (isBearish) {
     const longStatus = btc.canLong ? 'LONG Aman' : 'LONG Ditahan';
-    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #ff3366;">bawah EMA ${period}</b>. Entry SHORT diizinkan, waspada pembalikan tren (${longStatus}).`;
+    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #ff3366;">bawah EMA ${period}</b> (${diffPct.toFixed(2)}%). Tren Bearish terkonfirmasi, sinyal SHORT diizinkan (${longStatus}).`;
     if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
-    if (guardLabel) guardLabel.innerText = 'SHORT Aman ✅';
+    if (guardLabel) guardLabel.innerText = 'BEARISH (SHORT Aman) ✅';
+  } else {
+    // SIDEWAYS / BUFFER ZONE
+    const deadbandStr = btc.deadbandPct !== undefined ? `±${btc.deadbandPct}%` : '±0.25%';
+    if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%). Pasar stabil sideways: sinyal Smart Money LONG &amp; SHORT diizinkan.`;
+    if (guardBadge) guardBadge.className = 'btc-guard-badge neutral';
+    if (guardLabel) guardLabel.innerText = 'SIDEWAYS / NETRAL 🟡';
   }
 
   lastBtcTrendTs = btc.updatedAt || Date.now();
@@ -3563,6 +3571,7 @@ function populateSettingsForm(cfg) {
   if (smBtcTrendCb) smBtcTrendCb.checked = smCfg.btcTrendFilterEnabled !== false;
   setVal('cfg-sm-btc-trend-tf', smCfg.btcTrendTimeframe || '1h');
   setVal('cfg-sm-btc-trend-ema', smCfg.btcTrendEmaPeriod ?? 50);
+  setVal('cfg-sm-btc-trend-deadband', smCfg.btcTrendDeadbandPct ?? 0.25);
   setVal('cfg-sm-btc-drop-threshold', smCfg.btcDropThresholdPct ?? 1.0);
   const smLowVolCb = document.getElementById('cfg-sm-low-vol-enabled');
   if (smLowVolCb) smLowVolCb.checked = smCfg.lowVolumeAdaptiveEnabled !== false;
@@ -3920,6 +3929,7 @@ function getSettingsFormData() {
       btcTrendFilterEnabled: !!document.getElementById('cfg-sm-btc-trend-enabled')?.checked,
       btcTrendTimeframe: getVal('cfg-sm-btc-trend-tf', '1h'),
       btcTrendEmaPeriod: parseInt(getVal('cfg-sm-btc-trend-ema', '50'), 10) || 50,
+      btcTrendDeadbandPct: parseFloat(getVal('cfg-sm-btc-trend-deadband', '0.25')) || 0.25,
       btcDropThresholdPct: parseFloat(getVal('cfg-sm-btc-drop-threshold', '1.0')) || 1.0,
       lowVolumeAdaptiveEnabled: !!document.getElementById('cfg-sm-low-vol-enabled')?.checked,
       lowVolumeThresholdUsdt: parseFloat(getVal('cfg-sm-low-vol-thresh', '20000000')) || 20000000,

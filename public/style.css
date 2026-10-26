@@ -3105,6 +3105,11 @@ body {
   box-shadow: 0 0 8px #ff3366;
 }
 
+.btc-beacon-pulse.sideways {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
 @keyframes btcPulseGlow {
   0% { transform: scale(0.9); opacity: 0.8; }
   50% { transform: scale(1.3); opacity: 1; }
@@ -3163,6 +3168,12 @@ body {
   background: rgba(255, 51, 102, 0.14);
   border: 1px solid rgba(255, 51, 102, 0.35);
   color: #ff3366;
+}
+
+.btc-trend-pill.sideways {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
 }
 
 .btc-detail-text {
@@ -3240,6 +3251,12 @@ body {
   background: rgba(255, 51, 102, 0.12);
   border-color: rgba(255, 51, 102, 0.35);
   color: #ff3366;
+}
+
+.btc-guard-badge.neutral {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
 }
 
 .btn-btc-sync {

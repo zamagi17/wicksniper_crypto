@@ -605,7 +605,8 @@ export class SmartMoneyScanner {
           const btcTf = this.config.btcTrendTimeframe || '1h';
           const btcPeriod = this.config.btcTrendEmaPeriod || 50;
           const dropThresh = this.config.btcDropThresholdPct ?? 1.0;
-          btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh);
+          const deadband = this.config.btcTrendDeadbandPct ?? 0.25;
+          btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband);
 
           if (btcTrendStatus) {
             if (detectedSide === 'LONG' && !btcTrendStatus.canLong) {

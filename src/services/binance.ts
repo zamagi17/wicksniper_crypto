@@ -1902,9 +1902,11 @@ export class BinanceFuturesClient {
   public async getBtcTrendStatus(
     interval: string = '1h',
     period: number = 50,
-    dropThresholdPct: number = 1.0
+    dropThresholdPct: number = 1.0,
+    deadbandPct: number = 0.25
   ): Promise<BtcTrendStatus | null> {
-    const cacheKey = `${interval}_${period}_${dropThresholdPct}`;
+    const deadband = Math.max(0, deadbandPct);
+    const cacheKey = `${interval}_${period}_${dropThresholdPct}_${deadband}`;
     const cached = this.btcTrendCache.get(cacheKey);
     const now = Date.now();
     if (cached && now - cached.timestamp < 20_000) {
@@ -1941,22 +1943,33 @@ export class BinanceFuturesClient {
         const isFlashDump = candleChangePct <= -thresh || changeFromPrevClose <= -thresh;
         const isFlashSurge = candleChangePct >= thresh || changeFromPrevClose >= thresh;
 
-        const isBullish = currentPrice >= ema;
-        const isBearish = currentPrice < ema;
-        const trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = isBullish ? 'BULLISH' : 'BEARISH';
-
-        // Pelindung Dua Arah:
-        // - LONG aman jika: BTC tidak sedang Flash Dump DAN BTC berada di atas garis EMA (Trend Bullish)
-        // - SHORT aman jika: BTC tidak sedang Flash Surge DAN BTC berada di bawah garis EMA (Trend Bearish)
-        const canLong = !isFlashDump && isBullish;
-        const canShort = !isFlashSurge && isBearish;
-
-        let reason = `BTC $${currentPrice.toFixed(0)} (${trend} vs EMA${period} $${ema.toFixed(0)}) | 1-Candle Δ: ${candleChangePct >= 0 ? '+' : ''}${candleChangePct.toFixed(2)}%`;
-        if (isFlashDump) reason += ' | ⚠️ FLASH DUMP';
-        if (isFlashSurge) reason += ' | 🚀 FLASH SURGE';
-
         const diffUsdt = currentPrice - ema;
         const diffPct = ema > 0 ? (diffUsdt / ema) * 100 : 0;
+
+        // Evaluasi Tren Macro dengan Deadband / Hysteresis Buffer:
+        // - BULLISH: diffPct > +deadband (harga tegas di atas batas toleransi)
+        // - BEARISH: diffPct < -deadband (harga tegas di bawah batas toleransi)
+        // - SIDEWAYS: -deadband <= diffPct <= +deadband (harga berada di zona penyangga EMA, pasar berkonsolidasi)
+        let trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
+        if (diffPct > deadband) {
+          trend = 'BULLISH';
+        } else if (diffPct < -deadband) {
+          trend = 'BEARISH';
+        } else {
+          trend = 'SIDEWAYS';
+        }
+
+        // Kebijakan Eksekusi (Anti-Whipsaw):
+        // 1. BULLISH  -> canLong = !isFlashDump, canShort = false
+        // 2. BEARISH  -> canLong = false, canShort = !isFlashSurge
+        // 3. SIDEWAYS -> Pasar sedang ranging/konsolidasi tenang di sekitar EMA.
+        //    Koin altcoin dengan Smart Money kuat diizinkan baik LONG maupun SHORT (menghindari flip-flop labil).
+        const canLong = !isFlashDump && (trend === 'BULLISH' || trend === 'SIDEWAYS');
+        const canShort = !isFlashSurge && (trend === 'BEARISH' || trend === 'SIDEWAYS');
+
+        let reason = `BTC $${currentPrice.toFixed(0)} (${trend} vs EMA${period} $${ema.toFixed(0)}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) | 1-Candle Δ: ${candleChangePct >= 0 ? '+' : ''}${candleChangePct.toFixed(2)}%`;
+        if (isFlashDump) reason += ' | ⚠️ FLASH DUMP';
+        if (isFlashSurge) reason += ' | 🚀 FLASH SURGE';
 
         const result: BtcTrendStatus = {
           btcPrice: currentPrice,
@@ -1972,6 +1985,7 @@ export class BinanceFuturesClient {
           period,
           diffUsdt,
           diffPct,
+          deadbandPct: deadband,
           updatedAt: now,
         };
 

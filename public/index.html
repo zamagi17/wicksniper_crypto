@@ -973,7 +973,12 @@
               <div style="flex: 1; min-width: 140px;">
                 <label style="font-size: 11px; margin-bottom: 2px;">Periode EMA BTC</label>
                 <input type="number" id="cfg-sm-btc-trend-ema" min="10" max="200" step="1" class="form-control" placeholder="50" style="padding: 4px 8px;">
-                <small class="form-hint">Long dilarang jika BTC &lt; EMA; Short dilarang jika BTC &gt; EMA (Standar: 50).</small>
+                <small class="form-hint">Baseline moving average tren BTC (Standar: 50).</small>
+              </div>
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Buffer Zona Sideways (%)</label>
+                <input type="number" id="cfg-sm-btc-trend-deadband" min="0.0" max="2.0" step="0.05" class="form-control" placeholder="0.25" style="padding: 4px 8px;">
+                <small class="form-hint">Toleransi sideways di sekitar EMA agar filter tidak labil / flip-flop (Standar: 0.25%).</small>
               </div>
               <div style="flex: 1; min-width: 140px;">
                 <label style="font-size: 11px; margin-bottom: 2px;">Ambang Flash Dump/Surge (%)</label>

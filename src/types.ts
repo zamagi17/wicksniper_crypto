@@ -188,6 +188,7 @@ export interface SmartMoneyConfig {
   btcTrendTimeframe?: '15m' | '1h' | '4h'; // Timeframe tren BTC (default: '1h')
   btcTrendEmaPeriod?: number;  // Periode EMA BTC (default: 50)
   btcDropThresholdPct?: number; // Ambang flash dump/surge BTC (%) (default: 1.0%)
+  btcTrendDeadbandPct?: number; // Ambang batas zona netral/sideways di sekitar EMA (%) (default: 0.25%)
   lowVolumeAdaptiveEnabled?: boolean; // Adaptasi otomatis koin bervolume rendah (< 20M)
   lowVolumeThresholdUsdt?: number;    // Ambang batas volume 24 jam koin rendah (USDT, default: 20_000_000)
   lowVolumeMarginDivisor?: number;    // Pembagi margin untuk koin bervolume rendah (default: 2, margin dibagi 2)
@@ -208,6 +209,7 @@ export interface BtcTrendStatus {
   period?: number;
   diffUsdt?: number;
   diffPct?: number;
+  deadbandPct?: number;
   updatedAt?: number;
 }
 
