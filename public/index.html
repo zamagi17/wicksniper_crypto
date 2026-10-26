@@ -705,13 +705,18 @@
                 <small class="form-hint">Standar: 2 (Margin awal dibagi 2 sebelum dikalikan leverage).</small>
               </div>
               <div style="flex: 1; min-width: 130px;">
-                <label style="font-size: 11px; margin-bottom: 2px;">Pengali Pelebaran SL & TP</label>
-                <input type="number" id="cfg-sm-low-vol-sltp-mult" min="1.2" max="4.0" step="0.1" class="form-control" placeholder="2.0" style="padding: 4px 8px;">
-                <small class="form-hint">Standar: 2.0x (Jarak SL & TP diperlebar 2x agar resiko nominal $ tetap sama).</small>
+                <label style="font-size: 11px; margin-bottom: 2px;">Pengali Jarak Stop Loss (SL)</label>
+                <input type="number" id="cfg-sm-low-vol-sl-mult" min="1.0" max="4.0" step="0.1" class="form-control" placeholder="2.0" style="padding: 4px 8px;">
+                <small class="form-hint">Standar: 2.0x (SL diperlebar 2x agar tahan wick noise tanpa premature stop out).</small>
+              </div>
+              <div style="flex: 1; min-width: 130px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Pengali Jarak Take Profit (TP)</label>
+                <input type="number" id="cfg-sm-low-vol-tp-mult" min="0.5" max="3.0" step="0.1" class="form-control" placeholder="1.0" style="padding: 4px 8px;">
+                <small class="form-hint">Standar: 1.0x (TP tetap realistis agar cepat tercapai sebelum koin berbalik arah).</small>
               </div>
             </div>
             <small class="form-hint" style="color: #94a3b8; margin-top: 6px;">
-              <b>Mekanisme Proteksi:</b> Untuk koin bervolume rendah (likuiditas tipis seperti HUMA), pergerakan sering membuat spike/wick liar sebelum berbalik arah. Dengan margin dibagi 2 dan jarak SL/TP diperlebar 2x, resiko kerugian dollar ($) tetap sama, namun posisi memiliki ruang bernafas 2x lebih luas untuk bertahan dan meraih TP!
+              <b>Mekanisme Proteksi:</b> Untuk koin bervolume rendah (likuiditas tipis), pergerakan sering membuat spike liar sesaat. Margin dibagi 2 dan SL diperlebar (2.0x) agar tahan wick noise dengan resiko nominal $ tetap terkendali, sementara TP tetap dipertahankan realistis (1.0x) agar cepat terkunci sebelum koin kehabisan momentum!
             </small>
           </div>
 

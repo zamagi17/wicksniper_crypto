@@ -215,7 +215,7 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       : `🛑 <b>Hard SL:</b> <code>$${formatCryptoPrice(pos.hardSlPrice)}</code> (${slSign}${slPct}%)`;
 
     const lowVolLine = pos.paramsSnapshot?.isLowVolumeAdjusted
-      ? `\n🛡️ <b>Adaptasi Vol Rendah:</b> 24h Vol $${((pos.paramsSnapshot.vol24hUsdt || 0) / 1e6).toFixed(1)}M < $${((pos.paramsSnapshot.lowVolumeThresholdUsdt || 20000000) / 1e6).toFixed(0)}M (Margin ÷${pos.paramsSnapshot.lowVolumeMarginDivisor || 2}, SL/TP ${pos.paramsSnapshot.lowVolumeSlTpMultiplier || 2}x)`
+      ? `\n🛡️ <b>Adaptasi Vol Rendah:</b> 24h Vol $${((pos.paramsSnapshot.vol24hUsdt || 0) / 1e6).toFixed(1)}M < $${((pos.paramsSnapshot.lowVolumeThresholdUsdt || 20000000) / 1e6).toFixed(0)}M (Margin ÷${pos.paramsSnapshot.lowVolumeMarginDivisor || 2}, SL ${pos.paramsSnapshot.lowVolumeSlMultiplier || pos.paramsSnapshot.lowVolumeSlTpMultiplier || 2}x, TP ${pos.paramsSnapshot.lowVolumeTpMultiplier || 1}x)`
       : '';
 
     const msg =

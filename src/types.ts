@@ -94,6 +94,8 @@ export interface BotConfig {
     lowVolumeThresholdUsdt?: number;
     lowVolumeMarginDivisor?: number;
     lowVolumeSlTpMultiplier?: number;
+    lowVolumeSlMultiplier?: number;
+    lowVolumeTpMultiplier?: number;
   };
   paperTrading: {
     initialVirtualBalance: number;
@@ -192,7 +194,9 @@ export interface SmartMoneyConfig {
   lowVolumeAdaptiveEnabled?: boolean; // Adaptasi otomatis koin bervolume rendah (< 20M)
   lowVolumeThresholdUsdt?: number;    // Ambang batas volume 24 jam koin rendah (USDT, default: 20_000_000)
   lowVolumeMarginDivisor?: number;    // Pembagi margin untuk koin bervolume rendah (default: 2, margin dibagi 2)
-  lowVolumeSlTpMultiplier?: number;   // Pengali pelebaran jarak SL & TP (default: 2.0, diperlebar 2x agar resiko $ sama)
+  lowVolumeSlTpMultiplier?: number;   // Legacy: Pengali jarak SL & TP
+  lowVolumeSlMultiplier?: number;     // Pengali jarak SL untuk koin bervolume rendah (default: 2.0x)
+  lowVolumeTpMultiplier?: number;     // Pengali jarak TP untuk koin bervolume rendah (default: 1.0x)
 }
 
 export interface BtcTrendStatus {

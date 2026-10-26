@@ -2520,8 +2520,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       )}
       ${renderCompareRow(
         'Adaptasi Vol Rendah (< 20M)',
-        snap.isLowVolumeAdjusted ? `Aktif (÷${snap.lowVolumeMarginDivisor || 2} Mgn, ${snap.lowVolumeSlTpMultiplier || 2}x SL/TP)` : (snap.lowVolumeAdaptiveEnabled !== undefined ? (snap.lowVolumeAdaptiveEnabled ? 'Aktif' : 'Nonaktif') : undefined),
-        (curr.smartMoney?.lowVolumeAdaptiveEnabled ?? currExit.lowVolumeAdaptiveEnabled ?? true) ? `Aktif (÷${curr.smartMoney?.lowVolumeMarginDivisor ?? currExit.lowVolumeMarginDivisor ?? 2} Mgn, ${curr.smartMoney?.lowVolumeSlTpMultiplier ?? currExit.lowVolumeSlTpMultiplier ?? 2}x SL/TP)` : 'Nonaktif'
+        snap.isLowVolumeAdjusted ? `Aktif (÷${snap.lowVolumeMarginDivisor || 2} Mgn, SL ${snap.lowVolumeSlMultiplier || snap.lowVolumeSlTpMultiplier || 2}x, TP ${snap.lowVolumeTpMultiplier || 1}x)` : (snap.lowVolumeAdaptiveEnabled !== undefined ? (snap.lowVolumeAdaptiveEnabled ? 'Aktif' : 'Nonaktif') : undefined),
+        (curr.smartMoney?.lowVolumeAdaptiveEnabled ?? currExit.lowVolumeAdaptiveEnabled ?? true) ? `Aktif (÷${curr.smartMoney?.lowVolumeMarginDivisor ?? currExit.lowVolumeMarginDivisor ?? 2} Mgn, SL ${curr.smartMoney?.lowVolumeSlMultiplier ?? currExit.lowVolumeSlMultiplier ?? 2}x, TP ${curr.smartMoney?.lowVolumeTpMultiplier ?? currExit.lowVolumeTpMultiplier ?? 1}x)` : 'Nonaktif'
       )}
       ${renderCompareRow('Maks Hold Time', snap.maxHoldMinutes, currExit.maxHoldMinutes, ' Menit')}
       ${renderCompareRow(
@@ -3577,7 +3577,8 @@ function populateSettingsForm(cfg) {
   if (smLowVolCb) smLowVolCb.checked = smCfg.lowVolumeAdaptiveEnabled !== false;
   setVal('cfg-sm-low-vol-thresh', smCfg.lowVolumeThresholdUsdt ?? 20000000);
   setVal('cfg-sm-low-vol-margin-divisor', smCfg.lowVolumeMarginDivisor ?? 2);
-  setVal('cfg-sm-low-vol-sltp-mult', smCfg.lowVolumeSlTpMultiplier ?? 2.0);
+  setVal('cfg-sm-low-vol-sl-mult', smCfg.lowVolumeSlMultiplier ?? smCfg.lowVolumeSlTpMultiplier ?? 2.0);
+  setVal('cfg-sm-low-vol-tp-mult', smCfg.lowVolumeTpMultiplier ?? 1.0);
 
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   if (typeof toggleSmTrailingInput === 'function') toggleSmTrailingInput();
@@ -3934,7 +3935,9 @@ function getSettingsFormData() {
       lowVolumeAdaptiveEnabled: !!document.getElementById('cfg-sm-low-vol-enabled')?.checked,
       lowVolumeThresholdUsdt: parseFloat(getVal('cfg-sm-low-vol-thresh', '20000000')) || 20000000,
       lowVolumeMarginDivisor: parseFloat(getVal('cfg-sm-low-vol-margin-divisor', '2')) || 2,
-      lowVolumeSlTpMultiplier: parseFloat(getVal('cfg-sm-low-vol-sltp-mult', '2.0')) || 2.0,
+      lowVolumeSlMultiplier: parseFloat(getVal('cfg-sm-low-vol-sl-mult', '2.0')) || 2.0,
+      lowVolumeTpMultiplier: parseFloat(getVal('cfg-sm-low-vol-tp-mult', '1.0')) || 1.0,
+      lowVolumeSlTpMultiplier: parseFloat(getVal('cfg-sm-low-vol-sl-mult', '2.0')) || 2.0,
     },
     tradingMode: getVal('cfg-mode', 'PAPER'),
     leverage: parseInt(getVal('cfg-leverage', '5')) || 5,
