@@ -1916,6 +1916,7 @@ export class BinanceFuturesClient {
 
   private btcTrendCache: Map<string, { timestamp: number; data: BtcTrendStatus }> = new Map();
   private lastBtcTrendStatus: BtcTrendStatus | null = null;
+  private lastDirectionalTrend: 'BULLISH' | 'BEARISH' | null = null;
 
   public getLastBtcTrendStatus(): BtcTrendStatus | null {
     return this.lastBtcTrendStatus;
@@ -1925,10 +1926,11 @@ export class BinanceFuturesClient {
     interval: string = '1h',
     period: number = 50,
     dropThresholdPct: number = 1.0,
-    deadbandPct: number = 0.25
+    deadbandPct: number = 0.25,
+    inheritSidewaysTrend: boolean = true
   ): Promise<BtcTrendStatus | null> {
     const deadband = Math.max(0, deadbandPct);
-    const cacheKey = `${interval}_${period}_${dropThresholdPct}_${deadband}`;
+    const cacheKey = `${interval}_${period}_${dropThresholdPct}_${deadband}_${inheritSidewaysTrend}`;
     const cached = this.btcTrendCache.get(cacheKey);
     const now = Date.now();
     if (cached && now - cached.timestamp < 20_000) {
@@ -1951,10 +1953,12 @@ export class BinanceFuturesClient {
         const currentPrice = parseFloat(currentCandle[4]);
 
         const multiplier = 2 / (period + 1);
-        let ema = closes[0];
+        const emaSeries: number[] = new Array(closes.length);
+        emaSeries[0] = closes[0];
         for (let i = 1; i < closes.length; i++) {
-          ema = (closes[i] - ema) * multiplier + ema;
+          emaSeries[i] = (closes[i] - emaSeries[i - 1]) * multiplier + emaSeries[i - 1];
         }
+        const ema = emaSeries[emaSeries.length - 1];
 
         const candleChangePct = ((currentPrice - openPrice) / openPrice) * 100;
         const prevCandle = klines.length >= 2 ? klines[klines.length - 2] : null;
@@ -1975,21 +1979,69 @@ export class BinanceFuturesClient {
         let trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
         if (diffPct > deadband) {
           trend = 'BULLISH';
+          this.lastDirectionalTrend = 'BULLISH';
         } else if (diffPct < -deadband) {
           trend = 'BEARISH';
+          this.lastDirectionalTrend = 'BEARISH';
         } else {
           trend = 'SIDEWAYS';
         }
 
-        // Kebijakan Eksekusi (Anti-Whipsaw):
+        // Tentukan priorTrend secara deterministik dari riwayat klines (mencari candle terakhir di luar deadband):
+        let priorTrend: 'BULLISH' | 'BEARISH' | 'NONE' = 'NONE';
+        for (let i = closes.length - 2; i >= 0; i--) {
+          const pastClose = closes[i];
+          const pastEma = emaSeries[i];
+          if (pastEma > 0) {
+            const pastDiffPct = ((pastClose - pastEma) / pastEma) * 100;
+            if (pastDiffPct > deadband) {
+              priorTrend = 'BULLISH';
+              break;
+            } else if (pastDiffPct < -deadband) {
+              priorTrend = 'BEARISH';
+              break;
+            }
+          }
+        }
+
+        // Fallback ke cache memory jika seluruh lookback berada di dalam deadband
+        if (priorTrend === 'NONE' && this.lastDirectionalTrend) {
+          priorTrend = this.lastDirectionalTrend;
+        } else if (priorTrend !== 'NONE' && !this.lastDirectionalTrend) {
+          this.lastDirectionalTrend = priorTrend;
+        }
+
+        // Kebijakan Eksekusi (Anti-Whipsaw & Anti Bear/Bull Flag Trap):
         // 1. BULLISH  -> canLong = !isFlashDump, canShort = false
         // 2. BEARISH  -> canLong = false, canShort = !isFlashSurge
-        // 3. SIDEWAYS -> Pasar sedang ranging/konsolidasi tenang di sekitar EMA.
-        //    Koin altcoin dengan Smart Money kuat diizinkan baik LONG maupun SHORT (menghindari flip-flop labil).
-        const canLong = !isFlashDump && (trend === 'BULLISH' || trend === 'SIDEWAYS');
-        const canShort = !isFlashSurge && (trend === 'BEARISH' || trend === 'SIDEWAYS');
+        // 3. SIDEWAYS (Regime Hysteresis / Trend Inertia):
+        //    - Pasca-BEARISH: canLong = false (LONG DITAHAN agar terhindar dari Bear-Flag Trap), canShort = !isFlashSurge
+        //    - Pasca-BULLISH: canLong = !isFlashDump, canShort = false (SHORT DITAHAN agar terhindar dari Bull-Flag Trap)
+        //    - Murni Netral / Inherit Nonaktif: canLong = !isFlashDump, canShort = !isFlashSurge
+        let canLong = false;
+        let canShort = false;
 
-        let reason = `BTC $${currentPrice.toFixed(0)} (${trend} vs EMA${period} $${ema.toFixed(0)}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) | 1-Candle Δ: ${candleChangePct >= 0 ? '+' : ''}${candleChangePct.toFixed(2)}%`;
+        if (trend === 'BULLISH') {
+          canLong = !isFlashDump;
+          canShort = false;
+        } else if (trend === 'BEARISH') {
+          canLong = false;
+          canShort = !isFlashSurge;
+        } else {
+          if (inheritSidewaysTrend && priorTrend === 'BEARISH') {
+            canLong = false;
+            canShort = !isFlashSurge;
+          } else if (inheritSidewaysTrend && priorTrend === 'BULLISH') {
+            canLong = !isFlashDump;
+            canShort = false;
+          } else {
+            canLong = !isFlashDump;
+            canShort = !isFlashSurge;
+          }
+        }
+
+        const priorLabel = trend === 'SIDEWAYS' && priorTrend !== 'NONE' ? ` [Prior: ${priorTrend}]` : '';
+        let reason = `BTC $${currentPrice.toFixed(0)} (${trend}${priorLabel} vs EMA${period} $${ema.toFixed(0)}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) | 1-Candle Δ: ${candleChangePct >= 0 ? '+' : ''}${candleChangePct.toFixed(2)}%`;
         if (isFlashDump) reason += ' | ⚠️ FLASH DUMP';
         if (isFlashSurge) reason += ' | 🚀 FLASH SURGE';
 
@@ -1997,6 +2049,7 @@ export class BinanceFuturesClient {
           btcPrice: currentPrice,
           ema,
           trend,
+          priorTrend,
           changePct: candleChangePct,
           isFlashDump,
           isFlashSurge,
@@ -2008,6 +2061,7 @@ export class BinanceFuturesClient {
           diffUsdt,
           diffPct,
           deadbandPct: deadband,
+          inheritSidewaysTrend,
           updatedAt: now,
         };
 

@@ -990,6 +990,14 @@
                 <input type="number" id="cfg-sm-btc-drop-threshold" min="0.3" max="5.0" step="0.1" class="form-control" placeholder="1.0" style="padding: 4px 8px;">
                 <small class="form-hint">Blokir Long saat BTC drop &ge; X%, blokir Short saat BTC surge &ge; X% (Standar: 1.0%).</small>
               </div>
+              <div style="flex: 1; min-width: 180px;">
+                <label style="font-size: 11px; margin-bottom: 2px;">Sideways Trend Memory</label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 6px; cursor: pointer; color: var(--text-primary, #e2e8f0);">
+                  <input type="checkbox" id="cfg-sm-btc-trend-inherit" style="width: 15px; height: 15px; accent-color: #f59e0b;" checked>
+                  <span>Kunci Arah Tren Sebelumnya</span>
+                </label>
+                <small class="form-hint">Bearish➜Sideways: Short Only (Anti Bear-Flag). Bullish➜Sideways: Long Only (Anti Bull-Flag).</small>
+              </div>
             </div>
           </div>
         </div>

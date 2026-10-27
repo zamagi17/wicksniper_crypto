@@ -606,28 +606,38 @@ export class SmartMoneyScanner {
           const btcPeriod = this.config.btcTrendEmaPeriod || 50;
           const dropThresh = this.config.btcDropThresholdPct ?? 1.0;
           const deadband = this.config.btcTrendDeadbandPct ?? 0.25;
-          btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband);
+          const inheritSideways = this.config.btcTrendInheritSideways !== false;
+          btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband, inheritSideways);
 
           if (btcTrendStatus) {
             if (detectedSide === 'LONG' && !btcTrendStatus.canLong) {
               const dumpDetail = btcTrendStatus.isFlashDump ? ' (FLASH DUMP)' : '';
+              const sidewaysDetail = btcTrendStatus.trend === 'SIDEWAYS' && btcTrendStatus.priorTrend === 'BEARISH'
+                ? ' (SIDEWAYS pasca-BEARISH - Long Ditahan)'
+                : '';
               logger.log(
                 'INFO',
-                `🛡️ [BTC GUARD SKIP] ${symbol} LONG dibatalkan: BTC sedang ${btcTrendStatus.trend}${dumpDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko pisau jatuh pasar.`
+                `🛡️ [BTC GUARD SKIP] ${symbol} LONG dibatalkan: BTC sedang ${btcTrendStatus.trend}${dumpDetail}${sidewaysDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko pisau jatuh pasar.`
               );
               return;
             }
 
             if (detectedSide === 'SHORT' && !btcTrendStatus.canShort) {
               const surgeDetail = btcTrendStatus.isFlashSurge ? ' (FLASH SURGE)' : '';
+              const sidewaysDetail = btcTrendStatus.trend === 'SIDEWAYS' && btcTrendStatus.priorTrend === 'BULLISH'
+                ? ' (SIDEWAYS pasca-BULLISH - Short Ditahan)'
+                : '';
               logger.log(
                 'INFO',
-                `🛡️ [BTC GUARD SKIP] ${symbol} SHORT dibatalkan: BTC sedang ${btcTrendStatus.trend}${surgeDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko kena squeeze pump pasar.`
+                `🛡️ [BTC GUARD SKIP] ${symbol} SHORT dibatalkan: BTC sedang ${btcTrendStatus.trend}${surgeDetail}${sidewaysDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko kena squeeze pump pasar.`
               );
               return;
             }
 
-            reason += ` | BTC ${btcTrendStatus.trend} ($${btcTrendStatus.btcPrice.toFixed(0)}/EMA $${btcTrendStatus.ema.toFixed(0)})`;
+            const priorStr = btcTrendStatus.trend === 'SIDEWAYS' && btcTrendStatus.priorTrend && btcTrendStatus.priorTrend !== 'NONE'
+              ? ` [Prior: ${btcTrendStatus.priorTrend}]`
+              : '';
+            reason += ` | BTC ${btcTrendStatus.trend}${priorStr} ($${btcTrendStatus.btcPrice.toFixed(0)}/EMA $${btcTrendStatus.ema.toFixed(0)})`;
           }
         }
 
@@ -665,6 +675,7 @@ export class SmartMoneyScanner {
                 btcPrice: btcTrendStatus.btcPrice,
                 ema: btcTrendStatus.ema,
                 trend: btcTrendStatus.trend,
+                priorTrend: btcTrendStatus.priorTrend,
                 changePct: btcTrendStatus.changePct,
               }
             : undefined,

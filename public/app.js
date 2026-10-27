@@ -976,7 +976,11 @@ function renderBtcFilter(btc) {
   const trendBadge = document.getElementById('btc-trend-badge');
   if (trendBadge) {
     trendBadge.className = `btc-trend-pill ${isBullish ? 'bullish' : (isBearish ? 'bearish' : 'sideways')}`;
-    trendBadge.innerHTML = isBullish ? 'BULLISH 🟢' : (isBearish ? 'BEARISH 🔴' : 'SIDEWAYS 🟡');
+    let badgeText = isBullish ? 'BULLISH 🟢' : (isBearish ? 'BEARISH 🔴' : 'SIDEWAYS 🟡');
+    if (isSideways && btc.priorTrend && btc.priorTrend !== 'NONE') {
+      badgeText = `SIDEWAYS (${btc.priorTrend}) 🟡`;
+    }
+    trendBadge.innerHTML = badgeText;
   }
 
   // 2. Pulse Beacon
@@ -1058,9 +1062,20 @@ function renderBtcFilter(btc) {
   } else {
     // SIDEWAYS / BUFFER ZONE
     const deadbandStr = btc.deadbandPct !== undefined ? `±${btc.deadbandPct}%` : '±0.25%';
-    if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%). Pasar stabil sideways: sinyal Smart Money LONG &amp; SHORT diizinkan.`;
-    if (guardBadge) guardBadge.className = 'btc-guard-badge neutral';
-    if (guardLabel) guardLabel.innerText = 'SIDEWAYS / NETRAL 🟡';
+    const priorTrend = btc.priorTrend;
+    if (priorTrend === 'BEARISH' && btc.canLong === false) {
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) pasca-<b>BEARISH</b>. 🛡️ <b>LONG Ditahan</b> (menghindari Bear-Flag trap), hanya <b>SHORT</b> yang diizinkan.`;
+      if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
+      if (guardLabel) guardLabel.innerText = 'SIDEWAYS (Prior: BEARISH ➜ SHORT Only) ⚠️';
+    } else if (priorTrend === 'BULLISH' && btc.canShort === false) {
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) pasca-<b>BULLISH</b>. 🛡️ <b>SHORT Ditahan</b> (menghindari Bull-Flag trap), hanya <b>LONG</b> yang diizinkan.`;
+      if (guardBadge) guardBadge.className = 'btc-guard-badge success';
+      if (guardLabel) guardLabel.innerText = 'SIDEWAYS (Prior: BULLISH ➜ LONG Only) ✅';
+    } else {
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%). Pasar stabil sideways: sinyal Smart Money LONG &amp; SHORT diizinkan.`;
+      if (guardBadge) guardBadge.className = 'btc-guard-badge neutral';
+      if (guardLabel) guardLabel.innerText = 'SIDEWAYS / NETRAL 🟡';
+    }
   }
 
   lastBtcTrendTs = btc.updatedAt || Date.now();
@@ -1288,7 +1303,8 @@ function renderActivePositions(positions) {
         const btcTrendColor = btc.trend === 'BULLISH' ? '#30d158' : btc.trend === 'BEARISH' ? '#ff453a' : '#ffd60a';
         const btcTrendBg = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.12)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.12)' : 'rgba(255, 214, 10, 0.12)';
         const btcTrendBorder = btc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.35)' : btc.trend === 'BEARISH' ? 'rgba(255, 69, 58, 0.35)' : 'rgba(255, 214, 10, 0.35)';
-        btcTag = `<span class="badge-tag" style="background: ${btcTrendBg}; border: 1px solid ${btcTrendBorder}; color: ${btcTrendColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Tren Macro BTC saat Entry: $${Number(btc.btcPrice || 0).toFixed(0)} (${btc.trend} vs EMA $${Number(btc.ema || 0).toFixed(0)})">🛡️ BTC: ${btc.trend}</span>`;
+        const subTrend = btc.trend === 'SIDEWAYS' && btc.priorTrend && btc.priorTrend !== 'NONE' ? ` [${btc.priorTrend}]` : '';
+        btcTag = `<span class="badge-tag" style="background: ${btcTrendBg}; border: 1px solid ${btcTrendBorder}; color: ${btcTrendColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Tren Macro BTC saat Entry: $${Number(btc.btcPrice || 0).toFixed(0)} (${btc.trend}${subTrend} vs EMA $${Number(btc.ema || 0).toFixed(0)})">🛡️ BTC: ${btc.trend}${subTrend}</span>`;
       }
 
       let fundingTag = '';
@@ -3577,6 +3593,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-btc-trend-ema', smCfg.btcTrendEmaPeriod ?? 50);
   setVal('cfg-sm-btc-trend-deadband', smCfg.btcTrendDeadbandPct ?? 0.25);
   setVal('cfg-sm-btc-drop-threshold', smCfg.btcDropThresholdPct ?? 1.0);
+  const smBtcInheritCb = document.getElementById('cfg-sm-btc-trend-inherit');
+  if (smBtcInheritCb) smBtcInheritCb.checked = smCfg.btcTrendInheritSideways !== false;
   const smLowVolCb = document.getElementById('cfg-sm-low-vol-enabled');
   if (smLowVolCb) smLowVolCb.checked = smCfg.lowVolumeAdaptiveEnabled !== false;
   setVal('cfg-sm-low-vol-thresh', smCfg.lowVolumeThresholdUsdt ?? 20000000);
@@ -3951,6 +3969,7 @@ function getSettingsFormData() {
       btcTrendEmaPeriod: parseInt(getVal('cfg-sm-btc-trend-ema', '50'), 10) || 50,
       btcTrendDeadbandPct: parseFloat(getVal('cfg-sm-btc-trend-deadband', '0.25')) || 0.25,
       btcDropThresholdPct: parseFloat(getVal('cfg-sm-btc-drop-threshold', '1.0')) || 1.0,
+      btcTrendInheritSideways: !!document.getElementById('cfg-sm-btc-trend-inherit')?.checked,
       lowVolumeAdaptiveEnabled: !!document.getElementById('cfg-sm-low-vol-enabled')?.checked,
       lowVolumeThresholdUsdt: parseFloat(getVal('cfg-sm-low-vol-thresh', '20000000')) || 20000000,
       lowVolumeMarginDivisor: parseFloat(getVal('cfg-sm-low-vol-margin-divisor', '2')) || 2,

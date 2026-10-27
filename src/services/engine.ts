@@ -204,6 +204,7 @@ export class WickSniperEngine {
       btcTrendEmaPeriod: 50,
       btcDropThresholdPct: 1.0,
       btcTrendDeadbandPct: 0.25,
+      btcTrendInheritSideways: true,
       lowVolumeAdaptiveEnabled: true,
       lowVolumeThresholdUsdt: 20_000_000,
       lowVolumeMarginDivisor: 2,
@@ -4904,7 +4905,8 @@ export class WickSniperEngine {
       const btcPeriod = this.config.smartMoney?.btcTrendEmaPeriod || 50;
       const dropThresh = this.config.smartMoney?.btcDropThresholdPct ?? 1.0;
       const deadband = this.config.smartMoney?.btcTrendDeadbandPct ?? 0.25;
-      const res = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband);
+      const inheritSideways = this.config.smartMoney?.btcTrendInheritSideways !== false;
+      const res = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband, inheritSideways);
       if (res) {
         this.lastBtcTrendStatus = res;
       }

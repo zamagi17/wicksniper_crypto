@@ -196,6 +196,7 @@ export interface SmartMoneyConfig {
   btcTrendEmaPeriod?: number;  // Periode EMA BTC (default: 50)
   btcDropThresholdPct?: number; // Ambang flash dump/surge BTC (%) (default: 1.0%)
   btcTrendDeadbandPct?: number; // Ambang batas zona netral/sideways di sekitar EMA (%) (default: 0.25%)
+  btcTrendInheritSideways?: boolean; // Jika sideways, warisi arah tren sebelumnya (bearish->sideways: short only, bullish->sideways: long only) (default: true)
   lowVolumeAdaptiveEnabled?: boolean; // Adaptasi otomatis koin bervolume rendah (< 20M)
   lowVolumeThresholdUsdt?: number;    // Ambang batas volume 24 jam koin rendah (USDT, default: 20_000_000)
   lowVolumeMarginDivisor?: number;    // Pembagi margin untuk koin bervolume rendah (default: 2, margin dibagi 2)
@@ -208,6 +209,7 @@ export interface BtcTrendStatus {
   btcPrice: number;
   ema: number;
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  priorTrend?: 'BULLISH' | 'BEARISH' | 'NONE';
   changePct: number;
   isFlashDump: boolean;
   isFlashSurge: boolean;
@@ -219,6 +221,7 @@ export interface BtcTrendStatus {
   diffUsdt?: number;
   diffPct?: number;
   deadbandPct?: number;
+  inheritSidewaysTrend?: boolean;
   updatedAt?: number;
 }
 
@@ -251,6 +254,7 @@ export interface SmartMoneySignal {
     btcPrice: number;
     ema: number;
     trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    priorTrend?: 'BULLISH' | 'BEARISH' | 'NONE';
     changePct?: number;
   };
   rsi15m?: number;
@@ -399,6 +403,7 @@ export interface ActivePosition {
     btcPrice: number;
     ema: number;
     trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    priorTrend?: 'BULLISH' | 'BEARISH' | 'NONE';
     changePct?: number;
   };
   fundingRatePct?: number;
@@ -488,6 +493,7 @@ export interface ClosedTrade {
     btcPrice: number;
     ema: number;
     trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    priorTrend?: 'BULLISH' | 'BEARISH' | 'NONE';
     changePct?: number;
   };
   fundingRatePct?: number;
