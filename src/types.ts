@@ -267,6 +267,65 @@ export interface SmartMoneySignal {
   reason?: string;
 }
 
+export interface SymbolAnalysisResult {
+  symbol: string;
+  found: boolean;
+  message?: string;
+  price?: number;
+  priceChange24hPct?: number;
+  vol24hUsdt?: number;
+  high24h?: number;
+  low24h?: number;
+  fundingRatePct?: number;
+  metrics?: {
+    smartTraderLongRatio: number;
+    smartTraderShortRatio: number;
+    smartTraderLongShortRatio: number;
+    smartTraderLongAvgEntry?: number;
+    smartTraderShortAvgEntry?: number;
+    whaleLongRatio: number;
+    whaleShortRatio: number;
+    whaleLongShortRatio: number;
+    whaleLongAvgEntry?: number;
+    whaleShortAvgEntry?: number;
+    retailLongRatio: number;
+    retailShortRatio: number;
+    longWhaleWinratePct?: number;
+    shortWhaleWinratePct?: number;
+    longWhales?: number;
+    shortWhales?: number;
+    longWhalePositionsUsdt?: number;
+    shortWhalePositionsUsdt?: number;
+  };
+  bias: {
+    side: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT' | 'DIVERGENT';
+    label: string;
+    description: string;
+    smartTraderScore: number;
+    whaleScore: number;
+    retailScore: number;
+    overallScore: number;
+  };
+  botSimulation: {
+    eligible: boolean;
+    simulatedSide: 'LONG' | 'SHORT' | 'NONE';
+    checks: {
+      name: string;
+      passed: boolean;
+      detail: string;
+    }[];
+    summary: string;
+  };
+  btcTrend?: {
+    price: number;
+    trend: string;
+    priorTrend?: string;
+    canLong: boolean;
+    canShort: boolean;
+  };
+  analyzedAt: number;
+}
+
 export interface MomentumLongConfig {
   enabled: boolean;
   minSurgePct?: number;

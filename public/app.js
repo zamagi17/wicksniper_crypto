@@ -5902,4 +5902,351 @@ window.triggerAutoTunerAnalysis = triggerAutoTunerAnalysis;
 window.applyAutoTunerProposal = applyAutoTunerProposal;
 window.rollbackAutoTuner = rollbackAutoTuner;
 
+// ==========================================
+// SYMBOL INSPECTOR CONTROLLER (SMART MONEY & WHALE)
+// ==========================================
+let currentInspectedSymbol = null;
+
+function openSymbolInspectorModal(symbol) {
+  const modal = document.getElementById('symbol-inspector-modal');
+  if (modal) modal.classList.add('open');
+  if (symbol && typeof symbol === 'string') {
+    const input = document.getElementById('inspect-symbol-input');
+    if (input) input.value = symbol.trim().toUpperCase();
+    inspectSymbol(symbol);
+  } else {
+    setTimeout(() => {
+      const input = document.getElementById('inspect-symbol-input');
+      if (input) input.focus();
+    }, 150);
+  }
+}
+
+function closeSymbolInspectorModal() {
+  const modal = document.getElementById('symbol-inspector-modal');
+  if (modal) modal.classList.remove('open');
+}
+
+function quickInspectSymbol(sym) {
+  const input = document.getElementById('inspect-symbol-input');
+  if (input) input.value = sym;
+  inspectSymbol(sym);
+}
+
+function handleSymbolInspectSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const input = document.getElementById('inspect-symbol-input');
+  const sym = input ? input.value.trim() : '';
+  if (!sym) return;
+  inspectSymbol(sym);
+}
+
+function refreshCurrentInspectSymbol() {
+  if (currentInspectedSymbol) {
+    inspectSymbol(currentInspectedSymbol);
+  }
+}
+
+async function inspectSymbol(rawSymbol) {
+  if (!rawSymbol || !rawSymbol.trim()) return;
+  const sym = rawSymbol.trim().toUpperCase();
+  currentInspectedSymbol = sym;
+
+  const emptyState = document.getElementById('inspect-empty-state');
+  const loadingState = document.getElementById('inspect-loading-state');
+  const errorState = document.getElementById('inspect-error-state');
+  const errorText = document.getElementById('inspect-error-text');
+  const resultContainer = document.getElementById('inspect-result-container');
+  const btnSubmit = document.getElementById('btn-inspect-submit');
+  const btnIcon = document.getElementById('inspect-btn-icon');
+  const btnText = document.getElementById('inspect-btn-text');
+
+  // UI state: loading
+  if (emptyState) emptyState.style.display = 'none';
+  if (errorState) errorState.style.display = 'none';
+  if (resultContainer) resultContainer.style.display = 'none';
+  if (loadingState) loadingState.style.display = 'block';
+
+  if (btnSubmit) btnSubmit.disabled = true;
+  if (btnIcon) btnIcon.innerText = '⏳';
+  if (btnText) btnText.innerText = 'Menganalisis...';
+
+  try {
+    const res = await authFetch(`/api/smart-money/analyze/${encodeURIComponent(sym)}?_t=${Date.now()}`, {
+      cache: 'no-store',
+    }).then((r) => r.json());
+
+    if (!res || !res.success || !res.data) {
+      throw new Error(res?.message || 'Gagal memproses data analisis simbol.');
+    }
+
+    const data = res.data;
+
+    if (!data.found) {
+      if (loadingState) loadingState.style.display = 'none';
+      if (errorState) errorState.style.display = 'block';
+      if (errorText) errorText.innerText = data.message || `Simbol "${sym}" tidak ditemukan di pasar Binance Futures!`;
+      return;
+    }
+
+    // Populate Symbol & Header Information
+    const elSymbol = document.getElementById('inspect-res-symbol');
+    const elPrice = document.getElementById('inspect-res-price');
+    const elChange = document.getElementById('inspect-res-24h-change');
+    const elVol = document.getElementById('inspect-res-vol');
+    const elFr = document.getElementById('inspect-res-fr');
+
+    if (elSymbol) elSymbol.innerText = data.symbol;
+    if (elPrice) {
+      const p = Number(data.price || 0);
+      elPrice.innerText = p >= 1 ? `$${p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : `$${p.toFixed(6)}`;
+    }
+    if (elChange) {
+      const chg = Number(data.priceChange24hPct ?? 0);
+      elChange.innerText = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+      elChange.style.color = chg >= 0 ? '#30d158' : '#ff453a';
+    }
+    if (elVol) {
+      const v = Number(data.vol24hUsdt ?? 0);
+      elVol.innerText = v >= 1e9 ? `Vol: $${(v / 1e9).toFixed(2)}B` : `Vol: $${(v / 1e6).toFixed(2)}M`;
+    }
+    if (elFr) {
+      if (data.fundingRatePct !== null && data.fundingRatePct !== undefined) {
+        const frVal = Number(data.fundingRatePct);
+        elFr.innerText = `${frVal >= 0 ? '+' : ''}${frVal.toFixed(4)}%`;
+        elFr.style.color = frVal >= 0 ? '#30d158' : '#ff453a';
+      } else {
+        elFr.innerText = 'N/A';
+        elFr.style.color = 'var(--text-muted)';
+      }
+    }
+
+    // Populate Verdict Hero Banner
+    const banner = document.getElementById('inspect-res-bias-banner');
+    const badge = document.getElementById('inspect-res-bias-badge');
+    const score = document.getElementById('inspect-res-bias-score');
+    const desc = document.getElementById('inspect-res-bias-desc');
+    const sideIcon = document.getElementById('inspect-res-bias-side-icon');
+
+    if (badge) badge.innerText = data.bias?.label || 'ANALISIS NETRAL';
+    if (score) {
+      const sc = Number(data.bias?.overallScore ?? 0);
+      score.innerText = `Skor Bias: ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}%`;
+    }
+    if (desc) desc.innerText = data.bias?.description || '';
+
+    if (banner && sideIcon) {
+      const biasSide = String(data.bias?.side || 'NEUTRAL');
+      if (biasSide.includes('LONG')) {
+        banner.style.background = 'linear-gradient(135deg, rgba(48, 209, 88, 0.16), rgba(16, 185, 129, 0.08))';
+        banner.style.borderColor = 'rgba(48, 209, 88, 0.4)';
+        if (badge) {
+          badge.style.background = '#30d158';
+          badge.style.color = '#000000';
+        }
+        sideIcon.innerText = '🚀';
+      } else if (biasSide.includes('SHORT')) {
+        banner.style.background = 'linear-gradient(135deg, rgba(255, 69, 58, 0.16), rgba(239, 68, 68, 0.08))';
+        banner.style.borderColor = 'rgba(255, 69, 58, 0.4)';
+        if (badge) {
+          badge.style.background = '#ff453a';
+          badge.style.color = '#ffffff';
+        }
+        sideIcon.innerText = '🔻';
+      } else if (biasSide === 'DIVERGENT') {
+        banner.style.background = 'linear-gradient(135deg, rgba(234, 179, 8, 0.16), rgba(168, 85, 247, 0.12))';
+        banner.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+        if (badge) {
+          badge.style.background = '#eab308';
+          badge.style.color = '#000000';
+        }
+        sideIcon.innerText = '⚠️';
+      } else {
+        banner.style.background = 'linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(100, 116, 139, 0.08))';
+        banner.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+        if (badge) {
+          badge.style.background = '#94a3b8';
+          badge.style.color = '#000000';
+        }
+        sideIcon.innerText = '⚖️';
+      }
+    }
+
+    // Populate 3-Tier Meters
+    if (data.metrics) {
+      // 1. Smart Trader
+      const rawStLong = Number(data.metrics.smartTraderLongRatio ?? 0.5);
+      const stLong = rawStLong <= 1.0 ? rawStLong * 100 : rawStLong;
+      const rawStShort = Number(data.metrics.smartTraderShortRatio ?? 0.5);
+      const stShort = rawStShort <= 1.0 ? rawStShort * 100 : rawStShort;
+
+      const stBar = document.getElementById('inspect-st-bar');
+      const stLVal = document.getElementById('inspect-st-long-val');
+      const stSVal = document.getElementById('inspect-st-short-val');
+      const stEntryL = document.getElementById('inspect-st-entry-long');
+      const stEntryS = document.getElementById('inspect-st-entry-short');
+
+      if (stBar) stBar.style.width = `${Math.min(100, Math.max(0, stLong))}%`;
+      if (stLVal) stLVal.innerText = `${stLong.toFixed(1)}% L`;
+      if (stSVal) stSVal.innerText = `${stShort.toFixed(1)}% S`;
+      if (stEntryL) {
+        const avg = data.metrics.smartTraderLongAvgEntry;
+        stEntryL.innerText = `Dominasi Modal Long: ${stLong.toFixed(1)}%${avg ? ` (Avg: $${avg.toFixed(4)})` : ''}`;
+      }
+      if (stEntryS) {
+        const avg = data.metrics.smartTraderShortAvgEntry;
+        stEntryS.innerText = `Dominasi Modal Short: ${stShort.toFixed(1)}%${avg ? ` (Avg: $${avg.toFixed(4)})` : ''}`;
+      }
+
+      // 2. Whale
+      const rawWhaleLong = Number(data.metrics.whaleLongRatio ?? 0.5);
+      const whaleLong = rawWhaleLong <= 1.0 ? rawWhaleLong * 100 : rawWhaleLong;
+      const rawWhaleShort = Number(data.metrics.whaleShortRatio ?? 0.5);
+      const whaleShort = rawWhaleShort <= 1.0 ? rawWhaleShort * 100 : rawWhaleShort;
+
+      const whaleBar = document.getElementById('inspect-whale-bar');
+      const whaleLVal = document.getElementById('inspect-whale-long-val');
+      const whaleSVal = document.getElementById('inspect-whale-short-val');
+      const whaleEntryL = document.getElementById('inspect-whale-entry-long');
+      const whaleEntryS = document.getElementById('inspect-whale-entry-short');
+
+      if (whaleBar) whaleBar.style.width = `${Math.min(100, Math.max(0, whaleLong))}%`;
+      if (whaleLVal) whaleLVal.innerText = `${whaleLong.toFixed(1)}% L`;
+      if (whaleSVal) whaleSVal.innerText = `${whaleShort.toFixed(1)}% S`;
+      if (whaleEntryL) {
+        const avg = data.metrics.whaleLongAvgEntry;
+        whaleEntryL.innerText = `Modal Paus Long: ${whaleLong.toFixed(1)}%${avg ? ` (Avg: $${avg.toFixed(4)})` : ''}`;
+      }
+      if (whaleEntryS) {
+        const avg = data.metrics.whaleShortAvgEntry;
+        whaleEntryS.innerText = `Modal Paus Short: ${whaleShort.toFixed(1)}%${avg ? ` (Avg: $${avg.toFixed(4)})` : ''}`;
+      }
+
+      // 3. Retail
+      const rawRetLong = Number(data.metrics.retailLongRatio ?? 0.5);
+      const retLong = rawRetLong <= 1.0 ? rawRetLong * 100 : rawRetLong;
+      const rawRetShort = Number(data.metrics.retailShortRatio ?? 0.5);
+      const retShort = rawRetShort <= 1.0 ? rawRetShort * 100 : rawRetShort;
+
+      const retBar = document.getElementById('inspect-retail-bar');
+      const retLVal = document.getElementById('inspect-retail-long-val');
+      const retSVal = document.getElementById('inspect-retail-short-val');
+      const retStatusL = document.getElementById('inspect-retail-status-long');
+      const retStatusS = document.getElementById('inspect-retail-status-short');
+
+      if (retBar) retBar.style.width = `${Math.min(100, Math.max(0, retLong))}%`;
+      if (retLVal) retLVal.innerText = `${retLong.toFixed(1)}% L`;
+      if (retSVal) retSVal.innerText = `${retShort.toFixed(1)}% S`;
+      if (retStatusL) retStatusL.innerText = `Ritel Long: ${retLong.toFixed(1)}% (Jebakan / Resistensi Bearish)`;
+      if (retStatusS) retStatusS.innerText = `Ritel Short: ${retShort.toFixed(1)}% (Bahan Bakar Short Squeeze Bullish)`;
+    }
+
+    // Populate Bot Simulation Checklist
+    const simBadge = document.getElementById('inspect-sim-badge');
+    const simChecklist = document.getElementById('inspect-sim-checklist');
+    const simSummary = document.getElementById('inspect-sim-summary');
+
+    const botSim = data.botSimulation || {};
+    const isEligible = botSim.eligible === true;
+    const simSide = botSim.simulatedSide || 'NONE';
+
+    if (simBadge) {
+      if (isEligible && simSide === 'LONG') {
+        simBadge.innerText = '✅ MEMENUHI SYARAT ENTRY LONG';
+        simBadge.style.background = 'rgba(48, 209, 88, 0.2)';
+        simBadge.style.color = '#30d158';
+        simBadge.style.border = '1px solid rgba(48, 209, 88, 0.4)';
+      } else if (isEligible && simSide === 'SHORT') {
+        simBadge.innerText = '✅ MEMENUHI SYARAT ENTRY SHORT';
+        simBadge.style.background = 'rgba(255, 69, 58, 0.2)';
+        simBadge.style.color = '#ff453a';
+        simBadge.style.border = '1px solid rgba(255, 69, 58, 0.4)';
+      } else {
+        simBadge.innerText = '⛔ DITAHAN OLEH FILTER BOT';
+        simBadge.style.background = 'rgba(245, 158, 11, 0.2)';
+        simBadge.style.color = '#f59e0b';
+        simBadge.style.border = '1px solid rgba(245, 158, 11, 0.4)';
+      }
+    }
+
+    if (simChecklist) {
+      simChecklist.innerHTML = '';
+      const checks = Array.isArray(botSim.checks) ? botSim.checks : [];
+      checks.forEach((cp) => {
+        const item = document.createElement('div');
+        item.style.display = 'flex';
+        item.style.justifyContent = 'space-between';
+        item.style.alignItems = 'center';
+        item.style.padding = '7px 10px';
+        item.style.borderRadius = '4px';
+        item.style.background = cp.passed ? 'rgba(48, 209, 88, 0.05)' : 'rgba(255, 69, 58, 0.05)';
+        item.style.border = cp.passed ? '1px solid rgba(48, 209, 88, 0.15)' : '1px solid rgba(255, 69, 58, 0.15)';
+        item.style.fontSize = '12px';
+
+        const left = document.createElement('div');
+        left.style.display = 'flex';
+        left.style.alignItems = 'center';
+        left.style.gap = '8px';
+        left.innerHTML = `<span>${cp.passed ? '✅' : '❌'}</span><strong>${cp.name}</strong>`;
+
+        const right = document.createElement('div');
+        right.style.color = cp.passed ? '#30d158' : '#ff453a';
+        right.style.fontWeight = '500';
+        right.style.fontSize = '11.5px';
+        right.innerText = cp.detail;
+
+        item.appendChild(left);
+        item.appendChild(right);
+        simChecklist.appendChild(item);
+      });
+    }
+
+    if (simSummary) {
+      if (isEligible && simSide === 'LONG') {
+        simSummary.style.background = 'rgba(48, 209, 88, 0.1)';
+        simSummary.style.border = '1px solid rgba(48, 209, 88, 0.3)';
+        simSummary.style.color = '#30d158';
+        simSummary.innerHTML = `<strong>Status Eksekusi Bot:</strong> ${botSim.summary || 'Simbol ini saat ini lolos seluruh parameter filter bot untuk <strong>ENTRY LONG</strong>.'}`;
+      } else if (isEligible && simSide === 'SHORT') {
+        simSummary.style.background = 'rgba(255, 69, 58, 0.1)';
+        simSummary.style.border = '1px solid rgba(255, 69, 58, 0.3)';
+        simSummary.style.color = '#ff6b6b';
+        simSummary.innerHTML = `<strong>Status Eksekusi Bot:</strong> ${botSim.summary || 'Simbol ini saat ini lolos seluruh parameter filter bot untuk <strong>ENTRY SHORT</strong>.'}`;
+      } else {
+        simSummary.style.background = 'rgba(245, 158, 11, 0.1)';
+        simSummary.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+        simSummary.style.color = '#f59e0b';
+        simSummary.innerHTML = `<strong>Status Eksekusi Bot:</strong> ${botSim.summary || 'Belum memenuhi syarat eksekusi orderflow bot.'}`;
+      }
+    }
+
+    // Footer Timestamp
+    const footerTime = document.getElementById('inspect-footer-time');
+    if (footerTime) {
+      const d = new Date(data.analyzedAt || Date.now());
+      footerTime.innerText = `Diperbarui: ${d.toLocaleTimeString()}`;
+    }
+
+    // Switch to result container
+    if (loadingState) loadingState.style.display = 'none';
+    if (resultContainer) resultContainer.style.display = 'flex';
+  } catch (err) {
+    if (loadingState) loadingState.style.display = 'none';
+    if (errorState) errorState.style.display = 'block';
+    if (errorText) errorText.innerText = `Gagal menganalisa simbol: ${err.message || 'Koneksi error'}`;
+  } finally {
+    if (btnSubmit) btnSubmit.disabled = false;
+    if (btnIcon) btnIcon.innerText = '🔍';
+    if (btnText) btnText.innerText = 'Analisa Koin';
+  }
+}
+
+window.openSymbolInspectorModal = openSymbolInspectorModal;
+window.closeSymbolInspectorModal = closeSymbolInspectorModal;
+window.quickInspectSymbol = quickInspectSymbol;
+window.handleSymbolInspectSubmit = handleSymbolInspectSubmit;
+window.refreshCurrentInspectSymbol = refreshCurrentInspectSymbol;
+window.inspectSymbol = inspectSymbol;
+
+
 

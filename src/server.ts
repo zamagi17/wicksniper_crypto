@@ -237,6 +237,16 @@ app.get('/api/smart-money/metrics', requireAuth, (req, res) => {
   }
 });
 
+app.get('/api/smart-money/analyze/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol;
+    const result = await engine.analyzeSymbol(symbol);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/btc-trend', async (req, res) => {
   try {
     const trend = await engine.updateBtcTrendStatus();

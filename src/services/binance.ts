@@ -2104,6 +2104,19 @@ export class BinanceFuturesClient {
     return undefined;
   }
 
+  public async getTicker24hr(symbol: string): Promise<any | null> {
+    try {
+      const client = await this.getHttpClient();
+      const res = await client.get('/fapi/v1/ticker/24hr', {
+        params: { symbol },
+        timeout: 4000,
+      });
+      return res?.data || null;
+    } catch {
+      return null;
+    }
+  }
+
   public isUserStreamActive(): boolean {
     return this.isUserWsConnected;
   }

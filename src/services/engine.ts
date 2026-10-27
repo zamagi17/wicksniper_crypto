@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult } from '../types';
+import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -4920,6 +4920,272 @@ export class WickSniperEngine {
 
   public getBtcTrendStatus(): BtcTrendStatus | null {
     return this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus();
+  }
+
+  public async analyzeSymbol(rawSymbol: string): Promise<SymbolAnalysisResult> {
+    const analyzedAt = Date.now();
+    let symbol = (rawSymbol || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (!symbol) {
+      return {
+        symbol: rawSymbol,
+        found: false,
+        message: 'Simbol koin tidak boleh kosong.',
+        bias: { side: 'NEUTRAL', label: 'TIDAK VALID', description: 'Simbol tidak valid.', smartTraderScore: 0, whaleScore: 0, retailScore: 0, overallScore: 0 },
+        botSimulation: { eligible: false, simulatedSide: 'NONE', checks: [], summary: 'Simbol kosong' },
+        analyzedAt,
+      };
+    }
+
+    if (!symbol.endsWith('USDT') && !symbol.endsWith('USDC') && !symbol.endsWith('BUSD')) {
+      symbol += 'USDT';
+    }
+
+    // 1. Ambil data ticker 24h Binance Futures
+    const ticker = await binanceFutures.getTicker24hr(symbol);
+    if (!ticker) {
+      return {
+        symbol,
+        found: false,
+        message: `Simbol "${symbol}" tidak ditemukan di Binance Futures USDT-M. Pastikan koin terdaftar (contoh: BTC, SOL, ETH, DOGE, PEPE).`,
+        bias: { side: 'NEUTRAL', label: 'TIDAK DITEMUKAN', description: 'Koin tidak terdaftar.', smartTraderScore: 0, whaleScore: 0, retailScore: 0, overallScore: 0 },
+        botSimulation: { eligible: false, simulatedSide: 'NONE', checks: [], summary: 'Koin tidak ditemukan di Binance Futures' },
+        analyzedAt,
+      };
+    }
+
+    const price = parseFloat(ticker.lastPrice || '0');
+    const priceChange24hPct = parseFloat(ticker.priceChangePercent || '0');
+    const vol24hUsdt = parseFloat(ticker.quoteVolume || '0');
+    const high24h = parseFloat(ticker.highPrice || '0');
+    const low24h = parseFloat(ticker.lowPrice || '0');
+
+    // 2. Ambil data Smart Money Metrics, Funding Rate, dan BTC Macro Trend secara paralel
+    const period = this.config.smartMoney?.period || '5m';
+    const [metrics, fundingRatePct, btcTrend] = await Promise.all([
+      binanceFutures.getSmartMoneyMetrics(symbol, period),
+      binanceFutures.getFundingRate(symbol),
+      this.updateBtcTrendStatus(),
+    ]);
+
+    const sLong = metrics?.smartTraderLongRatio ?? 0.5;
+    const sShort = metrics?.smartTraderShortRatio ?? 0.5;
+    const wLong = metrics?.whaleLongRatio ?? 0.5;
+    const wShort = metrics?.whaleShortRatio ?? 0.5;
+    const rLong = metrics?.retailLongRatio ?? 0.5;
+    const rShort = metrics?.retailShortRatio ?? 0.5;
+
+    // 3. Hitung Skor Bias Pasar & Akumulasi
+    const smartTraderScore = Math.round((sLong - sShort) * 100);
+    const whaleScore = Math.round((wLong - wShort) * 100);
+    const retailScore = Math.round((rShort - rLong) * 100); // Contrarian: retail short -> bullish
+    const overallScore = Math.round(smartTraderScore * 0.45 + whaleScore * 0.35 + retailScore * 0.20);
+
+    let side: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT' | 'DIVERGENT' = 'NEUTRAL';
+    let label = '🟡 NETRAL / KONSOLIDASI';
+    let description = 'Tidak ada dominasi arah yang kuat antara Long dan Short.';
+
+    if (smartTraderScore >= 20 && whaleScore <= -30) {
+      side = 'DIVERGENT';
+      label = '⚠️ DIVERGEN (Top Trader Long vs Paus Short)';
+      description = 'Top Trader memegang posisi Long namun Paus didominasi Short. Arus saling berlawanan, waspadai risiko whipsaw / squeeze.';
+    } else if (smartTraderScore <= -20 && whaleScore >= 30) {
+      side = 'DIVERGENT';
+      label = '⚠️ DIVERGEN (Top Trader Short vs Paus Long)';
+      description = 'Top Trader memegang posisi Short namun Paus didominasi Long. Arus saling berlawanan, waspadai fakeout / rejection.';
+    } else if (overallScore >= 35) {
+      side = 'STRONG_LONG';
+      label = '🚀 SANGAT CONDONG LONG';
+      description = 'Konfluensi akumulasi Long sangat kuat dari Smart Trader dan Paus, didukung retail yang tertinggal di posisi Short.';
+    } else if (overallScore >= 12) {
+      side = 'LONG';
+      label = '🟢 CONDONG LONG';
+      description = 'Arus akumulasi pasar saat ini lebih condong ke arah Long.';
+    } else if (overallScore <= -35) {
+      side = 'STRONG_SHORT';
+      label = '💥 SANGAT CONDONG SHORT';
+      description = 'Konfluensi akumulasi Short sangat kuat dari Smart Trader dan Paus, retail terjebak di posisi Long.';
+    } else if (overallScore <= -12) {
+      side = 'SHORT';
+      label = '🔴 CONDONG SHORT';
+      description = 'Arus akumulasi pasar saat ini lebih condong ke arah Short.';
+    }
+
+    // 4. Simulasi Aturan Bot (Smart Money Scanner Checks)
+    const smCfg: SmartMoneyConfig = this.config.smartMoney || ({} as SmartMoneyConfig);
+    const driver = smCfg.signalDriver || 'SMART_TRADER';
+    const threshLong = smCfg.thresholdLongRatio || 0.60;
+    const threshShort = smCfg.thresholdShortRatio || 0.60;
+
+    const rawFallbackWhale = smCfg.minWhaleRatio ?? 30;
+    const rawMinWhaleLong = smCfg.minWhaleRatioLong ?? rawFallbackWhale;
+    const rawMinWhaleShort = smCfg.minWhaleRatioShort ?? rawFallbackWhale;
+    const minWhaleLong = (rawMinWhaleLong > 1 ? rawMinWhaleLong / 100 : rawMinWhaleLong);
+    const minWhaleShort = (rawMinWhaleShort > 1 ? rawMinWhaleShort / 100 : rawMinWhaleShort);
+
+    const isSmartFilterOn = smCfg.smartTraderFilterEnabled !== false;
+    const isRetailTrapOn = smCfg.retailTrapFilter !== false;
+    const isFundingOn = smCfg.fundingRateFilterEnabled !== false;
+    const isBtcFilterOn = smCfg.btcTrendFilterEnabled !== false;
+    const minFrShort = smCfg.minFundingRatePct ?? -0.02;
+    const maxFrLong = smCfg.maxFundingRatePct ?? 0.10;
+    const allowedDir = smCfg.direction || 'BOTH';
+
+    const checks: { name: string; passed: boolean; detail: string }[] = [];
+
+    const longPrimaryPass = driver === 'SMART_TRADER'
+      ? sLong >= threshLong
+      : driver === 'DUAL_CONFLUENCE'
+      ? (sLong >= threshLong && wLong >= threshLong)
+      : wLong >= threshLong;
+
+    const shortPrimaryPass = driver === 'SMART_TRADER'
+      ? sShort >= threshShort
+      : driver === 'DUAL_CONFLUENCE'
+      ? (sShort >= threshShort && wShort >= threshShort)
+      : wShort >= threshShort;
+
+    let testSide: 'LONG' | 'SHORT' | 'NONE' = 'NONE';
+    if (longPrimaryPass && !shortPrimaryPass) testSide = 'LONG';
+    else if (shortPrimaryPass && !longPrimaryPass) testSide = 'SHORT';
+    else if (longPrimaryPass && shortPrimaryPass) testSide = sLong >= sShort ? 'LONG' : 'SHORT';
+    else {
+      testSide = sLong >= sShort ? 'LONG' : 'SHORT';
+    }
+
+    if (testSide === 'LONG') {
+      const targetDominance = driver === 'SMART_TRADER' ? sLong : wLong;
+      const driverLabel = driver === 'SMART_TRADER' ? 'Smart Trader Long' : driver === 'DUAL_CONFLUENCE' ? 'Dual Confluence Long' : 'Paus Long';
+      checks.push({
+        name: `Dominansi Pengemudi (${driver})`,
+        passed: longPrimaryPass,
+        detail: `${driverLabel}: ${(targetDominance * 100).toFixed(1)}% (Syarat: >= ${(threshLong * 100).toFixed(0)}%)`,
+      });
+
+      const whaleOk = !isSmartFilterOn || wLong >= minWhaleLong;
+      checks.push({
+        name: 'Rasio Searah Paus / Anti-Ekstrem',
+        passed: whaleOk,
+        detail: `Paus Long ${(wLong * 100).toFixed(1)}% (Syarat Min: >= ${(minWhaleLong * 100).toFixed(0)}%)`,
+      });
+
+      const retailTrapOk = !isRetailTrapOn || rShort >= 0.50;
+      checks.push({
+        name: 'Konfirmasi Retail Trap',
+        passed: retailTrapOk,
+        detail: `Retail Short ${(rShort * 100).toFixed(1)}% (Syarat Ritel Lawan: >= 50%)`,
+      });
+
+      const frVal = fundingRatePct ?? 0;
+      const frOk = !isFundingOn || frVal <= maxFrLong;
+      checks.push({
+        name: 'Filter Funding Rate',
+        passed: frOk,
+        detail: `Funding ${frVal >= 0 ? '+' : ''}${frVal.toFixed(3)}% (Batas Maks Long: <= +${maxFrLong.toFixed(2)}%)`,
+      });
+
+      const btcOk = !isBtcFilterOn || !btcTrend || btcTrend.canLong;
+      const btcDesc = btcTrend ? `${btcTrend.trend}${btcTrend.priorTrend ? ` (${btcTrend.priorTrend})` : ''}` : 'N/A';
+      checks.push({
+        name: 'Pelindung Macro BTC',
+        passed: btcOk,
+        detail: `BTC Macro: ${btcDesc} (Status: ${btcOk ? 'Izinkan LONG ✅' : 'Tahan LONG ⛔'})`,
+      });
+
+      const dirOk = allowedDir === 'BOTH' || allowedDir === 'LONG_ONLY';
+      checks.push({
+        name: 'Arah Trading Bot',
+        passed: dirOk,
+        detail: `Mode config: ${allowedDir}`,
+      });
+    } else {
+      const targetDominance = driver === 'SMART_TRADER' ? sShort : wShort;
+      const driverLabel = driver === 'SMART_TRADER' ? 'Smart Trader Short' : driver === 'DUAL_CONFLUENCE' ? 'Dual Confluence Short' : 'Paus Short';
+      checks.push({
+        name: `Dominansi Pengemudi (${driver})`,
+        passed: shortPrimaryPass,
+        detail: `${driverLabel}: ${(targetDominance * 100).toFixed(1)}% (Syarat: >= ${(threshShort * 100).toFixed(0)}%)`,
+      });
+
+      const whaleOk = !isSmartFilterOn || wShort >= minWhaleShort;
+      checks.push({
+        name: 'Rasio Searah Paus / Anti-Ekstrem',
+        passed: whaleOk,
+        detail: `Paus Short ${(wShort * 100).toFixed(1)}% (Syarat Min: >= ${(minWhaleShort * 100).toFixed(0)}%)`,
+      });
+
+      const retailTrapOk = !isRetailTrapOn || rLong >= 0.50;
+      checks.push({
+        name: 'Konfirmasi Retail Trap',
+        passed: retailTrapOk,
+        detail: `Retail Long ${(rLong * 100).toFixed(1)}% (Syarat Ritel Lawan: >= 50%)`,
+      });
+
+      const frVal = fundingRatePct ?? 0;
+      const frOk = !isFundingOn || frVal >= minFrShort;
+      checks.push({
+        name: 'Filter Funding Rate',
+        passed: frOk,
+        detail: `Funding ${frVal >= 0 ? '+' : ''}${frVal.toFixed(3)}% (Batas Min Short: >= ${minFrShort.toFixed(2)}%)`,
+      });
+
+      const btcOk = !isBtcFilterOn || !btcTrend || btcTrend.canShort;
+      const btcDesc = btcTrend ? `${btcTrend.trend}${btcTrend.priorTrend ? ` (${btcTrend.priorTrend})` : ''}` : 'N/A';
+      checks.push({
+        name: 'Pelindung Macro BTC',
+        passed: btcOk,
+        detail: `BTC Macro: ${btcDesc} (Status: ${btcOk ? 'Izinkan SHORT ✅' : 'Tahan SHORT ⛔'})`,
+      });
+
+      const dirOk = allowedDir === 'BOTH' || allowedDir === 'SHORT_ONLY';
+      checks.push({
+        name: 'Arah Trading Bot',
+        passed: dirOk,
+        detail: `Mode config: ${allowedDir}`,
+      });
+    }
+
+    const allPassed = checks.every((c) => c.passed);
+    const finalSimulatedSide = allPassed ? testSide : 'NONE';
+    const failedChecks = checks.filter((c) => !c.passed);
+    const summary = allPassed
+      ? `✅ Lolos semua kriteria! Sinyal ${testSide} siap dieksekusi.`
+      : `⛔ Belum memenuhi syarat entry: ${failedChecks.map((f) => f.name).join(', ')}.`;
+
+    return {
+      symbol,
+      found: true,
+      price,
+      priceChange24hPct,
+      vol24hUsdt,
+      high24h,
+      low24h,
+      fundingRatePct,
+      metrics: metrics || undefined,
+      bias: {
+        side,
+        label,
+        description,
+        smartTraderScore,
+        whaleScore,
+        retailScore,
+        overallScore,
+      },
+      botSimulation: {
+        eligible: allPassed,
+        simulatedSide: finalSimulatedSide,
+        checks,
+        summary,
+      },
+      btcTrend: btcTrend ? {
+        price: btcTrend.btcPrice,
+        trend: btcTrend.trend,
+        priorTrend: btcTrend.priorTrend,
+        canLong: btcTrend.canLong,
+        canShort: btcTrend.canShort,
+      } : undefined,
+      analyzedAt,
+    };
   }
 
   private getMergedCooldowns(): { symbol: string; until: number }[] {

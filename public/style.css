@@ -3318,6 +3318,29 @@ body {
   }
 }
 
+/* ==========================================
+   SYMBOL INSPECTOR MODAL & PRESET CHIPS
+   ========================================== */
+.btn-preset-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-color, #f1f5f9);
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-mono, monospace);
+}
 
+.btn-preset-chip:hover {
+  background: rgba(168, 85, 247, 0.25);
+  border-color: #a855f7;
+  color: #fff;
+  transform: translateY(-1px);
+}
 
-
+.btn-preset-chip:active {
+  transform: translateY(0);
+}

@@ -98,6 +98,7 @@
         <span id="btn-engine-text">Jalankan Bot</span>
       </button>
 
+      <button class="btn btn-secondary nav-btn-desktop" onclick="openSymbolInspectorModal()" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(99, 102, 241, 0.2)); border-color: rgba(168, 85, 247, 0.45); color: #c084fc; font-weight: 600;">🔍 Cek Simbol</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openAutoTunerModal()">🧠 Auto-Tuner</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openBacktestModal()">🧪 Backtest Lab</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openSettingsModal()">⚙️ Pengaturan</button>
@@ -459,6 +460,15 @@
             <div class="dm-info">
               <b>Pengaturan Parameter</b>
               <small>Ubah TP/SL, Kuota, Grid & API Binance</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+
+          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); openSymbolInspectorModal();">
+            <div class="dm-icon bg-purple">🔍</div>
+            <div class="dm-info">
+              <b>Cek Simbol Koin</b>
+              <small>Analisa Smart Trader & Paus koin pilihan</small>
             </div>
             <span class="dm-arrow">›</span>
           </button>
@@ -2508,6 +2518,211 @@
 
       <div class="modal-footer floating-footer">
         <button type="button" class="btn btn-secondary" onclick="closeAutoTunerModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SYMBOL INSPECTOR MODAL (SMART MONEY COIN ANALYZER) -->
+  <div id="symbol-inspector-modal" class="modal-backdrop" onclick="if(event.target===this)closeSymbolInspectorModal()" style="display: none; z-index: 10000;">
+    <div class="modal-card modal-lg" style="max-width: 880px; border: 1px solid rgba(168, 85, 247, 0.35); box-shadow: 0 16px 48px rgba(0,0,0,0.6), 0 0 24px rgba(168, 85, 247, 0.15);">
+      <div class="modal-header" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.12), rgba(99, 102, 241, 0.08)); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+        <div class="modal-title-box">
+          <h3 style="display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px;">
+            <span style="font-size: 20px;">🔍</span> Inspector Koin Smart Money
+            <span class="badge-tag badge-smart-money" style="font-size: 11px;">Analisa Per Simbol</span>
+          </h3>
+          <span style="font-size: 11.5px; color: var(--text-muted);">Cek persentase Smart Trader, Paus, Ritel, dan kelolosan filter bot secara instan</span>
+        </div>
+        <button type="button" class="btn-close" onclick="closeSymbolInspectorModal()">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding: 18px; display: flex; flex-direction: column; gap: 16px;">
+        <!-- Search & Preset Bar -->
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-sm); padding: 12px 14px;">
+          <form onsubmit="handleSymbolInspectSubmit(event)" style="display: flex; gap: 10px; align-items: center;">
+            <div style="position: relative; flex: 1;">
+              <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 16px; opacity: 0.6;">⚡</span>
+              <input 
+                type="text" 
+                id="inspect-symbol-input" 
+                class="form-control" 
+                placeholder="Ketik simbol koin (contoh: SOXL, SOL, BTC, ETH, DOGE, PEPE)..." 
+                style="padding: 10px 14px 10px 38px; font-weight: 600; font-size: 14px; text-transform: uppercase;"
+                autocomplete="off"
+              >
+            </div>
+            <button type="submit" id="btn-inspect-submit" class="btn btn-primary" style="padding: 10px 20px; font-weight: 600; display: flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #a855f7, #6366f1); border: none; white-space: nowrap;">
+              <span id="inspect-btn-icon">🔍</span>
+              <span id="inspect-btn-text">Analisa Koin</span>
+            </button>
+          </form>
+
+          <!-- Quick Suggestion Chips -->
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
+            <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">Pintas Cepat:</span>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('SOXL')">SOXL</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('SOL')">SOL</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('BTC')">BTC</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('ETH')">ETH</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('DOGE')">DOGE</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('PEPE')">PEPE</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('SUI')">SUI</button>
+            <button type="button" class="btn-preset-chip" onclick="quickInspectSymbol('NEAR')">NEAR</button>
+          </div>
+        </div>
+
+        <!-- Initial Placeholder State -->
+        <div id="inspect-empty-state" style="text-align: center; padding: 40px 20px; background: rgba(255, 255, 255, 0.02); border-radius: var(--radius-sm); border: 1px dashed rgba(255, 255, 255, 0.1);">
+          <div style="font-size: 40px; margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(168, 85, 247, 0.4));">🧭</div>
+          <h4 style="margin: 0 0 6px 0; font-size: 15px; font-weight: 600;">Masukkan Simbol Koin untuk Dianalisis</h4>
+          <p style="margin: 0; font-size: 12.5px; color: var(--text-muted); max-width: 480px; margin: 0 auto;">
+            Lihat persentase akumulasi Top 20% Trader Profit vs Paus, konfluensi ritel, funding rate, dan status kelolosan aturan bot secara real-time.
+          </p>
+        </div>
+
+        <!-- Loading State -->
+        <div id="inspect-loading-state" style="display: none; text-align: center; padding: 45px 20px;">
+          <div class="spinner" style="width: 36px; height: 36px; margin: 0 auto 12px auto; border-top-color: #a855f7;"></div>
+          <div style="font-size: 14px; font-weight: 600; color: #c084fc;">Mengambil data live orderbook & rasio pasar Binance...</div>
+          <small style="color: var(--text-muted); font-size: 11.5px; margin-top: 4px; display: block;">Menganalisis Smart Trader, posisi Paus, dan sentimen ritel</small>
+        </div>
+
+        <!-- Error State -->
+        <div id="inspect-error-state" style="display: none; padding: 18px 20px; background: rgba(255, 69, 58, 0.1); border: 1px solid rgba(255, 69, 58, 0.35); border-radius: var(--radius-sm); text-align: center;">
+          <span style="font-size: 28px; display: block; margin-bottom: 6px;">⚠️</span>
+          <div id="inspect-error-text" style="color: #ff6b6b; font-weight: 600; font-size: 13.5px;"></div>
+        </div>
+
+        <!-- Result Container -->
+        <div id="inspect-result-container" style="display: none; flex-direction: column; gap: 14px;">
+          <!-- Card Header & Summary -->
+          <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-sm); padding: 12px 16px; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(99, 102, 241, 0.25)); border: 1px solid rgba(168, 85, 247, 0.4); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #c084fc;">
+                🪙
+              </div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h3 id="inspect-res-symbol" style="margin: 0; font-size: 18px; font-family: var(--font-mono); font-weight: 700;">BTCUSDT</h3>
+                  <span id="inspect-res-tf-badge" class="badge-tag" style="background: rgba(255,255,255,0.08); color: #cbd5e1; font-size: 11px;">TF 5m</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; margin-top: 3px;">
+                  <span id="inspect-res-price" class="font-mono" style="font-weight: 700; font-size: 14px; color: #ffffff;">$0.00</span>
+                  <span id="inspect-res-24h-change" class="font-mono" style="font-weight: 600;">+0.00%</span>
+                  <span style="color: var(--text-muted);">•</span>
+                  <span id="inspect-res-vol" style="color: var(--text-muted);">Vol: $0M</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="text-align: right;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Funding Rate</div>
+                <div id="inspect-res-fr" class="font-mono" style="font-weight: 700; font-size: 13px;">+0.000%</div>
+              </div>
+              <button type="button" class="btn btn-secondary" onclick="refreshCurrentInspectSymbol()" style="padding: 6px 12px; font-size: 12px;" title="Segarkan data simbol ini">🔄 Refresh</button>
+            </div>
+          </div>
+
+          <!-- VERDICT HERO BANNER -->
+          <div id="inspect-res-bias-banner" style="border-radius: var(--radius-sm); padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; border: 1px solid rgba(255,255,255,0.1);">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="inspect-res-bias-badge" style="font-size: 14px; font-weight: 800; padding: 4px 12px; border-radius: 6px;">🚀 SANGAT CONDONG LONG</span>
+                <span id="inspect-res-bias-score" class="font-mono" style="font-size: 12px; font-weight: 700; opacity: 0.85;">Skor Bias: +58%</span>
+              </div>
+              <p id="inspect-res-bias-desc" style="margin: 0; font-size: 12.5px; line-height: 1.4; color: rgba(255,255,255,0.85); max-width: 620px;"></p>
+            </div>
+            <div id="inspect-res-bias-side-icon" style="font-size: 32px; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4));"></div>
+          </div>
+
+          <!-- 3-TIER RATIO METERS (Smart Trader, Whale, Retail) -->
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; flex-direction: column; gap: 14px;">
+            <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">
+              📊 Perbandingan Rasio Long vs Short (Arus Modal 3 Tingkat)
+            </div>
+
+            <!-- 1. Smart Trader Meter -->
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; font-size: 12px;">
+                <span style="font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                  <span>🧠</span> Top 20% Trader Profit (Smart Trader)
+                </span>
+                <span class="font-mono" style="font-weight: 700;">
+                  <span style="color: #30d158;" id="inspect-st-long-val">0.0% L</span> / <span style="color: #ff453a;" id="inspect-st-short-val">0.0% S</span>
+                </span>
+              </div>
+              <div style="height: 10px; width: 100%; background: #ff453a; border-radius: 5px; overflow: hidden; display: flex;">
+                <div id="inspect-st-bar" style="height: 100%; background: #30d158; width: 50%; transition: width 0.4s ease;"></div>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-top: 3px; font-size: 10.5px; color: var(--text-muted);">
+                <span id="inspect-st-entry-long">Modal Long: $--</span>
+                <span id="inspect-st-entry-short">Modal Short: $--</span>
+              </div>
+            </div>
+
+            <!-- 2. Whale Meter -->
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; font-size: 12px;">
+                <span style="font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                  <span>🐋</span> Akumulasi Volume Paus (Top Positions)
+                </span>
+                <span class="font-mono" style="font-weight: 700;">
+                  <span style="color: #30d158;" id="inspect-whale-long-val">0.0% L</span> / <span style="color: #ff453a;" id="inspect-whale-short-val">0.0% S</span>
+                </span>
+              </div>
+              <div style="height: 10px; width: 100%; background: #ff453a; border-radius: 5px; overflow: hidden; display: flex;">
+                <div id="inspect-whale-bar" style="height: 100%; background: #30d158; width: 50%; transition: width 0.4s ease;"></div>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-top: 3px; font-size: 10.5px; color: var(--text-muted);">
+                <span id="inspect-whale-entry-long">Modal Long: $--</span>
+                <span id="inspect-whale-entry-short">Modal Short: $--</span>
+              </div>
+            </div>
+
+            <!-- 3. Retail Meter -->
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; font-size: 12px;">
+                <span style="font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                  <span>👥</span> Sentimen Ritel Publik (Global Accounts)
+                  <span class="badge-tag" style="background: rgba(255,255,255,0.06); font-size: 9.5px; color: #94a3b8;">Kontrarian</span>
+                </span>
+                <span class="font-mono" style="font-weight: 700;">
+                  <span style="color: #30d158;" id="inspect-retail-long-val">0.0% L</span> / <span style="color: #ff453a;" id="inspect-retail-short-val">0.0% S</span>
+                </span>
+              </div>
+              <div style="height: 10px; width: 100%; background: #ff453a; border-radius: 5px; overflow: hidden; display: flex;">
+                <div id="inspect-retail-bar" style="height: 100%; background: #30d158; width: 50%; transition: width 0.4s ease;"></div>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-top: 3px; font-size: 10.5px; color: var(--text-muted);">
+                <span id="inspect-retail-status-long">Ritel Long (Sinyal Bearish)</span>
+                <span id="inspect-retail-status-short">Ritel Short (Sinyal Bullish)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- BOT EXECUTION READINESS CHECKLIST -->
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-sm); padding: 14px 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <span style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">
+                🤖 Simulasi Kelolosan Filter Bot (Kondisi Saat Ini)
+              </span>
+              <span id="inspect-sim-badge" class="badge-tag" style="font-size: 11px; font-weight: 700;">MEMENUHI SYARAT</span>
+            </div>
+
+            <div id="inspect-sim-checklist" style="display: flex; flex-direction: column; gap: 8px;">
+              <!-- Checkpoint items rendered dynamically -->
+            </div>
+
+            <div id="inspect-sim-summary" style="margin-top: 12px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.4;">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer floating-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span id="inspect-footer-time" style="font-size: 11px; color: var(--text-muted);">Diperbarui: --</span>
+        <button type="button" class="btn btn-secondary" onclick="closeSymbolInspectorModal()">Tutup</button>
       </div>
     </div>
   </div>
