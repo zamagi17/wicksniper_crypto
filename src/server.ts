@@ -227,6 +227,26 @@ app.post('/api/close-position', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/pending-signals/:symbol/cancel', requireAuth, (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const cancelled = engine.cancelPendingSignal(symbol);
+    res.json({ success: cancelled, status: engine.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/pending-signals/:symbol/trigger', requireAuth, async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    const triggered = await engine.forceTriggerPendingSignal(symbol);
+    res.json({ success: triggered, status: engine.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/smart-money/metrics', requireAuth, (req, res) => {
   try {
     const scanner = engine.getSmartMoneyScanner();

@@ -778,6 +778,59 @@ function renderStatus(status) {
     }
   }
 
+  // 3. Operational Schedule Indicators
+  const schedBadge = document.getElementById('schedule-badge');
+  const mobileSchedChip = document.getElementById('mobile-schedule-chip');
+  const previewTime = document.getElementById('schedule-preview-time');
+  const previewStatus = document.getElementById('schedule-preview-status');
+
+  const sched = status.scheduleStatus;
+  if (sched) {
+    let badgeClass = 'badge-schedule';
+    let dotClass = 'sched-dot';
+    let label = '';
+    let shortLabel = '';
+
+    if (!sched.enabled) {
+      badgeClass += ' disabled';
+      dotClass += ' disabled';
+      label = `⚡ 24/7 (Jadwal Nonaktif)`;
+      shortLabel = `24/7 (Bebas)`;
+    } else if (sched.inWindow) {
+      badgeClass += ' active';
+      dotClass += ' active';
+      const cleanSession = sched.activeSessionName ? sched.activeSessionName.split('(')[0].trim() : 'Prime Time';
+      label = `🟢 ${cleanSession} (${sched.currentWibTime})`;
+      shortLabel = `🟢 ${cleanSession}`;
+    } else if (sched.reason && sched.reason.toLowerCase().includes('akhir pekan')) {
+      badgeClass += ' weekend';
+      dotClass += ' weekend';
+      label = `🏖️ Weekend Standby (${sched.currentWibTime}) • Next: ${sched.nextSessionText || '-'}`;
+      shortLabel = `🏖️ Weekend Standby`;
+    } else {
+      badgeClass += ' standby';
+      dotClass += ' standby';
+      label = `⏸️ Standby (${sched.currentWibTime}) • Next: ${sched.nextSessionText || '-'}`;
+      shortLabel = `⏸️ Standby`;
+    }
+
+    if (schedBadge) {
+      schedBadge.className = badgeClass;
+      schedBadge.innerHTML = `<span class="${dotClass}"></span><span id="schedule-badge-text">${label}</span>`;
+    }
+    if (mobileSchedChip) {
+      mobileSchedChip.className = badgeClass;
+      mobileSchedChip.innerHTML = `<span class="${dotClass}"></span><span id="mobile-schedule-chip-text">${shortLabel}</span>`;
+    }
+    if (previewTime) {
+      previewTime.innerText = `⏱️ Server: ${sched.currentDayWib}, ${sched.currentWibTime}`;
+    }
+    if (previewStatus) {
+      previewStatus.className = badgeClass;
+      previewStatus.innerHTML = `<span class="${dotClass}"></span> ${sched.inWindow ? (sched.activeSessionName || 'Prime Time Aktif') : (sched.reason || 'Standby')}`;
+    }
+  }
+
   const dPnl = status.dailyPnl !== undefined ? status.dailyPnl : status.accumulatedPnl;
   const isPosPnl = dPnl >= 0;
   const pnlEl = document.getElementById('metric-pnl');
@@ -920,7 +973,8 @@ function renderStatus(status) {
     renderBtcFilter(status.btcTrendStatus);
   }
 
-  // 5. Render Active Positions
+  // 5. Render Pending Signals (2-Stage Execution) & Active Positions
+  renderPendingSignals(status.pendingSignals || []);
   renderActivePositions(status.activePositions || []);
 
   // 6. Render Spikes Radar
@@ -1118,6 +1172,113 @@ async function refreshBtcFilterNow() {
   }
 }
 window.refreshBtcFilterNow = refreshBtcFilterNow;
+
+function renderPendingSignals(signals) {
+  const wrapper = document.getElementById('pending-watchlist-wrapper');
+  const container = document.getElementById('pending-watchlist-container');
+  const badge = document.getElementById('pending-count-badge');
+  if (!wrapper || !container) return;
+
+  if (!signals || signals.length === 0) {
+    wrapper.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  wrapper.style.display = 'block';
+  if (badge) badge.innerText = `${signals.length} Sinyal Menunggu`;
+
+  container.innerHTML = signals.map(sig => {
+    const isLong = (sig.side || '').toUpperCase() === 'LONG';
+    const sideBadgeClass = isLong ? 'badge-long' : 'badge-short';
+    const sideColor = isLong ? '#10b981' : '#f43f5e';
+    const isArmed = sig.status === 'ARMED';
+
+    const ttlMs = Math.max(0, (sig.expiresAt || 0) - Date.now());
+    const ttlMin = Math.floor(ttlMs / 60000);
+    const ttlSec = Math.floor((ttlMs % 60000) / 1000);
+    const ttlStr = ttlMs > 0 ? `${ttlMin}m ${ttlSec}s` : 'Expired';
+
+    const statusBadge = isArmed
+      ? `<span class="badge-status armed" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⚡ ARMED (Menunggu Rebound)</span>`
+      : `<span class="badge-status waiting" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏳ Menunggu Diskon</span>`;
+
+    const reboundPct = sig.currentReboundPct !== undefined ? sig.currentReboundPct : 0;
+    const targetRebound = sig.targetReboundPct || 0.15;
+    const progressPct = Math.min(100, Math.max(0, (reboundPct / targetRebound) * 100));
+
+    const anchorName = sig.anchorType === 'WHALE_VWAP' ? 'Whale VWAP' : sig.anchorType === 'ATR_OFFSET' ? 'ATR 15m' : 'Target %';
+    const extremePrice = isLong ? (sig.lowestPrice ?? sig.currentPrice) : (sig.highestPrice ?? sig.currentPrice);
+    const extremeLabel = isLong ? 'Titik Terendah' : 'Titik Tertinggi';
+
+    return `
+      <div class="pending-watch-card ${isArmed ? 'armed' : ''}">
+        <div class="pending-head-row">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 15px; font-weight: 800; color: #f8fafc;">${sig.symbol}</span>
+            <span class="badge-side ${sideBadgeClass}" style="padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">${sig.side}</span>
+            <span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); font-size: 11px;">${anchorName}</span>
+            ${statusBadge}
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">⏱️ Sisa: <b style="color: ${ttlMs < 300000 ? '#fb7185' : '#e2e8f0'};">${ttlStr}</b></span>
+            <div style="display: flex; gap: 6px;">
+              <button type="button" class="btn btn-sm btn-primary" onclick="window.triggerPendingSignalNow('${sig.symbol}')" style="padding: 3px 10px; font-size: 11.5px; border-radius: 4px;" title="Langsung eksekusi tanpa menunggu pantulan">
+                ⚡ Tembak
+              </button>
+              <button type="button" class="btn btn-sm" onclick="window.cancelPendingSignal('${sig.symbol}')" style="padding: 3px 10px; font-size: 11.5px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" title="Batalkan pending order koin ini">
+                ✕ Batal
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pending-metrics-grid">
+          <div class="pending-metric-box">
+            <span class="pending-metric-label">Harga Sinyal</span>
+            <span class="pending-metric-value" style="color: #94a3b8;">$${formatCryptoPrice(sig.signalPrice)}</span>
+          </div>
+          <div class="pending-metric-box">
+            <span class="pending-metric-label">Target Jemputan</span>
+            <span class="pending-metric-value" style="color: #38bdf8;">$${formatCryptoPrice(sig.targetEntryPrice)}</span>
+          </div>
+          <div class="pending-metric-box">
+            <span class="pending-metric-label">Harga Live</span>
+            <span class="pending-metric-value" style="color: #f8fafc;">$${formatCryptoPrice(sig.currentPrice)}</span>
+          </div>
+          <div class="pending-metric-box">
+            <span class="pending-metric-label">${extremeLabel}</span>
+            <span class="pending-metric-value" style="color: ${sideColor};">$${formatCryptoPrice(extremePrice)}</span>
+          </div>
+          ${sig.whaleAvgEntry ? `
+          <div class="pending-metric-box">
+            <span class="pending-metric-label">Modal Paus</span>
+            <span class="pending-metric-value" style="color: #a855f7;">$${formatCryptoPrice(sig.whaleAvgEntry)}</span>
+          </div>` : ''}
+          <div class="pending-metric-box">
+            <span class="pending-metric-label">Batas Batal (Inval)</span>
+            <span class="pending-metric-value" style="color: #fb7185;">$${formatCryptoPrice(sig.invalidationPrice)}</span>
+          </div>
+        </div>
+
+        <div style="background: rgba(0, 0, 0, 0.2); padding: 8px 10px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.04);">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+            <span style="color: #94a3b8;">
+              ${isArmed ? '⚡ Status ARMED: Mengukur pantulan rebound sebelum konfirmasi eksekusi:' : '⏳ Menunggu harga masuk ke zona diskon jemputan:'}
+            </span>
+            <span style="font-weight: 700; color: ${isArmed ? (progressPct >= 100 ? '#10b981' : '#38bdf8') : '#94a3b8'};">
+              ${isArmed ? `${reboundPct.toFixed(2)}% / ${targetRebound.toFixed(2)}% (+${progressPct.toFixed(0)}%)` : 'Standby Diskon'}
+            </span>
+          </div>
+          <div class="rebound-progress-bar">
+            <div class="rebound-progress-fill" style="width: ${isArmed ? progressPct : 0}%;"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+window.renderPendingSignals = renderPendingSignals;
 
 function renderActivePositions(positions) {
   const container = document.getElementById('active-positions-container');
@@ -2296,8 +2457,9 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     // Header Title & Badge
     const detailSide = (t.side || snap?.side || 'SHORT').toUpperCase();
     const lowVolTag = snap?.isLowVolumeAdjusted ? ' • 🛡️ Low-Vol' : '';
+    const sessionTag = snap?.sessionAtEntry ? ` • ⏰ ${snap.sessionAtEntry}` : '';
     const titleEl = document.getElementById('td-title');
-    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${detailSide} [${stratName}${lowVolTag}] (${t.isPaper ? 'Paper' : 'Live'})`;
+    if (titleEl) titleEl.innerText = `🔍 Detail Trade: ${t.symbol} ${detailSide} [${stratName}${lowVolTag}${sessionTag}] (${t.isPaper ? 'Paper' : 'Live'})`;
     const badge = document.getElementById('td-pnl-badge');
     if (badge) {
       badge.className = `badge-mode ${isWin ? 'live' : 'paper'}`;
@@ -3500,6 +3662,41 @@ async function manualClosePosition(symbol) {
     alert(`Error: ${err.message}`);
   }
 }
+window.manualClosePosition = manualClosePosition;
+
+async function cancelPendingSignal(symbol) {
+  if (!confirm(`Batalkan sinyal pending untuk ${symbol}?`)) return;
+  try {
+    const res = await authFetch(`/api/pending-signals/${encodeURIComponent(symbol)}/cancel`, {
+      method: 'POST',
+    }).then(r => r.json());
+    if (res.success && res.status) {
+      renderStatus(res.status);
+    } else {
+      alert(`Gagal membatalkan: ${res.message || 'Sinyal tidak ditemukan'}`);
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+window.cancelPendingSignal = cancelPendingSignal;
+
+async function triggerPendingSignalNow(symbol) {
+  if (!confirm(`Paksa eksekusi posisi ${symbol} SEKARANG di harga pasar tanpa menunggu rebound?`)) return;
+  try {
+    const res = await authFetch(`/api/pending-signals/${encodeURIComponent(symbol)}/trigger`, {
+      method: 'POST',
+    }).then(r => r.json());
+    if (res.success && res.status) {
+      renderStatus(res.status);
+    } else {
+      alert(`Gagal trigger: ${res.message || 'Error saat eksekusi'}`);
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+window.triggerPendingSignalNow = triggerPendingSignalNow;
 
 // ==========================================
 // MODAL SETTINGS (PERSISTENT & FLOATING FOOTER)
@@ -3551,6 +3748,13 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-max-funding-long', smCfg.maxFundingRatePct ?? 0.10);
   const smPullbackCb = document.getElementById('cfg-sm-pullback-enabled');
   if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false;
+  setVal('cfg-sm-execution-mode', smCfg.executionMode || 'TWO_STAGE_PULLBACK');
+  setVal('cfg-sm-target-anchor', smCfg.pullbackTargetAnchor || 'WHALE_VWAP_OR_ATR');
+  setVal('cfg-sm-whale-premium', smCfg.whaleMaxPremiumPct ?? 0.15);
+  setVal('cfg-sm-atr-pullback-mult', smCfg.atrPullbackMultiplier ?? 0.4);
+  setVal('cfg-sm-rebound-pct', smCfg.reboundThresholdPct ?? 0.15);
+  setVal('cfg-sm-signal-ttl', smCfg.signalTtlMinutes ?? 30);
+  setVal('cfg-sm-invalidation-pct', smCfg.invalidationThresholdPct ?? 1.2);
   setVal('cfg-sm-pullback-min', smCfg.pullbackMinPct ?? 0.3);
   setVal('cfg-sm-pullback-wait', smCfg.pullbackMaxWaitSeconds ?? 12);
   const smDistCb = document.getElementById('cfg-sm-whale-dist-enabled');
@@ -3804,6 +4008,32 @@ function populateSettingsForm(cfg) {
   setVal('cfg-risk-max-daily-loss', cfg.risk?.maxDailyLossUsdt ?? 30);
   setVal('cfg-risk-min-balance', cfg.risk?.minSafetyBalanceUsdt ?? 15);
 
+  // Trading Schedule (Prime Time & Weekend Guard)
+  const schedCfg = cfg.schedule || {};
+  const schedEnabledCb = document.getElementById('cfg-schedule-enabled');
+  if (schedEnabledCb) schedEnabledCb.checked = schedCfg.enabled !== false;
+  const schedWeekendCb = document.getElementById('cfg-schedule-block-weekends');
+  if (schedWeekendCb) schedWeekendCb.checked = schedCfg.blockWeekends !== false;
+  setVal('cfg-schedule-friday-cutoff', schedCfg.fridayCutoffTime || '23:00');
+  const schedSunCb = document.getElementById('cfg-schedule-sunday-open');
+  if (schedSunCb) schedSunCb.checked = !!schedCfg.sundayNightOpen;
+  setVal('cfg-schedule-sunday-time', schedCfg.sundayNightStartTime || '22:00');
+
+  const p1Cb = document.getElementById('cfg-schedule-p1-enabled');
+  if (p1Cb) p1Cb.checked = schedCfg.primeTime1Enabled !== false;
+  setVal('cfg-schedule-p1-start', schedCfg.primeTime1Start || '14:30');
+  setVal('cfg-schedule-p1-end', schedCfg.primeTime1End || '17:00');
+
+  const p2Cb = document.getElementById('cfg-schedule-p2-enabled');
+  if (p2Cb) p2Cb.checked = schedCfg.primeTime2Enabled !== false;
+  setVal('cfg-schedule-p2-start', schedCfg.primeTime2Start || '19:30');
+  setVal('cfg-schedule-p2-end', schedCfg.primeTime2End || '23:30');
+
+  const p3Cb = document.getElementById('cfg-schedule-p3-enabled');
+  if (p3Cb) p3Cb.checked = schedCfg.primeTime3Enabled !== false;
+  setVal('cfg-schedule-p3-start', schedCfg.primeTime3Start || '07:00');
+  setVal('cfg-schedule-p3-end', schedCfg.primeTime3End || '09:30');
+
   // Whitelist
   const wlCheckbox = document.getElementById('cfg-whitelist-enabled');
   if (wlCheckbox) {
@@ -3942,6 +4172,13 @@ function getSettingsFormData() {
       minFundingRatePct: parseFloat(getVal('cfg-sm-min-funding-short', '-0.02')) ?? -0.02,
       maxFundingRatePct: parseFloat(getVal('cfg-sm-max-funding-long', '0.10')) ?? 0.10,
       pullbackConfirmationEnabled: !!document.getElementById('cfg-sm-pullback-enabled')?.checked,
+      executionMode: getVal('cfg-sm-execution-mode', 'TWO_STAGE_PULLBACK'),
+      pullbackTargetAnchor: getVal('cfg-sm-target-anchor', 'WHALE_VWAP_OR_ATR'),
+      whaleMaxPremiumPct: parseFloat(getVal('cfg-sm-whale-premium', '0.15')) || 0.15,
+      atrPullbackMultiplier: parseFloat(getVal('cfg-sm-atr-pullback-mult', '0.4')) || 0.4,
+      reboundThresholdPct: parseFloat(getVal('cfg-sm-rebound-pct', '0.15')) || 0.15,
+      signalTtlMinutes: parseInt(getVal('cfg-sm-signal-ttl', '30'), 10) || 30,
+      invalidationThresholdPct: parseFloat(getVal('cfg-sm-invalidation-pct', '1.2')) || 1.2,
       pullbackMinPct: parseFloat(getVal('cfg-sm-pullback-min', '0.3')) || 0.3,
       pullbackMaxWaitSeconds: parseInt(getVal('cfg-sm-pullback-wait', '12'), 10) || 12,
       whaleDistanceFilterEnabled: !!document.getElementById('cfg-sm-whale-dist-enabled')?.checked,
@@ -4082,6 +4319,26 @@ function getSettingsFormData() {
     risk: {
       maxDailyLossUsdt: parseFloat(getVal('cfg-risk-max-daily-loss', '30')) || 0,
       minSafetyBalanceUsdt: parseFloat(getVal('cfg-risk-min-balance', '15')) || 0,
+    },
+    schedule: {
+      ...(currentConfig?.schedule || {}),
+      enabled: !!document.getElementById('cfg-schedule-enabled')?.checked,
+      blockWeekends: !!document.getElementById('cfg-schedule-block-weekends')?.checked,
+      fridayCutoffTime: (getVal('cfg-schedule-friday-cutoff', '23:00') || '23:00').trim(),
+      sundayNightOpen: !!document.getElementById('cfg-schedule-sunday-open')?.checked,
+      sundayNightStartTime: (getVal('cfg-schedule-sunday-time', '22:00') || '22:00').trim(),
+      primeTime1Enabled: !!document.getElementById('cfg-schedule-p1-enabled')?.checked,
+      primeTime1Start: (getVal('cfg-schedule-p1-start', '14:30') || '14:30').trim(),
+      primeTime1End: (getVal('cfg-schedule-p1-end', '17:00') || '17:00').trim(),
+      primeTime1Name: 'Prime Time 1 (Sore - Sesi London)',
+      primeTime2Enabled: !!document.getElementById('cfg-schedule-p2-enabled')?.checked,
+      primeTime2Start: (getVal('cfg-schedule-p2-start', '19:30') || '19:30').trim(),
+      primeTime2End: (getVal('cfg-schedule-p2-end', '23:30') || '23:30').trim(),
+      primeTime2Name: 'Prime Time 2 (Malam - Utama NY Open)',
+      primeTime3Enabled: !!document.getElementById('cfg-schedule-p3-enabled')?.checked,
+      primeTime3Start: (getVal('cfg-schedule-p3-start', '07:00') || '07:00').trim(),
+      primeTime3End: (getVal('cfg-schedule-p3-end', '09:30') || '09:30').trim(),
+      primeTime3Name: 'Prime Time 3 (Pagi - Sesi Asia)',
     },
     telegram: {
       enabled: !!document.getElementById('cfg-tg-enabled')?.checked,

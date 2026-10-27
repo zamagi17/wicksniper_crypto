@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PostExitSnapshot, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult } from '../types';
+import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -139,6 +139,29 @@ export class WickSniperEngine {
   private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
   private lastBtcTrendStatus: BtcTrendStatus | null = null;
+  private pendingSignals: Map<string, PendingSignalWatchlistItem> = new Map();
+
+  public getDefaultTradingScheduleConfig(): TradingScheduleConfig {
+    return {
+      enabled: true,
+      blockWeekends: true,
+      fridayCutoffTime: '23:00',
+      sundayNightOpen: false,
+      sundayNightStartTime: '22:00',
+      primeTime1Enabled: true,
+      primeTime1Start: '14:30',
+      primeTime1End: '17:00',
+      primeTime1Name: 'Prime Time 1 (Sore - Sesi London)',
+      primeTime2Enabled: true,
+      primeTime2Start: '19:30',
+      primeTime2End: '23:30',
+      primeTime2Name: 'Prime Time 2 (Malam - Utama NY Open)',
+      primeTime3Enabled: true,
+      primeTime3Start: '07:00',
+      primeTime3End: '09:30',
+      primeTime3Name: 'Prime Time 3 (Pagi - Sesi Asia)',
+    };
+  }
 
   public getDefaultSmartMoneyConfig(): SmartMoneyConfig {
     return {
@@ -164,6 +187,13 @@ export class WickSniperEngine {
       pullbackConfirmationEnabled: true,
       pullbackMinPct: 0.3,
       pullbackMaxWaitSeconds: 12,
+      executionMode: 'TWO_STAGE_PULLBACK',
+      pullbackTargetAnchor: 'WHALE_VWAP_OR_ATR',
+      whaleMaxPremiumPct: 0.15,
+      atrPullbackMultiplier: 0.4,
+      reboundThresholdPct: 0.15,
+      signalTtlMinutes: 30,
+      invalidationThresholdPct: 1.2,
       entryLayers: 1,
       layerSpacingPct: 0.8,
       marginUsdt: 5.0,
@@ -355,6 +385,13 @@ export class WickSniperEngine {
         retailTrapFilter: true,
         pullbackMinPct: 0.5,
         pullbackMaxWaitSeconds: 15,
+        executionMode: 'TWO_STAGE_PULLBACK',
+        pullbackTargetAnchor: 'WHALE_VWAP_OR_ATR',
+        whaleMaxPremiumPct: 0.15,
+        atrPullbackMultiplier: 0.4,
+        reboundThresholdPct: 0.15,
+        signalTtlMinutes: 30,
+        invalidationThresholdPct: 1.2,
         entryLayers: 1,
         layerSpacingPct: 0.8,
         marginUsdt: 5.0,
@@ -375,6 +412,7 @@ export class WickSniperEngine {
         circuitBreakerLosses: 3,
         stepSizePct: 10,
       },
+      schedule: this.getDefaultTradingScheduleConfig(),
       security: {
         password: 'admin123',
       },
@@ -403,6 +441,9 @@ export class WickSniperEngine {
       autoTuner: newConfig.autoTuner !== undefined
         ? { ...(this.config.autoTuner || { enabled: false, mode: 'SEMI_AUTO' }), ...(newConfig.autoTuner || {}) }
         : this.config.autoTuner,
+      schedule: newConfig.schedule !== undefined
+        ? { ...(this.config.schedule || this.getDefaultTradingScheduleConfig()), ...(newConfig.schedule || {}) }
+        : this.config.schedule,
       security: { ...this.config.security, ...(newConfig.security || {}) },
     };
     this.scanner.updateConfig(this.config.scanner);
@@ -518,6 +559,7 @@ export class WickSniperEngine {
           scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
           grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
           telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+          schedule: { ...(this.config.schedule || this.getDefaultTradingScheduleConfig()), ...(dbCfg.schedule || {}) },
           security: { ...this.config.security, ...(dbCfg.security || {}) },
         };
         this.scanner.updateConfig(this.config.scanner);
@@ -799,6 +841,19 @@ export class WickSniperEngine {
     alert.paramsSnapshot ??= this.captureParamsSnapshot();
 
     const symbol = alert.symbol;
+
+    // Proteksi Jadwal Operasional (Prime Time Saja)
+    const scheduleCheck = this.isWithinTradingSchedule();
+    if (!scheduleCheck.allowed) {
+      const reason = `Di luar jadwal operasional (${scheduleCheck.reason || 'Bukan Prime Time'})`;
+      logger.log(
+        'INFO',
+        `⏳ [JADWAL SKIP] Lonjakan pada ${symbol} diabaikan: ${scheduleCheck.currentDayWib} ${scheduleCheck.currentWibTime} di luar prime time (${scheduleCheck.reason}). Next: ${scheduleCheck.nextSessionText || '-'}.`,
+        symbol
+      );
+      this.recordSkippedSpike(alert, reason);
+      return;
+    }
 
     // Proteksi lapis ganda: Cek apakah koin masih dalam masa cooldown
     if (this.scanner.isCoolingDown(symbol)) {
@@ -1817,9 +1872,198 @@ export class WickSniperEngine {
   }
 
   /**
+   * Evaluasi Antrean Sinyal Pending (The Golden Triad: Whale Anchor + Trailing Rebound + TTL/Invalidation)
+   */
+  private async evaluatePendingSignals(tickers: any[]) {
+    if (this.pendingSignals.size === 0) return;
+    const now = Date.now();
+    const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+
+    const tickerPriceMap = new Map<string, number>();
+    for (const t of tickers) {
+      const p = parseFloat(t.c || t.p || '0');
+      if (p > 0) tickerPriceMap.set(t.s, p);
+    }
+
+    const items = Array.from(this.pendingSignals.values());
+    for (const item of items) {
+      const symbol = item.symbol;
+      const livePrice = tickerPriceMap.get(symbol) || this.scanner.getCurrentPrice(symbol);
+      if (livePrice <= 0) continue;
+
+      item.currentPrice = livePrice;
+      const isLong = item.side === 'LONG';
+
+      // 1. Cek Kedaluwarsa (Signal TTL)
+      if (now >= item.expiresAt) {
+        this.pendingSignals.delete(symbol);
+        logger.log(
+          'INFO',
+          `⏳ [WATCHLIST EXPIRED] ${symbol} (${item.side}): Batas waktu tunggu diskon ${Math.round((item.expiresAt - item.createdAt) / 60000)}m habis (Live: $${formatCryptoPrice(livePrice)}, Target: $${formatCryptoPrice(item.targetEntryPrice)}). Sinyal dibatalkan.`,
+          symbol
+        );
+        this.broadcastStatus();
+        continue;
+      }
+
+      // 2. Cek Batas Invalidasi (Struktur Pasar Rusak / Dumping Terlalu Dalam)
+      const isInvalidated = isLong ? (livePrice <= item.invalidationPrice) : (livePrice >= item.invalidationPrice);
+      if (isInvalidated) {
+        this.pendingSignals.delete(symbol);
+        const reason = isLong
+          ? `Harga anjlok tembus $${formatCryptoPrice(item.invalidationPrice)} di bawah batas aman modal Paus`
+          : `Harga meroket tembus $${formatCryptoPrice(item.invalidationPrice)} di atas batas aman modal Paus`;
+        logger.log(
+          'WARN',
+          `🛑 [WATCHLIST INVALIDATED] ${symbol} (${item.side}): Dibatalkan karena ${reason}. Struktur tren rusak.`,
+          symbol
+        );
+        this.broadcastStatus();
+        continue;
+      }
+
+      // 3. Status WAITING_DISCOUNT: Tunggu harga menyentuh zona diskon
+      if (item.status === 'WAITING_DISCOUNT') {
+        const inDiscountZone = isLong ? (livePrice <= item.targetEntryPrice) : (livePrice >= item.targetEntryPrice);
+        if (inDiscountZone) {
+          item.status = 'ARMED';
+          item.armedAt = now;
+          if (isLong) {
+            item.lowestPrice = livePrice;
+          } else {
+            item.highestPrice = livePrice;
+          }
+          item.currentReboundPct = 0;
+          logger.log(
+            'SNIPER',
+            `🎯 [PULLBACK ARMED] ${symbol} (${item.side}): Harga menyentuh area diskon target $${formatCryptoPrice(item.targetEntryPrice)} (Harga saat ini: $${formatCryptoPrice(livePrice)}). Mengaktifkan Trailing Rebound (+${item.targetReboundPct}%)...`,
+            symbol
+          );
+          this.broadcastStatus();
+        }
+        continue;
+      }
+
+      // 4. Status ARMED: Trailing Rebound Confirmation (Anti Pisau Jatuh)
+      if (item.status === 'ARMED') {
+        if (isLong) {
+          if (!item.lowestPrice || livePrice < item.lowestPrice) {
+            item.lowestPrice = livePrice;
+          }
+          const reboundPct = ((livePrice - item.lowestPrice) / item.lowestPrice) * 100;
+          item.currentReboundPct = parseFloat(reboundPct.toFixed(2));
+
+          if (reboundPct >= item.targetReboundPct) {
+            const maxConcurrent = Math.max(
+              smCfg.maxConcurrentPositions || 0,
+              this.config.grid?.maxConcurrentCoins || 0
+            ) || 3;
+            if (this.activePositions.size + this.deployingSymbols.size >= maxConcurrent) {
+              return; // Kuota penuh, biarkan tetap ARMED menunggu posisi lain close
+            }
+
+            this.pendingSignals.delete(symbol);
+            this.deployingSymbols.add(symbol);
+            logger.log(
+              'SUCCESS',
+              `🚀 [TRAILING REBOUND TRIGGER] ${symbol} LONG: Terkonfirmasi pantulan +${reboundPct.toFixed(2)}% dari dasar $${formatCryptoPrice(item.lowestPrice)} ke $${formatCryptoPrice(livePrice)}! Mengeksekusi order...`,
+              symbol
+            );
+
+            try {
+              item.signal.currentPrice = livePrice;
+              item.signal.triggerPrice = livePrice;
+              await this.deploySmartMoneyPosition(item.signal);
+            } catch (err: any) {
+              logger.log('ERROR', `❌ [SMART MONEY TRIGGER ERROR] ${symbol}: ${err?.message || err}`, symbol);
+            } finally {
+              this.deployingSymbols.delete(symbol);
+            }
+            this.broadcastStatus();
+            continue;
+          }
+        } else {
+          // SHORT
+          if (!item.highestPrice || livePrice > item.highestPrice) {
+            item.highestPrice = livePrice;
+          }
+          const reboundPct = ((item.highestPrice - livePrice) / item.highestPrice) * 100;
+          item.currentReboundPct = parseFloat(reboundPct.toFixed(2));
+
+          if (reboundPct >= item.targetReboundPct) {
+            const maxConcurrent = Math.max(
+              smCfg.maxConcurrentPositions || 0,
+              this.config.grid?.maxConcurrentCoins || 0
+            ) || 3;
+            if (this.activePositions.size + this.deployingSymbols.size >= maxConcurrent) {
+              return; // Kuota penuh, biarkan tetap ARMED
+            }
+
+            this.pendingSignals.delete(symbol);
+            this.deployingSymbols.add(symbol);
+            logger.log(
+              'SUCCESS',
+              `🚀 [TRAILING REBOUND TRIGGER] ${symbol} SHORT: Terkonfirmasi pantulan -${reboundPct.toFixed(2)}% dari puncak $${formatCryptoPrice(item.highestPrice)} ke $${formatCryptoPrice(livePrice)}! Mengeksekusi order...`,
+              symbol
+            );
+
+            try {
+              item.signal.currentPrice = livePrice;
+              item.signal.triggerPrice = livePrice;
+              await this.deploySmartMoneyPosition(item.signal);
+            } catch (err: any) {
+              logger.log('ERROR', `❌ [SMART MONEY TRIGGER ERROR] ${symbol}: ${err?.message || err}`, symbol);
+            } finally {
+              this.deployingSymbols.delete(symbol);
+            }
+            this.broadcastStatus();
+            continue;
+          }
+        }
+      }
+    }
+  }
+
+  public cancelPendingSignal(symbol: string): boolean {
+    const sym = symbol.toUpperCase();
+    if (this.pendingSignals.has(sym)) {
+      this.pendingSignals.delete(sym);
+      logger.log('INFO', `🗑️ [WATCHLIST BATAL] Sinyal ${sym} dibatalkan dari antrean jemputan oleh pengguna.`, sym);
+      this.broadcastStatus();
+      return true;
+    }
+    return false;
+  }
+
+  public async forceTriggerPendingSignal(symbol: string): Promise<boolean> {
+    const sym = symbol.toUpperCase();
+    const item = this.pendingSignals.get(sym);
+    if (!item) return false;
+    this.pendingSignals.delete(sym);
+    this.deployingSymbols.add(sym);
+    logger.log('INFO', `⚡ [WATCHLIST FORCE TRIGGER] Mengeksekusi manual ${sym} (${item.side}) dari antrean jemputan...`, sym);
+    try {
+      const livePrice = this.scanner.getCurrentPrice(sym);
+      if (livePrice > 0) item.signal.currentPrice = livePrice;
+      await this.deploySmartMoneyPosition(item.signal);
+    } catch (err: any) {
+      logger.log('ERROR', `❌ [FORCE TRIGGER ERROR] ${sym}: ${err?.message || err}`, sym);
+    } finally {
+      this.deployingSymbols.delete(sym);
+    }
+    this.broadcastStatus();
+    return true;
+  }
+
+  /**
    * Pembaruan live harga dari WebSocket untuk mengecek trigger jaring dan TP/SL
    */
   private async onPriceTick(tickers: any[]) {
+    // 1. Evaluasi Antrean Sinyal Pending (2-Stage Execution: Watchlist -> Armed -> Rebound Trigger)
+    if (this.pendingSignals.size > 0) {
+      await this.evaluatePendingSignals(tickers);
+    }
+
     if (this.activePositions.size === 0) return;
 
     for (const t of tickers) {
@@ -3425,6 +3669,7 @@ export class WickSniperEngine {
       dataSource: this.config.scanner?.dataSource,
       maxDailyLossUsdt: this.config.risk?.maxDailyLossUsdt,
       minSafetyBalanceUsdt: this.config.risk?.minSafetyBalanceUsdt,
+      sessionAtEntry: this.isWithinTradingSchedule().activeSessionName || '24/7',
     };
   }
 
@@ -4834,6 +5079,149 @@ export class WickSniperEngine {
     }
   }
 
+  private parseTimeToMinutes(timeStr: string): number {
+    if (!timeStr || !timeStr.includes(':')) return 0;
+    const [h, m] = timeStr.split(':').map((v) => parseInt(v.trim(), 10) || 0);
+    return (h || 0) * 60 + (m || 0);
+  }
+
+  public isWithinTradingSchedule(ts: number = Date.now()): {
+    allowed: boolean;
+    reason?: string;
+    activeSessionName?: string;
+    nextSessionText?: string;
+    currentWibTime: string;
+    currentDayWib: string;
+  } {
+    // Perhitungan waktu real-time WIB (UTC + 7 Jam)
+    const wibDate = new Date(ts + 7 * 3600 * 1000);
+    const day = wibDate.getUTCDay(); // 0 = Minggu, 1 = Senin, ..., 5 = Jumat, 6 = Sabtu
+    const hour = wibDate.getUTCHours();
+    const min = wibDate.getUTCMinutes();
+    const nowMins = hour * 60 + min;
+
+    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const currentDayWib = days[day];
+    const currentWibTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')} WIB`;
+
+    const sched = this.config.schedule || this.getDefaultTradingScheduleConfig();
+    if (!sched.enabled) {
+      return {
+        allowed: true,
+        currentWibTime,
+        currentDayWib,
+        activeSessionName: '24/7 (Jadwal Nonaktif)',
+      };
+    }
+
+    const friCutoffMins = this.parseTimeToMinutes(sched.fridayCutoffTime || '23:00');
+    const sunStartMins = this.parseTimeToMinutes(sched.sundayNightStartTime || '22:00');
+
+    // 1. Cek Blokir Jumat Malam & Akhir Pekan
+    if (day === 5 && nowMins >= friCutoffMins) {
+      return {
+        allowed: false,
+        reason: `Tutup Buku Mingguan Jumat > ${sched.fridayCutoffTime || '23:00'} WIB`,
+        currentWibTime,
+        currentDayWib,
+        nextSessionText: sched.sundayNightOpen ? `Minggu ${sched.sundayNightStartTime || '22:00'} WIB` : 'Senin 07:00 WIB',
+      };
+    }
+
+    if (sched.blockWeekends) {
+      if (day === 6) {
+        return {
+          allowed: false,
+          reason: 'Akhir Pekan (Sabtu) - Likuiditas Tipis & Pasar Choppy',
+          currentWibTime,
+          currentDayWib,
+          nextSessionText: sched.sundayNightOpen ? `Minggu ${sched.sundayNightStartTime || '22:00'} WIB` : 'Senin 07:00 WIB',
+        };
+      }
+      if (day === 0) {
+        if (sched.sundayNightOpen && nowMins >= sunStartMins) {
+          return {
+            allowed: true,
+            activeSessionName: `Re-Open Pasar Minggu Malam (${sched.sundayNightStartTime || '22:00'} WIB+)`,
+            currentWibTime,
+            currentDayWib,
+          };
+        }
+        return {
+          allowed: false,
+          reason: 'Akhir Pekan (Minggu) - Likuiditas Tipis & Pasar Choppy',
+          currentWibTime,
+          currentDayWib,
+          nextSessionText: sched.sundayNightOpen ? `Minggu ${sched.sundayNightStartTime || '22:00'} WIB` : 'Senin 07:00 WIB',
+        };
+      }
+    }
+
+    // 2. Evaluasi Prime Times pada Hari Kerja (Senin s/d Jumat)
+    // Prime Time 3: 07:00 – 09:30 (Pagi - Arah awal candle harian & sesi Asia)
+    const p3Start = this.parseTimeToMinutes(sched.primeTime3Start || '07:00');
+    const p3End = this.parseTimeToMinutes(sched.primeTime3End || '09:30');
+    if (sched.primeTime3Enabled !== false && nowMins >= p3Start && nowMins < p3End) {
+      return {
+        allowed: true,
+        activeSessionName: sched.primeTime3Name || 'Prime Time 3 (Pagi - Sesi Asia)',
+        currentWibTime,
+        currentDayWib,
+      };
+    }
+
+    // Prime Time 1: 14:30 – 17:00 (Sore - Awal sesi London)
+    const p1Start = this.parseTimeToMinutes(sched.primeTime1Start || '14:30');
+    const p1End = this.parseTimeToMinutes(sched.primeTime1End || '17:00');
+    if (sched.primeTime1Enabled !== false && nowMins >= p1Start && nowMins < p1End) {
+      return {
+        allowed: true,
+        activeSessionName: sched.primeTime1Name || 'Prime Time 1 (Sore - Sesi London)',
+        currentWibTime,
+        currentDayWib,
+      };
+    }
+
+    // Prime Time 2: 19:30 – 23:30 (Malam - Sesi Utama NY Open & Indeks AS)
+    const p2Start = this.parseTimeToMinutes(sched.primeTime2Start || '19:30');
+    let p2End = this.parseTimeToMinutes(sched.primeTime2End || '23:30');
+    if (day === 5) {
+      p2End = Math.min(p2End, friCutoffMins);
+    }
+    if (sched.primeTime2Enabled !== false && nowMins >= p2Start && nowMins < p2End) {
+      return {
+        allowed: true,
+        activeSessionName: sched.primeTime2Name || 'Prime Time 2 (Malam - Utama NY Open)',
+        currentWibTime,
+        currentDayWib,
+      };
+    }
+
+    // Hitung Sesi Berikutnya untuk Estimasi Tampilan
+    let nextText = 'Besok 07:00 WIB';
+    if (sched.primeTime3Enabled !== false && nowMins < p3Start) {
+      nextText = `Pagi ${sched.primeTime3Start || '07:00'} WIB (Sesi Asia)`;
+    } else if (sched.primeTime1Enabled !== false && nowMins < p1Start) {
+      nextText = `Sore ${sched.primeTime1Start || '14:30'} WIB (Sesi London)`;
+    } else if (sched.primeTime2Enabled !== false && nowMins < p2Start) {
+      nextText = `Malam ${sched.primeTime2Start || '19:30'} WIB (Sesi New York)`;
+    } else {
+      if (day === 5) {
+        nextText = sched.sundayNightOpen ? `Minggu ${sched.sundayNightStartTime || '22:00'} WIB` : 'Senin 07:00 WIB';
+      } else {
+        nextText = `Besok ${sched.primeTime3Start || '07:00'} WIB`;
+      }
+    }
+
+    return {
+      allowed: false,
+      reason: 'Di luar rentang Prime Time operasional',
+      nextSessionText: nextText,
+      currentWibTime,
+      currentDayWib,
+    };
+  }
+
   public getClosedTrades(): ClosedTrade[] {
     return this.closedTrades;
   }
@@ -4898,6 +5286,16 @@ export class WickSniperEngine {
       orderCount10s: binanceFutures.getOrderCount10s(),
       wsConnected: this.isRunning && (this.config.scanner?.dataSource === 'POLLING' || binanceFutures.isConnected()),
       btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
+      scheduleStatus: {
+        enabled: this.config.schedule?.enabled ?? true,
+        inWindow: this.isWithinTradingSchedule().allowed,
+        currentWibTime: this.isWithinTradingSchedule().currentWibTime,
+        currentDayWib: this.isWithinTradingSchedule().currentDayWib,
+        activeSessionName: this.isWithinTradingSchedule().activeSessionName,
+        nextSessionText: this.isWithinTradingSchedule().nextSessionText,
+        reason: this.isWithinTradingSchedule().reason,
+      },
+      pendingSignals: Array.from(this.pendingSignals.values()),
     };
   }
 
@@ -5243,6 +5641,7 @@ export class WickSniperEngine {
           grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
           risk: { ...this.config.risk, ...(dbCfg.risk || {}) },
           telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+          schedule: { ...(this.config.schedule || this.getDefaultTradingScheduleConfig()), ...(dbCfg.schedule || {}) },
           security: { ...this.config.security, ...(dbCfg.security || {}) },
         };
         try {
@@ -5320,6 +5719,7 @@ export class WickSniperEngine {
     this.closedTrades = [];
     this.cachedDbStats = null;
     this.activePositions.clear();
+    this.pendingSignals.clear();
     db.clearAllTrades().catch(() => { });
     db.saveState(this.virtualBalance, [], 0).catch(() => { });
     logger.log('INFO', '🧹 Saldo dan riwayat trade demo berhasil di-reset.');
@@ -5793,7 +6193,18 @@ export class WickSniperEngine {
 
     const symbol = signal.symbol;
     if (this.smartMoneyScanner.isCoolingDown(symbol) || this.scanner.isCoolingDown(symbol)) return;
-    if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) return;
+    if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol) || this.pendingSignals.has(symbol)) return;
+
+    // Proteksi Jadwal Operasional (Prime Time Saja)
+    const scheduleCheck = this.isWithinTradingSchedule();
+    if (!scheduleCheck.allowed) {
+      logger.log(
+        'INFO',
+        `⏳ [JADWAL SKIP] Sinyal Smart Money ${symbol} (${signal.side}) diabaikan: ${scheduleCheck.currentDayWib} ${scheduleCheck.currentWibTime} di luar prime time (${scheduleCheck.reason}). Next: ${scheduleCheck.nextSessionText || '-'}.`,
+        symbol
+      );
+      return;
+    }
 
     const maxConcurrent = Math.max(
       this.config.smartMoney?.maxConcurrentPositions || 0,
@@ -5825,78 +6236,114 @@ export class WickSniperEngine {
       }
     }
 
-    this.deployingSymbols.add(symbol);
-    try {
-      const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
-      const cooldownMins = smCfg.cooldownMinutes || 30;
-      this.smartMoneyScanner.setCooldown(symbol, cooldownMins);
+    const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+    const cooldownMins = smCfg.cooldownMinutes || 30;
+    this.smartMoneyScanner.setCooldown(symbol, cooldownMins);
 
-      const effectiveDriver = signal.signalDriver || smCfg.signalDriver || 'SMART_TRADER';
-      const driverTag = effectiveDriver === 'SMART_TRADER' ? '🧠 [SMART TRADER SIGNAL]' : effectiveDriver === 'DUAL_CONFLUENCE' ? '🎯 [DUAL CONFLUENCE SIGNAL]' : '🐋 [WHALE SIGNAL]';
+    const effectiveDriver = signal.signalDriver || smCfg.signalDriver || 'SMART_TRADER';
+    const driverTag = effectiveDriver === 'SMART_TRADER' ? '🧠 [SMART TRADER SIGNAL]' : effectiveDriver === 'DUAL_CONFLUENCE' ? '🎯 [DUAL CONFLUENCE SIGNAL]' : '🐋 [WHALE SIGNAL]';
+    logger.log(
+      'SNIPER',
+      `${driverTag} ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga Awal: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi...`,
+      symbol
+    );
+
+    // MODE 1: Direct Market Execution (Eksekusi Langsung)
+    if (smCfg.executionMode === 'DIRECT_MARKET') {
+      this.deployingSymbols.add(symbol);
+      try {
+        await this.deploySmartMoneyPosition(signal);
+      } catch (err: any) {
+        logger.log('ERROR', `❌ [SMART MONEY DEPLOY ERROR] ${symbol}: ${err?.message || err}`, symbol);
+      } finally {
+        this.deployingSymbols.delete(symbol);
+      }
+      return;
+    }
+
+    // MODE 2: The Golden Triad 2-Stage Execution (Signal -> Pending Watchlist -> Armed -> Trailing Rebound Trigger)
+    const isLong = signal.side === 'LONG';
+    const anchor = smCfg.pullbackTargetAnchor || 'WHALE_VWAP_OR_ATR';
+    const whaleAvg = isLong
+      ? (signal.whaleAvgEntry || signal.smartTraderLongAvgEntry)
+      : (signal.whaleAvgEntry || signal.smartTraderShortAvgEntry);
+
+    let targetEntryPrice = signal.currentPrice;
+    let anchorType: 'WHALE_VWAP' | 'ATR_OFFSET' | 'PERCENT' = 'PERCENT';
+
+    if (anchor !== 'ATR_ONLY' && anchor !== 'PERCENT_ONLY' && whaleAvg && whaleAvg > 0) {
+      const maxPrem = (smCfg.whaleMaxPremiumPct ?? 0.15) / 100;
+      targetEntryPrice = isLong ? whaleAvg * (1 + maxPrem) : whaleAvg * (1 - maxPrem);
+      anchorType = 'WHALE_VWAP';
+    } else if (anchor !== 'PERCENT_ONLY' && signal.atr && signal.atr > 0) {
+      const atrMult = smCfg.atrPullbackMultiplier ?? 0.4;
+      targetEntryPrice = isLong ? (signal.currentPrice - signal.atr * atrMult) : (signal.currentPrice + signal.atr * atrMult);
+      anchorType = 'ATR_OFFSET';
+    } else {
+      const minDip = (smCfg.pullbackMinPct || 0.4) / 100;
+      targetEntryPrice = isLong ? signal.currentPrice * (1 - minDip) : signal.currentPrice * (1 + minDip);
+      anchorType = 'PERCENT';
+    }
+
+    // Batas Invalidasi: Jika harga jebol melewati batas toleransi modal Paus (tren rusak)
+    const invThresh = (smCfg.invalidationThresholdPct ?? 1.2) / 100;
+    const refPrice = (whaleAvg && whaleAvg > 0) ? whaleAvg : signal.currentPrice;
+    const invalidationPrice = isLong ? refPrice * (1 - invThresh) : refPrice * (1 + invThresh);
+
+    const ttlMins = smCfg.signalTtlMinutes || 30;
+    const expiresAt = Date.now() + ttlMins * 60 * 1000;
+
+    // Cek apakah harga saat ini sudah berada di area diskon
+    const inDiscount = isLong ? (signal.currentPrice <= targetEntryPrice) : (signal.currentPrice >= targetEntryPrice);
+    const initialStatus: 'ARMED' | 'WAITING_DISCOUNT' = inDiscount ? 'ARMED' : 'WAITING_DISCOUNT';
+
+    const watchItem: PendingSignalWatchlistItem = {
+      id: `${symbol}-${Date.now()}`,
+      symbol,
+      side: signal.side,
+      signalDriver: effectiveDriver,
+      signalPrice: signal.currentPrice,
+      whaleAvgEntry: whaleAvg,
+      atr: signal.atr,
+      targetEntryPrice,
+      invalidationPrice,
+      status: initialStatus,
+      lowestPrice: isLong ? signal.currentPrice : undefined,
+      highestPrice: !isLong ? signal.currentPrice : undefined,
+      currentPrice: signal.currentPrice,
+      currentReboundPct: 0,
+      targetReboundPct: smCfg.reboundThresholdPct ?? 0.15,
+      createdAt: Date.now(),
+      expiresAt,
+      armedAt: inDiscount ? Date.now() : undefined,
+      reason: signal.reason || 'Smart Money Signal',
+      anchorType,
+      signal,
+    };
+
+    this.pendingSignals.set(symbol, watchItem);
+
+    const anchorDesc = anchorType === 'WHALE_VWAP'
+      ? `Modal Paus $${formatCryptoPrice(whaleAvg!)} (±${smCfg.whaleMaxPremiumPct ?? 0.15}%)`
+      : anchorType === 'ATR_OFFSET'
+      ? `ATR Offset $${formatCryptoPrice(signal.atr || 0)} (x${smCfg.atrPullbackMultiplier ?? 0.4})`
+      : `Diskon -${smCfg.pullbackMinPct || 0.4}%`;
+
+    if (initialStatus === 'ARMED') {
       logger.log(
         'SNIPER',
-        `${driverTag} ${symbol} terdeteksi: Arah ${signal.side} | ${signal.reason} | Harga Awal: $${formatCryptoPrice(signal.currentPrice)}. Menyiapkan eksekusi...`,
+        `🎯 [PULLBACK ARMED] ${symbol} ${signal.side}: Harga sudah di area diskon target $${formatCryptoPrice(targetEntryPrice)} (${anchorDesc})! Mengaktifkan Trailing Rebound (+${watchItem.targetReboundPct}%)...`,
         symbol
       );
-
-      // Konfirmasi Pullback Retest Mikro (Tunggu Pantulan Diskon Sebelum Eksekusi)
-      if (smCfg.pullbackConfirmationEnabled !== false && (smCfg.pullbackMinPct || 0) > 0) {
-        const minPullback = smCfg.pullbackMinPct;
-        const maxWaitSec = smCfg.pullbackMaxWaitSeconds || 12;
-        const startTime = Date.now();
-        const deadline = startTime + maxWaitSec * 1000;
-        let confirmed = false;
-
-        logger.log(
-          'INFO',
-          `🎯 [PULLBACK WAIT] ${symbol}: Menunggu koreksi/pantulan min ${minPullback}% (Maks ${maxWaitSec}s) sebelum eksekusi ${signal.side}...`,
-          symbol
-        );
-
-        while (Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 600));
-          const livePrice = this.scanner.getCurrentPrice(symbol);
-          if (livePrice > 0) {
-            if (signal.side === 'SHORT') {
-              const bouncePct = ((livePrice - signal.currentPrice) / signal.currentPrice) * 100;
-              if (bouncePct >= minPullback) {
-                confirmed = true;
-                signal.currentPrice = livePrice;
-                logger.log(
-                  'INFO',
-                  `✅ [PULLBACK CONFIRMED] ${symbol}: Harga memantul naik +${bouncePct.toFixed(2)}% ke $${formatCryptoPrice(livePrice)}. Eksekusi SHORT di harga puncak diskon!`,
-                  symbol
-                );
-                break;
-              }
-            } else {
-              const dipPct = ((signal.currentPrice - livePrice) / signal.currentPrice) * 100;
-              if (dipPct >= minPullback) {
-                confirmed = true;
-                signal.currentPrice = livePrice;
-                logger.log(
-                  'INFO',
-                  `✅ [PULLBACK CONFIRMED] ${symbol}: Harga koreksi turun -${dipPct.toFixed(2)}% ke $${formatCryptoPrice(livePrice)}. Eksekusi LONG di harga dasar diskon!`,
-                  symbol
-                );
-                break;
-              }
-            }
-          }
-        }
-
-        if (!confirmed) {
-          const latestPrice = this.scanner.getCurrentPrice(symbol);
-          if (latestPrice > 0) signal.currentPrice = latestPrice;
-        }
-      }
-
-      await this.deploySmartMoneyPosition(signal);
-    } catch (err: any) {
-      logger.log('ERROR', `❌ [SMART MONEY DEPLOY ERROR] ${symbol}: ${err?.message || err}`, symbol);
-    } finally {
-      this.deployingSymbols.delete(symbol);
+    } else {
+      logger.log(
+        'INFO',
+        `📋 [2-STAGE WATCHLIST] ${symbol} ${signal.side} masuk antrean jemputan. Menunggu diskon ke $${formatCryptoPrice(targetEntryPrice)} (${anchorDesc}) | Invalidation: $${formatCryptoPrice(invalidationPrice)} | Sisa TTL: ${ttlMins}m`,
+        symbol
+      );
     }
+
+    this.broadcastStatus();
   }
 
   private async deploySmartMoneyPosition(signal: SmartMoneySignal) {

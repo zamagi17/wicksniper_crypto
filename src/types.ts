@@ -125,6 +125,7 @@ export interface BotConfig {
   smartMoney?: SmartMoneyConfig;
   momentumLong?: MomentumLongConfig;
   autoTuner?: AutoTunerConfig;
+  schedule?: TradingScheduleConfig;
   security?: {
     password?: string;
   };
@@ -132,6 +133,37 @@ export interface BotConfig {
     port: number;
   };
 }
+
+export interface TradingScheduleConfig {
+  enabled: boolean;
+  blockWeekends: boolean;
+  fridayCutoffTime: string; // e.g. '23:00' Batas akhir Jumat malam sesi AS
+  sundayNightOpen: boolean; // Izinkan re-open Minggu malam (default: false)
+  sundayNightStartTime: string; // '22:00'
+  primeTime1Enabled: boolean;
+  primeTime1Start: string; // '14:30'
+  primeTime1End: string;   // '17:00'
+  primeTime1Name: string;  // 'Prime Time 1 (Sore - Sesi London)'
+  primeTime2Enabled: boolean;
+  primeTime2Start: string; // '19:30'
+  primeTime2End: string;   // '23:30'
+  primeTime2Name: string;  // 'Prime Time 2 (Malam - Utama NY Open)'
+  primeTime3Enabled: boolean;
+  primeTime3Start: string; // '07:00'
+  primeTime3End: string;   // '09:30'
+  primeTime3Name: string;  // 'Prime Time 3 (Pagi - Sesi Asia)'
+}
+
+export interface ScheduleStatus {
+  enabled: boolean;
+  inWindow: boolean;
+  currentWibTime: string;
+  currentDayWib: string;
+  activeSessionName?: string;
+  nextSessionText?: string;
+  reason?: string;
+}
+
 
 export interface SmartMoneyConfig {
   enabled: boolean;
@@ -156,6 +188,13 @@ export interface SmartMoneyConfig {
   pullbackConfirmationEnabled?: boolean; // Menunggu pantulan/diskon sebelum eksekusi
   pullbackMinPct: number;      // Pullback minimal sebelum eksekusi (%)
   pullbackMaxWaitSeconds: number; // Batas tunggu konfirmasi pullback (detik)
+  executionMode?: 'DIRECT_MARKET' | 'TWO_STAGE_PULLBACK'; // Mode eksekusi sinyal (default: 'TWO_STAGE_PULLBACK')
+  pullbackTargetAnchor?: 'WHALE_VWAP_OR_ATR' | 'WHALE_ONLY' | 'ATR_ONLY' | 'PERCENT_ONLY'; // Patokan target diskon
+  whaleMaxPremiumPct?: number; // Toleransi jemputan di dekat modal paus (%, default: 0.15%)
+  atrPullbackMultiplier?: number; // Pengali ATR 15m untuk jarak diskon jika patokan ATR digunakan (default: 0.4x)
+  reboundThresholdPct?: number; // Konfirmasi pantulan anti-pisau jatuh sebelum eksekusi (%, default: 0.15%)
+  signalTtlMinutes?: number; // Batas waktu tunggu diskon sebelum sinyal expired (menit, default: 30)
+  invalidationThresholdPct?: number; // Toleransi jebol di bawah modal paus sebelum sinyal dibatalkan (%, default: 1.2%)
   entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA
   layerSpacingPct: number;     // Jarak antar layer jika entryLayers > 1
   marginUsdt?: number;         // Modal margin per posisi (USDT)
@@ -225,6 +264,30 @@ export interface BtcTrendStatus {
   deadbandPct?: number;
   inheritSidewaysTrend?: boolean;
   updatedAt?: number;
+}
+
+export interface PendingSignalWatchlistItem {
+  id: string;
+  symbol: string;
+  side: 'SHORT' | 'LONG';
+  signalDriver?: string;
+  signalPrice: number;
+  whaleAvgEntry?: number;
+  atr?: number;
+  targetEntryPrice: number;
+  invalidationPrice: number;
+  status: 'WAITING_DISCOUNT' | 'ARMED' | 'TRIGGERED' | 'EXPIRED' | 'INVALIDATED';
+  lowestPrice?: number;
+  highestPrice?: number;
+  currentPrice: number;
+  currentReboundPct?: number;
+  targetReboundPct: number;
+  createdAt: number;
+  expiresAt: number;
+  armedAt?: number;
+  reason: string;
+  anchorType: 'WHALE_VWAP' | 'ATR_OFFSET' | 'PERCENT';
+  signal: SmartMoneySignal;
 }
 
 export interface SmartMoneySignal {
@@ -591,6 +654,8 @@ export interface EngineStatus {
   orderCount10s?: number;
   wsConnected?: boolean;
   btcTrendStatus?: BtcTrendStatus;
+  scheduleStatus?: ScheduleStatus;
+  pendingSignals?: PendingSignalWatchlistItem[];
 }
 
 export interface LogEntry {

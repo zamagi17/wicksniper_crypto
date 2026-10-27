@@ -92,6 +92,10 @@
       </div>
 
       <div id="mode-badge" class="badge-mode paper">🧪 PAPER TRADING</div>
+      <div id="schedule-badge" class="badge-schedule active" onclick="openSettingsModal()" title="Klik untuk atur Jadwal Operasional">
+        <span class="sched-dot active"></span>
+        <span id="schedule-badge-text">⏰ Memuat Jadwal...</span>
+      </div>
 
       <button id="btn-toggle-engine" class="btn btn-primary" onclick="toggleEngine()">
         <span id="btn-engine-icon">▶</span>
@@ -252,6 +256,21 @@
           <div id="cooldown-strip" style="display: none; padding: 8px 16px; background: rgba(255, 170, 0, 0.08); border-bottom: 1px solid rgba(255, 170, 0, 0.2); font-size: 12px; color: var(--color-orange, #ff9f0a); align-items: center; gap: 8px; flex-wrap: wrap;">
             <span style="font-weight: 700;">⏳ Jeda Cooldown Antar Trade:</span>
             <span id="cooldown-list-tags" style="display: flex; gap: 6px; flex-wrap: wrap;"></span>
+          </div>
+
+          <!-- PENDING 2-STAGE SIGNALS WATCHLIST (THE GOLDEN TRIAD) -->
+          <div id="pending-watchlist-wrapper" style="display: none; padding: 12px 16px; border-bottom: 1px solid var(--border-color); background: rgba(56, 189, 248, 0.03);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 16px;">🎯</span>
+                <span style="font-weight: 700; color: #38bdf8; font-size: 13.5px;">Pending Watchlist Sinyal (Diskon & Rebound Trigger)</span>
+                <span class="badge-tag" id="pending-count-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">0 Sinyal</span>
+              </div>
+              <small style="color: #94a3b8; font-size: 11px;">Mencegah Falling Knife • Auto Trigger Saat Rebound</small>
+            </div>
+            <div id="pending-watchlist-container" class="pending-watchlist-list" style="display: flex; flex-direction: column; gap: 10px;">
+              <!-- Dynamic pending cards inserted here -->
+            </div>
           </div>
 
           <div id="active-positions-container" class="positions-list">
@@ -452,6 +471,13 @@
         <div class="drawer-mode-indicator">
           <span>Mode Berjalan:</span>
           <span id="mobile-mode-chip" class="badge-mode paper">🧪 PAPER TRADING</span>
+        </div>
+        <div class="drawer-mode-indicator" style="margin-top: 8px;">
+          <span>Jadwal Operasional:</span>
+          <span id="mobile-schedule-chip" class="badge-schedule active" onclick="closeMobileDrawer(); openSettingsModal();">
+            <span class="sched-dot active"></span>
+            <span id="mobile-schedule-chip-text">⏰ Memuat...</span>
+          </span>
         </div>
 
         <div class="drawer-menu-grid">
@@ -774,21 +800,66 @@
             </div>
           </div>
 
-          <div class="form-group" style="grid-column: span 2; background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
-            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--color-cyan); margin: 0; cursor: pointer;">
-              <input type="checkbox" id="cfg-sm-pullback-enabled" style="width: 16px; height: 16px; accent-color: var(--color-cyan);" checked onchange="toggleSmPullbackInput()">
-              <span>🎯 Konfirmasi Pullback Retest Mikro (Tunggu Pantulan Diskon Sebelum Eksekusi) <span class="badge-tag badge-smart-money">Smart Money</span></span>
-            </label>
-            <div id="cfg-sm-pullback-box" style="display: flex; gap: 14px; margin-top: 8px;">
-              <div style="flex: 1;">
-                <label style="font-size: 11px; margin-bottom: 2px;">Min Pantulan / Retest (%)</label>
-                <input type="number" id="cfg-sm-pullback-min" min="0.1" max="2.0" step="0.05" class="form-control" placeholder="0.3" style="padding: 4px 8px;">
-                <small class="form-hint">Tunggu harga memantul naik +0.3% untuk Short, atau turun -0.3% untuk Long.</small>
+          <!-- 2-STAGE EXECUTION & PULLBACK CONFIRMATION (THE GOLDEN TRIAD) -->
+          <div class="form-group" style="grid-column: span 2; background: linear-gradient(135deg, rgba(0, 240, 255, 0.06), rgba(56, 189, 248, 0.03)); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: var(--radius-sm); padding: 12px 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--color-cyan); margin: 0; cursor: pointer;">
+                <input type="checkbox" id="cfg-sm-pullback-enabled" style="width: 16px; height: 16px; accent-color: var(--color-cyan);" checked onchange="toggleSmPullbackInput()">
+                <span>🎯 Eksekusi 2-Stage & Pullback Retest Mikro (The Golden Triad)</span>
+              </label>
+              <span class="badge-tag" style="background: rgba(0, 240, 255, 0.15); color: var(--color-cyan); border: 1px solid rgba(0, 240, 255, 0.3);">Anti-Falling Knife</span>
+            </div>
+            
+            <div id="cfg-sm-pullback-box" style="display: flex; flex-direction: column; gap: 12px; margin-top: 10px;">
+              <!-- Execution Mode & Target Anchor -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                <div>
+                  <label style="font-size: 11px; margin-bottom: 2px;">Mode Eksekusi Sinyal</label>
+                  <select id="cfg-sm-execution-mode" class="form-control" style="font-size: 12.5px; padding: 5px 8px;">
+                    <option value="TWO_STAGE_PULLBACK" selected>🎯 2-Stage (Watchlist -> Rebound Trigger - Rekomendasi)</option>
+                    <option value="DIRECT_MARKET">⚡ Direct Market Order (Langsung Tembak)</option>
+                  </select>
+                  <small class="form-hint">2-Stage: Antre di pending watchlist hingga harga terdiskon lalu rebound.</small>
+                </div>
+                <div>
+                  <label style="font-size: 11px; margin-bottom: 2px;">Patokan Target Jemputan (Anchor)</label>
+                  <select id="cfg-sm-target-anchor" class="form-control" style="font-size: 12.5px; padding: 5px 8px;">
+                    <option value="WHALE_VWAP_OR_ATR" selected>🐋 Whale VWAP (Fallback ATR 15m) - Optimal</option>
+                    <option value="WHALE_ONLY">🐋 Modal Paus (Whale VWAP) Saja</option>
+                    <option value="ATR_ONLY">📐 ATR 15m Offset Saja</option>
+                    <option value="PERCENT_ONLY">📊 Persentase Statis Saja</option>
+                  </select>
+                  <small class="form-hint">Level harga termurah/tertinggi yang ditunggu sebelum arming.</small>
+                </div>
               </div>
-              <div style="flex: 1;">
-                <label style="font-size: 11px; margin-bottom: 2px;">Maks Waktu Tunggu (Detik)</label>
-                <input type="number" id="cfg-sm-pullback-wait" min="3" max="60" step="1" class="form-control" placeholder="12" style="padding: 4px 8px;">
-                <small class="form-hint">Timeout jika harga terus bergerak (Standar: 12 detik).</small>
+
+              <!-- Parameter Golden Triad Grid -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; background: rgba(0, 0, 0, 0.2); padding: 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                <div>
+                  <label style="font-size: 10.5px; margin-bottom: 2px;">Toleransi Modal Paus (%)</label>
+                  <input type="number" id="cfg-sm-whale-premium" min="0.05" max="1.5" step="0.05" class="form-control" placeholder="0.15" style="padding: 4px 8px;">
+                  <small class="form-hint">Maks +0.15% dr modal paus.</small>
+                </div>
+                <div>
+                  <label style="font-size: 10.5px; margin-bottom: 2px;">Pengali ATR Pullback (x)</label>
+                  <input type="number" id="cfg-sm-atr-pullback-mult" min="0.1" max="1.5" step="0.05" class="form-control" placeholder="0.4" style="padding: 4px 8px;">
+                  <small class="form-hint">Diskon = ATR × 0.4.</small>
+                </div>
+                <div>
+                  <label style="font-size: 10.5px; margin-bottom: 2px;">Konfirmasi Rebound (%)</label>
+                  <input type="number" id="cfg-sm-rebound-pct" min="0.05" max="1.0" step="0.05" class="form-control" placeholder="0.15" style="padding: 4px 8px;">
+                  <small class="form-hint">Pantulan mikron +0.15% (trigger).</small>
+                </div>
+                <div>
+                  <label style="font-size: 10.5px; margin-bottom: 2px;">Batas Waktu Tunggu / TTL (Menit)</label>
+                  <input type="number" id="cfg-sm-signal-ttl" min="5" max="120" step="1" class="form-control" placeholder="30" style="padding: 4px 8px;">
+                  <small class="form-hint">Expired jika tidak disentuh dlm 30m.</small>
+                </div>
+                <div>
+                  <label style="font-size: 10.5px; margin-bottom: 2px;">Invalidasi Jebol (%)</label>
+                  <input type="number" id="cfg-sm-invalidation-pct" min="0.5" max="5.0" step="0.1" class="form-control" placeholder="1.2" style="padding: 4px 8px;">
+                  <small class="form-hint">Batal jika jebol &gt; 1.2% modal.</small>
+                </div>
               </div>
             </div>
           </div>
@@ -1868,6 +1939,109 @@
             <small class="form-hint" style="margin: 0;">Menguji token bot dan mengirimkan pesan tes ke Chat ID Anda.</small>
           </div>
           <div id="telegram-test-result" style="display: none; margin-top: 10px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;"></div>
+        </div>
+
+        <!-- TRADING OPERATIONAL SCHEDULE & PRIME TIME FILTER SECTION -->
+        <div class="form-row schedule-config-card" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+          <div class="form-group" style="grid-column: span 2; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; color: #38bdf8; margin: 0; cursor: pointer;">
+              <input type="checkbox" id="cfg-schedule-enabled" style="width: 18px; height: 18px; accent-color: #38bdf8;" checked>
+              <span>🗓️ Filter Jadwal Operasional (Prime Time Only)</span>
+            </label>
+            <span class="badge-tag" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">Win Rate & Liquidity Optimizer</span>
+          </div>
+
+          <div class="form-group" style="grid-column: span 2;">
+            <small class="form-hint" style="color: #94a3b8; line-height: 1.5;">
+              Saat aktif, bot <b>HANYA membuka posisi baru</b> pada jam-jam likuiditas tinggi (Prime Time). Di luar jam tersebut (pasar sepi & rawan whipsaw), bot standby dan <b>posisi floating yang sudah berjalan tetap dijaga ketat hingga Take Profit/Stop Loss</b>.
+            </small>
+            <div id="schedule-status-preview-box" style="margin-top: 10px; padding: 10px 14px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); font-size: 12.5px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+              <span id="schedule-preview-time" style="color: #e2e8f0; font-weight: 600;">⏱️ Waktu Server: Memuat...</span>
+              <span id="schedule-preview-status" class="badge-schedule active">🟢 Sesi Aktif</span>
+            </div>
+          </div>
+
+          <!-- PRIME TIME 1: SORE (LONDON) -->
+          <div class="form-group" style="grid-column: span 2;">
+            <div class="prime-time-row">
+              <label style="display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: #f1f5f9; cursor: pointer;">
+                <input type="checkbox" id="cfg-schedule-p1-enabled" style="width: 16px; height: 16px; accent-color: #38bdf8;" checked>
+                <span>🇬🇧 Prime Time 1 (Sore - Awal London)</span>
+              </label>
+              <div>
+                <small style="color: #94a3b8; font-size: 11px; display: block;">Mulai (WIB):</small>
+                <input type="text" id="cfg-schedule-p1-start" class="form-control" style="padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center;" value="14:30" placeholder="14:30">
+              </div>
+              <div>
+                <small style="color: #94a3b8; font-size: 11px; display: block;">Selesai (WIB):</small>
+                <input type="text" id="cfg-schedule-p1-end" class="form-control" style="padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center;" value="17:00" placeholder="17:00">
+              </div>
+            </div>
+          </div>
+
+          <!-- PRIME TIME 2: MALAM (NEW YORK OPEN) -->
+          <div class="form-group" style="grid-column: span 2;">
+            <div class="prime-time-row">
+              <label style="display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: #f1f5f9; cursor: pointer;">
+                <input type="checkbox" id="cfg-schedule-p2-enabled" style="width: 16px; height: 16px; accent-color: #38bdf8;" checked>
+                <span>🇺🇸 Prime Time 2 (Malam - Utama NY Open)</span>
+              </label>
+              <div>
+                <small style="color: #94a3b8; font-size: 11px; display: block;">Mulai (WIB):</small>
+                <input type="text" id="cfg-schedule-p2-start" class="form-control" style="padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center;" value="19:30" placeholder="19:30">
+              </div>
+              <div>
+                <small style="color: #94a3b8; font-size: 11px; display: block;">Selesai (WIB):</small>
+                <input type="text" id="cfg-schedule-p2-end" class="form-control" style="padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center;" value="23:30" placeholder="23:30">
+              </div>
+            </div>
+          </div>
+
+          <!-- PRIME TIME 3: PAGI (ASIA & DAILY CANDLE) -->
+          <div class="form-group" style="grid-column: span 2;">
+            <div class="prime-time-row">
+              <label style="display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: #f1f5f9; cursor: pointer;">
+                <input type="checkbox" id="cfg-schedule-p3-enabled" style="width: 16px; height: 16px; accent-color: #38bdf8;" checked>
+                <span>🌏 Prime Time 3 (Pagi - Asia & Candle Baru)</span>
+              </label>
+              <div>
+                <small style="color: #94a3b8; font-size: 11px; display: block;">Mulai (WIB):</small>
+                <input type="text" id="cfg-schedule-p3-start" class="form-control" style="padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center;" value="07:00" placeholder="07:00">
+              </div>
+              <div>
+                <small style="color: #94a3b8; font-size: 11px; display: block;">Selesai (WIB):</small>
+                <input type="text" id="cfg-schedule-p3-end" class="form-control" style="padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center;" value="09:30" placeholder="09:30">
+              </div>
+            </div>
+          </div>
+
+          <!-- JUMAT MALAM & AKHIR PEKAN GUARDS -->
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #fb7185; cursor: pointer;">
+              <input type="checkbox" id="cfg-schedule-block-weekends" style="width: 16px; height: 16px; accent-color: #fb7185;" checked>
+              <span>🏖️ Blokir Akhir Pekan (Sabtu & Minggu)</span>
+            </label>
+            <small class="form-hint">Mencegah entry baru saat likuiditas tipis & sering terjadi stop loss sweep market maker.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Batas Akhir Jumat Malam (WIB)</label>
+            <input type="text" id="cfg-schedule-friday-cutoff" class="form-control" value="23:00" placeholder="23:00">
+            <small class="form-hint">Institusi tutup buku mingguan di Jumat malam. Di atas jam ini tidak ada posisi baru.</small>
+          </div>
+
+          <div class="form-group" style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: rgba(255, 255, 255, 0.02); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid rgba(255, 255, 255, 0.05);">
+            <div>
+              <label style="display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: #a5b4fc; cursor: pointer;">
+                <input type="checkbox" id="cfg-schedule-sunday-open" style="width: 16px; height: 16px; accent-color: #a5b4fc;">
+                <span>🌙 Izinkan Re-Open Minggu Malam (22:00 WIB+)</span>
+              </label>
+              <small class="form-hint" style="margin-top: 3px; display: block;">Opsional: Buka kembali bot saat likuiditas Asia/awal pekan mulai masuk pada Minggu malam.</small>
+            </div>
+            <div style="width: 110px;">
+              <input type="text" id="cfg-schedule-sunday-time" class="form-control" style="padding: 4px 8px; font-size: 13px; text-align: center;" value="22:00" placeholder="22:00">
+            </div>
+          </div>
         </div>
 
         <!-- RISK MANAGEMENT & CIRCUIT BREAKER SECTION -->
