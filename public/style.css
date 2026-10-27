@@ -383,6 +383,29 @@ body {
   backdrop-filter: blur(8px);
 }
 
+.sched-text-full {
+  display: inline;
+}
+
+.sched-text-short {
+  display: none;
+}
+
+@media (max-width: 1280px) {
+  .sched-text-full {
+    display: none !important;
+  }
+  .sched-text-short {
+    display: inline !important;
+  }
+}
+
+@media (max-width: 1150px) {
+  .subtitle {
+    display: none !important;
+  }
+}
+
 .badge-schedule:hover {
   transform: translateY(-1px);
 }
@@ -2097,7 +2120,57 @@ body {
 /* --- TABLET & IPAD OPTIMIZATIONS (768px to 1023px) --- */
 @media (min-width: 768px) and (max-width: 1023px) {
   .navbar {
-    padding: calc(12px + var(--sat)) calc(18px + var(--sar)) 12px calc(18px + var(--sal));
+    padding: calc(10px + var(--sat)) calc(14px + var(--sar)) 10px calc(14px + var(--sal));
+    gap: 8px;
+  }
+
+  .nav-brand {
+    gap: 8px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .logo-badge {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .brand-text h1 {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .brand-text .badge-hft {
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+
+  .subtitle {
+    display: none !important;
+  }
+
+  .nav-actions {
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .badge-mode {
+    font-size: 11px;
+    padding: 4px 9px;
+  }
+
+  .badge-schedule {
+    font-size: 11px;
+    padding: 4px 9px;
+    max-width: 125px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
   }
 
   .nav-btn-desktop {
@@ -2106,6 +2179,11 @@ body {
 
   .btn-mobile-menu {
     display: inline-flex !important;
+    flex-shrink: 0;
+  }
+
+  #btn-toggle-engine {
+    flex-shrink: 0;
   }
 
   .container {
@@ -2148,7 +2226,7 @@ body {
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow-x: clip;
   }
 
   .nav-brand {
@@ -2167,6 +2245,7 @@ body {
 
   .brand-text {
     min-width: 0;
+    flex-shrink: 1;
   }
 
   .brand-text h1 {
@@ -2177,6 +2256,7 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 105px;
   }
 
   .brand-text .badge-hft {
@@ -2193,6 +2273,7 @@ body {
     align-items: center;
     gap: 5px;
     flex-shrink: 0;
+    min-width: 0;
   }
 
   .nav-btn-desktop {
@@ -2207,9 +2288,27 @@ body {
     padding: 3px 6px;
     font-size: 9px;
     gap: 4px;
+    flex-shrink: 0;
   }
 
   .status-pill .dot {
+    width: 5px;
+    height: 5px;
+  }
+
+  .badge-schedule {
+    padding: 3px 7px;
+    font-size: 10px;
+    gap: 4px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .sched-dot {
     width: 5px;
     height: 5px;
   }
@@ -2219,6 +2318,8 @@ body {
     font-size: 10.5px;
     gap: 3px;
     border-radius: 6px;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .btn-mobile-menu {
@@ -2227,6 +2328,8 @@ body {
     font-size: 11px;
     border-radius: 6px;
     gap: 3px;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .btn-mobile-menu .btn-text {
@@ -2593,6 +2696,33 @@ body {
 }
 
 @media (max-width: 480px) {
+  .badge-schedule {
+    max-width: 82px;
+    padding: 2.5px 5px;
+    font-size: 9px;
+    gap: 3px;
+  }
+
+  .brand-text h1 {
+    max-width: 85px;
+    font-size: 11.5px;
+  }
+
+  .status-pill {
+    padding: 2.5px 5px;
+    font-size: 8.5px;
+  }
+
+  #btn-toggle-engine {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .btn-mobile-menu {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+
   .login-card {
     padding: 22px 16px 18px;
     border-radius: 16px;

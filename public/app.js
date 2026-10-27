@@ -795,7 +795,7 @@ function renderStatus(status) {
       badgeClass += ' disabled';
       dotClass += ' disabled';
       label = `⚡ 24/7 (Jadwal Nonaktif)`;
-      shortLabel = `24/7 (Bebas)`;
+      shortLabel = `⚡ 24/7`;
     } else if (sched.inWindow) {
       badgeClass += ' active';
       dotClass += ' active';
@@ -806,7 +806,7 @@ function renderStatus(status) {
       badgeClass += ' weekend';
       dotClass += ' weekend';
       label = `🏖️ Weekend Standby (${sched.currentWibTime}) • Next: ${sched.nextSessionText || '-'}`;
-      shortLabel = `🏖️ Weekend Standby`;
+      shortLabel = `🏖️ Weekend`;
     } else {
       badgeClass += ' standby';
       dotClass += ' standby';
@@ -816,10 +816,12 @@ function renderStatus(status) {
 
     if (schedBadge) {
       schedBadge.className = badgeClass;
-      schedBadge.innerHTML = `<span class="${dotClass}"></span><span id="schedule-badge-text">${label}</span>`;
+      schedBadge.title = `Jadwal: ${label}\nKlik untuk atur Jadwal Operasional`;
+      schedBadge.innerHTML = `<span class="${dotClass}"></span><span id="schedule-badge-text"><span class="sched-text-full">${label}</span><span class="sched-text-short">${shortLabel}</span></span>`;
     }
     if (mobileSchedChip) {
       mobileSchedChip.className = badgeClass;
+      mobileSchedChip.title = `Jadwal: ${label}`;
       mobileSchedChip.innerHTML = `<span class="${dotClass}"></span><span id="mobile-schedule-chip-text">${shortLabel}</span>`;
     }
     if (previewTime) {
