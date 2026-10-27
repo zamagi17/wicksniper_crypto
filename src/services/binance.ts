@@ -22,7 +22,7 @@ export class BinanceFuturesClient {
   private isTestnet: boolean = false;
   private restBaseUrl: string = 'https://fapi.binance.com';
   private wsDomainIndex: number = 0;
-  private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me'];
+  private wsDomains: string[] = ['fstream.binance.com', 'stream.binancefuture.com', 'fstream.binance.me'];
   private wsUrl: string = `wss://${this.wsDomains[0]}/market/ws/!ticker@arr`;
   private currentDataSource: 'WEBSOCKET' | 'POLLING' = 'WEBSOCKET';
   private wsClient: WebSocket | null = null;
@@ -31,6 +31,7 @@ export class BinanceFuturesClient {
   private precisions: Map<string, SymbolPrecision> = new Map();
   private isWsConnected: boolean = false;
   private wsReconnectTimer: NodeJS.Timeout | null = null;
+  private wsReconnectAttempts: number = 0;
   private wsWatchdogTimer: NodeJS.Timeout | null = null;
   private lastWsMessageAt: number = 0;
   private lastWsCloseLog: number = 0;
@@ -100,56 +101,70 @@ export class BinanceFuturesClient {
   private dohCache: Map<string, string> = new Map();
 
   private async resolveHostViaDoH(hostname: string): Promise<string> {
-    if (this.dohCache.has(hostname)) {
-      return this.dohCache.get(hostname)!;
+    const cleanHost = hostname.replace(/\.$/, '');
+    if (this.dohCache.has(cleanHost)) {
+      return this.dohCache.get(cleanHost)!;
     }
+    // Coba Cloudflare DoH
     try {
-      const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
+      const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${cleanHost}&type=A`, {
         headers: { accept: 'application/dns-json' },
         timeout: 4000,
       });
       const answers = res.data?.Answer || [];
       for (const a of answers) {
         if (a.type === 1 && a.data) {
-          this.dohCache.set(hostname, a.data);
+          this.dohCache.set(cleanHost, a.data);
           return a.data;
         }
       }
     } catch {}
-    const fallback = hostname.includes('www.binance') ? '18.244.51.24' : (hostname.includes('testnet') ? '18.64.37.31' : '35.77.171.26');
-    this.dohCache.set(hostname, fallback);
-    return fallback;
+    // Fallback: Google DoH jika Cloudflare gagal
+    try {
+      const res = await axios.get(`https://dns.google/resolve?name=${cleanHost}&type=A`, {
+        timeout: 4000,
+      });
+      const answers = res.data?.Answer || [];
+      for (const a of answers) {
+        if (a.type === 1 && a.data) {
+          this.dohCache.set(cleanHost, a.data);
+          return a.data;
+        }
+      }
+    } catch {}
+    return '';
   }
 
   private async getOrCreateDohAgent(): Promise<https.Agent> {
     if (this.dohAgent) return this.dohAgent;
 
-    const fapiIp = await this.resolveHostViaDoH(this.isTestnet ? 'testnet.binancefuture.com' : 'fapi.binance.com');
-    const fstreamIp = await this.resolveHostViaDoH(this.isTestnet ? 'stream.binancefuture.com' : 'fstream.binance.com');
-    const wwwBinanceIp = await this.resolveHostViaDoH('www.binance.com');
+    // Pre-warm DNS cache untuk domain futures utama
+    await Promise.allSettled([
+      this.resolveHostViaDoH(this.isTestnet ? 'testnet.binancefuture.com' : 'fapi.binance.com'),
+      this.resolveHostViaDoH(this.isTestnet ? 'stream.binancefuture.com' : 'fstream.binance.com'),
+      this.resolveHostViaDoH('stream.binancefuture.com'),
+      this.resolveHostViaDoH('fstream.binance.me'),
+      this.resolveHostViaDoH('www.binance.com'),
+    ]);
 
     this.dohAgent = new https.Agent({
       keepAlive: true,
-      lookup: (hostname, options, callback) => {
+      lookup: async (hostname, options, callback) => {
         const cb = typeof options === 'function' ? options : callback;
         const opt = typeof options === 'object' ? options : {};
-        let ip = fapiIp;
-        if (hostname === 'www.binance.com') {
-          ip = wwwBinanceIp;
-        } else if (hostname.includes('stream') || hostname.includes('fstream')) {
-          ip = fstreamIp;
-        } else if (hostname.includes('binance')) {
-          ip = fapiIp;
-        }
-        if (hostname.includes('binance')) {
-          if (opt && (opt as any).all) {
-            cb(null, [{ address: ip, family: 4 }] as any);
-          } else {
-            cb(null, ip, 4);
+        const cleanHost = hostname.replace(/\.$/, '');
+        try {
+          if (cleanHost.includes('binance')) {
+            const ip = await this.resolveHostViaDoH(cleanHost);
+            if (ip) {
+              if (opt && (opt as any).all) {
+                return cb(null, [{ address: ip, family: 4 }] as any);
+              }
+              return cb(null, ip, 4);
+            }
           }
-        } else {
-          dns.lookup(hostname, options, cb);
-        }
+        } catch {}
+        return dns.lookup(hostname, options, cb);
       },
     });
 
@@ -1200,6 +1215,7 @@ export class BinanceFuturesClient {
 
       this.wsClient.on('open', () => {
         this.isWsConnected = true;
+        this.wsReconnectAttempts = 0;
         this.lastWsMessageAt = Date.now();
         if (this.wsReconnectTimer) {
           clearTimeout(this.wsReconnectTimer);
@@ -1249,6 +1265,12 @@ export class BinanceFuturesClient {
           this.wsWatchdogTimer = null;
         }
         if (this.currentDataSource === 'POLLING') return;
+
+        this.wsReconnectAttempts++;
+        if (this.wsReconnectAttempts >= 2) {
+          this.rotateWsDomain();
+          this.wsReconnectAttempts = 0;
+        }
 
         const now = Date.now();
         if (code !== 1000 && now - this.lastWsCloseLog > 10000) {
