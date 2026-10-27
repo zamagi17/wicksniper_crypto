@@ -821,16 +821,30 @@
               <input type="checkbox" id="cfg-sm-smart-trader-filter" style="width: 16px; height: 16px; accent-color: #c084fc;" checked onchange="toggleSmSmartTraderInput()">
               <span>🧠 Filter Konfluensi & Anti-Ekstrem <span class="badge-tag badge-smart-money">Smart Money</span></span>
             </label>
-            <div id="cfg-sm-smart-trader-box" style="display: flex; gap: 14px; margin-top: 8px;">
-              <div id="grp-sm-smart-trader-min" style="flex: 1; transition: opacity 0.2s;">
+            <div id="cfg-sm-smart-trader-box" style="display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap;">
+              <div id="grp-sm-smart-trader-min" style="flex: 1; min-width: 140px; transition: opacity 0.2s;">
                 <label style="font-size: 11px; margin-bottom: 2px;">Min. % Rasio Searah Smart Trader (%)</label>
                 <input type="number" id="cfg-sm-smart-trader-min-ratio" min="20" max="80" step="1" class="form-control" placeholder="30" style="padding: 4px 8px;">
                 <small class="form-hint">Saat mode Paus: batas minimal Smart Trader searah (Standar: 30%).</small>
               </div>
-              <div id="grp-sm-min-whale" style="flex: 1; transition: opacity 0.2s;">
-                <label style="font-size: 11px; margin-bottom: 2px;">Min. % Rasio Searah Paus / Anti-Ekstrem (%)</label>
-                <input type="number" id="cfg-sm-min-whale-ratio" min="10" max="60" step="1" class="form-control" placeholder="30" style="padding: 4px 8px;">
-                <small class="form-hint">Saat mode Smart Trader: cegah entry jika Paus lawan > 70% (min searah: 30%).</small>
+              <div id="grp-sm-min-whale" style="flex: 2; min-width: 280px; display: flex; flex-direction: column; gap: 6px; transition: opacity 0.2s;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <span id="lbl-sm-min-whale-header" style="font-size: 11px; font-weight: 600;">🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem</span>
+                  <span id="badge-sm-min-whale-status"></span>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                  <div style="flex: 1;">
+                    <label style="font-size: 10.5px; margin-bottom: 2px; color: #30d158;">🟢 Min. Paus LONG (%)</label>
+                    <input type="number" id="cfg-sm-min-whale-ratio-long" min="5" max="95" step="1" class="form-control" placeholder="10" style="padding: 4px 8px;">
+                    <small class="form-hint">Syarat min. Paus saat entry Long (cth: 10%).</small>
+                  </div>
+                  <div style="flex: 1;">
+                    <label style="font-size: 10.5px; margin-bottom: 2px; color: #ff453a;">🔴 Min. Paus SHORT (%)</label>
+                    <input type="number" id="cfg-sm-min-whale-ratio-short" min="5" max="95" step="1" class="form-control" placeholder="70" style="padding: 4px 8px;">
+                    <small class="form-hint">Syarat min. Paus saat entry Short (cth: 70%).</small>
+                  </div>
+                </div>
+                <input type="hidden" id="cfg-sm-min-whale-ratio" value="30">
               </div>
             </div>
           </div>

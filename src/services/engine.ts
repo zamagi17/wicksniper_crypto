@@ -192,6 +192,8 @@ export class WickSniperEngine {
       autoBepBufferPct: 0.3,
       signalDriver: 'SMART_TRADER',
       minWhaleRatio: 30,
+      minWhaleRatioLong: 10,
+      minWhaleRatioShort: 70,
       smartTraderFilterEnabled: true,
       smartTraderMinRatio: 30,
       entryOrderType: 'LIMIT', // Default LIMIT Maker (0.02% Fee)
@@ -6010,6 +6012,8 @@ export class WickSniperEngine {
         autoBepBufferPct: smCfg.autoBepBufferPct ?? 0.3,
         signalDriver: signal.signalDriver || smCfg.signalDriver || 'SMART_TRADER',
         minWhaleRatio: smCfg.minWhaleRatio ?? 30,
+        minWhaleRatioLong: smCfg.minWhaleRatioLong ?? smCfg.minWhaleRatio ?? 10,
+        minWhaleRatioShort: smCfg.minWhaleRatioShort ?? smCfg.minWhaleRatio ?? 70,
         smartTraderFilterEnabled: smCfg.smartTraderFilterEnabled !== false,
         smartTraderMinRatio: smCfg.smartTraderMinRatio ?? 30,
         smartTraderLongRatio: signal.smartTraderLongRatio,

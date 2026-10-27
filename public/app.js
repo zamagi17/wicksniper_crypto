@@ -3582,7 +3582,10 @@ function populateSettingsForm(cfg) {
   const smSmartTraderCb = document.getElementById('cfg-sm-smart-trader-filter');
   if (smSmartTraderCb) smSmartTraderCb.checked = smCfg.smartTraderFilterEnabled !== false;
   setVal('cfg-sm-smart-trader-min-ratio', smCfg.smartTraderMinRatio ?? 30);
-  setVal('cfg-sm-min-whale-ratio', smCfg.minWhaleRatio ?? 30);
+  const fallbackWhale = smCfg.minWhaleRatio ?? 30;
+  setVal('cfg-sm-min-whale-ratio-long', smCfg.minWhaleRatioLong ?? fallbackWhale);
+  setVal('cfg-sm-min-whale-ratio-short', smCfg.minWhaleRatioShort ?? fallbackWhale);
+  setVal('cfg-sm-min-whale-ratio', fallbackWhale);
   const smEmaCb = document.getElementById('cfg-sm-ema-filter-enabled');
   if (smEmaCb) smEmaCb.checked = !!smCfg.emaFilterEnabled;
   setVal('cfg-sm-ema-timeframe', smCfg.emaTimeframe || '15m');
@@ -3960,7 +3963,9 @@ function getSettingsFormData() {
       autoBepBufferPct: parseFloat(getVal('cfg-sm-auto-bep-buffer-pct', '0.3')) || 0.3,
       smartTraderFilterEnabled: !!document.getElementById('cfg-sm-smart-trader-filter')?.checked,
       smartTraderMinRatio: parseFloat(getVal('cfg-sm-smart-trader-min-ratio', '30')) || 30,
-      minWhaleRatio: parseFloat(getVal('cfg-sm-min-whale-ratio', '30')) || 30,
+      minWhaleRatioLong: parseFloat(getVal('cfg-sm-min-whale-ratio-long', '10')) || 10,
+      minWhaleRatioShort: parseFloat(getVal('cfg-sm-min-whale-ratio-short', '70')) || 70,
+      minWhaleRatio: parseFloat(getVal('cfg-sm-min-whale-ratio-long', '30')) || 30,
       emaFilterEnabled: !!document.getElementById('cfg-sm-ema-filter-enabled')?.checked,
       emaTimeframe: getVal('cfg-sm-ema-timeframe', '15m'),
       emaPeriod: parseInt(getVal('cfg-sm-ema-period', '50'), 10) || 50,
@@ -4817,19 +4822,16 @@ function updateSmDriverLabels() {
       if (input) input.style.pointerEvents = 'none';
     }
     if (grpWhale) {
-      const lbl = grpWhale.querySelector('label');
-      const hint = grpWhale.querySelector('.form-hint');
-      const input = grpWhale.querySelector('input');
+      const inputs = grpWhale.querySelectorAll('input');
+      const badgeWhale = document.getElementById('badge-sm-min-whale-status');
       if (isFilterChecked) {
-        if (lbl) lbl.innerHTML = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%) <span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
-        if (hint) hint.innerText = 'Aktif: Mencegah entry jika Paus lawan > 70% (Minimal Paus searah: 30%).';
+        if (badgeWhale) badgeWhale.innerHTML = '<span class="badge-tag" style="background: rgba(46,213,115,0.15); border: 1px solid rgba(46,213,115,0.35); color: #2ed573; font-size: 10px;">🟢 Aktif: Guard</span>';
         grpWhale.style.opacity = '1';
-        if (input) input.style.pointerEvents = 'auto';
+        inputs.forEach(inp => inp.style.pointerEvents = 'auto');
       } else {
-        if (lbl) lbl.innerHTML = '🛡️ Min. % Rasio Searah Paus / Anti-Ekstrem (%) <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Nonaktif</span>';
-        if (hint) hint.innerText = 'Nonaktif: Filter dimatikan, bot tidak membatasi perlawanan arah paus.';
+        if (badgeWhale) badgeWhale.innerHTML = '<span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Nonaktif</span>';
         grpWhale.style.opacity = '0.45';
-        if (input) input.style.pointerEvents = 'none';
+        inputs.forEach(inp => inp.style.pointerEvents = 'none');
       }
     }
 
@@ -4878,13 +4880,11 @@ function updateSmDriverLabels() {
       }
     }
     if (grpWhale) {
-      const lbl = grpWhale.querySelector('label');
-      const hint = grpWhale.querySelector('.form-hint');
-      if (lbl) lbl.innerHTML = '🐋 Min. % Rasio Searah Paus (%) <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Otomatis Bypassed</span>';
-      if (hint) hint.innerText = 'Tidak dipakai: Dominasi Paus sudah ditentukan oleh threshold utama (60%) di atas.';
+      const inputs = grpWhale.querySelectorAll('input');
+      const badgeWhale = document.getElementById('badge-sm-min-whale-status');
+      if (badgeWhale) badgeWhale.innerHTML = '<span class="badge-tag" style="background: rgba(255,255,255,0.08); color: #8e8e93; font-size: 10px;">⚪ Otomatis Bypassed</span>';
       grpWhale.style.opacity = '0.45';
-      const input = grpWhale.querySelector('input');
-      if (input) input.style.pointerEvents = 'none';
+      inputs.forEach(inp => inp.style.pointerEvents = 'none');
     }
 
     if (badgeDist) {
@@ -4925,13 +4925,11 @@ function updateSmDriverLabels() {
       if (input) input.style.pointerEvents = 'auto';
     }
     if (grpWhale) {
-      const lbl = grpWhale.querySelector('label');
-      const hint = grpWhale.querySelector('.form-hint');
-      if (lbl) lbl.innerHTML = '🎯 Min. % Rasio Searah Paus (%) <span class="badge-tag" style="background: rgba(56,189,248,0.15); border: 1px solid rgba(56,189,248,0.35); color: #38bdf8; font-size: 10px;">🟢 Aktif</span>';
-      if (hint) hint.innerText = 'Minimal dominasi Paus dalam konfluensi.';
+      const inputs = grpWhale.querySelectorAll('input');
+      const badgeWhale = document.getElementById('badge-sm-min-whale-status');
+      if (badgeWhale) badgeWhale.innerHTML = '<span class="badge-tag" style="background: rgba(56,189,248,0.15); border: 1px solid rgba(56,189,248,0.35); color: #38bdf8; font-size: 10px;">🟢 Aktif</span>';
       grpWhale.style.opacity = '1';
-      const input = grpWhale.querySelector('input');
-      if (input) input.style.pointerEvents = 'auto';
+      inputs.forEach(inp => inp.style.pointerEvents = 'auto');
     }
 
     if (badgeDist) {
