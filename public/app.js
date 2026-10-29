@@ -3749,6 +3749,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-period', smCfg.period || '5m');
   setVal('cfg-sm-thresh-short', Math.round((smCfg.thresholdShortRatio || 0.60) * 100));
   setVal('cfg-sm-thresh-long', Math.round((smCfg.thresholdLongRatio || 0.60) * 100));
+  const smRetailShortCheckbox = document.getElementById('cfg-sm-retail-trap-short');
+  if (smRetailShortCheckbox) smRetailShortCheckbox.checked = !!smCfg.retailTrapFilterShort;
   const smRetailCheckbox = document.getElementById('cfg-sm-retail-trap');
   if (smRetailCheckbox) smRetailCheckbox.checked = smCfg.retailTrapFilter !== false;
   setVal('cfg-sm-tp-pct', smCfg.takeProfitPct ?? 1.5);
@@ -3782,6 +3784,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-whale-premium', smCfg.whaleMaxPremiumPct ?? 0.15);
   setVal('cfg-sm-atr-pullback-mult', smCfg.atrPullbackMultiplier ?? 0.4);
   setVal('cfg-sm-rebound-pct', smCfg.reboundThresholdPct ?? 0.15);
+  setVal('cfg-sm-rebound-short-pct', smCfg.reboundThresholdShortPct ?? 0.25);
   setVal('cfg-sm-signal-ttl', smCfg.signalTtlMinutes ?? 30);
   setVal('cfg-sm-invalidation-pct', smCfg.invalidationThresholdPct ?? 1.2);
   setVal('cfg-sm-pullback-min', smCfg.pullbackMinPct ?? 0.3);
@@ -4178,6 +4181,8 @@ function getSettingsFormData() {
       thresholdShortRatio: (parseFloat(getVal('cfg-sm-thresh-short', '60')) || 60) / 100,
       thresholdLongRatio: (parseFloat(getVal('cfg-sm-thresh-long', '60')) || 60) / 100,
       retailTrapFilter: !!document.getElementById('cfg-sm-retail-trap')?.checked,
+      retailTrapFilterShort: !!document.getElementById('cfg-sm-retail-trap-short')?.checked,
+      retailTrapFilterLong: !!document.getElementById('cfg-sm-retail-trap')?.checked,
       takeProfitPct: parseFloat(getVal('cfg-sm-tp-pct', '1.5')) || 1.5,
       stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '1.2')) || 1.2,
       structuralSlEnabled: !!document.getElementById('cfg-sm-structural-sl-enabled')?.checked,
@@ -4206,6 +4211,7 @@ function getSettingsFormData() {
       whaleMaxPremiumPct: parseFloat(getVal('cfg-sm-whale-premium', '0.15')) || 0.15,
       atrPullbackMultiplier: parseFloat(getVal('cfg-sm-atr-pullback-mult', '0.4')) || 0.4,
       reboundThresholdPct: parseFloat(getVal('cfg-sm-rebound-pct', '0.15')) || 0.15,
+      reboundThresholdShortPct: parseFloat(getVal('cfg-sm-rebound-short-pct', '0.25')) || 0.25,
       signalTtlMinutes: parseInt(getVal('cfg-sm-signal-ttl', '30'), 10) || 30,
       invalidationThresholdPct: parseFloat(getVal('cfg-sm-invalidation-pct', '1.2')) || 1.2,
       pullbackMinPct: parseFloat(getVal('cfg-sm-pullback-min', '0.3')) || 0.3,
