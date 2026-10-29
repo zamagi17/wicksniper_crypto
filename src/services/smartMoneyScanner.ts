@@ -170,12 +170,23 @@ export class SmartMoneyScanner {
       const thresholdShort = this.config.thresholdShortRatio || 0.60;
       const thresholdLong = this.config.thresholdLongRatio || 0.60;
 
+      // Ambil status BTC Trend terkini sebelum scanning batch koin untuk sinkronisasi izin arah posisi
+      let btcTrendStatus: BtcTrendStatus | null = null;
+      if (this.config.btcTrendFilterEnabled !== false) {
+        const btcTf = this.config.btcTrendTimeframe || '1h';
+        const btcPeriod = this.config.btcTrendEmaPeriod || 50;
+        const dropThresh = this.config.btcDropThresholdPct ?? 1.0;
+        const deadband = this.config.btcTrendDeadbandPct ?? 0.25;
+        const inheritSideways = this.config.btcTrendInheritSideways !== false;
+        btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband, inheritSideways);
+      }
+
       const CHUNK_SIZE = 3;
       for (let i = 0; i < symbolsToScan.length; i += CHUNK_SIZE) {
         if (!this.isScanning) break;
         const chunk = symbolsToScan.slice(i, i + CHUNK_SIZE);
         await Promise.all(
-          chunk.map((symbol) => this.scanSymbol(symbol, period, thresholdShort, thresholdLong))
+          chunk.map((symbol) => this.scanSymbol(symbol, period, thresholdShort, thresholdLong, btcTrendStatus))
         );
         if (i + CHUNK_SIZE < symbolsToScan.length) {
           await new Promise((r) => setTimeout(r, 120));
@@ -190,6 +201,13 @@ export class SmartMoneyScanner {
         const driverName = driver === 'SMART_TRADER' ? 'SMART TRADER' : driver === 'DUAL_CONFLUENCE' ? 'DUAL CONFLUENCE' : 'PAUS';
         const targetPct = Math.round(Math.max(thresholdShort, thresholdLong) * 100);
 
+        let pulseCanShort = this.config.direction === 'BOTH' || this.config.direction === 'SHORT_ONLY';
+        let pulseCanLong = this.config.direction === 'BOTH' || this.config.direction === 'LONG_ONLY';
+        if (this.config.btcTrendFilterEnabled !== false && btcTrendStatus) {
+          if (!btcTrendStatus.canShort) pulseCanShort = false;
+          if (!btcTrendStatus.canLong) pulseCanLong = false;
+        }
+
         let topCoin = '';
         let topRatio = 0;
         let topSide = '';
@@ -199,15 +217,19 @@ export class SmartMoneyScanner {
           if (driver === 'SMART_TRADER') {
             const sShort = m.smartTraderShortRatio || 0;
             const sLong = m.smartTraderLongRatio || 0;
-            if (sShort > topRatio) { topRatio = sShort; topCoin = sym; topSide = 'Short'; }
-            if (sLong > topRatio) { topRatio = sLong; topCoin = sym; topSide = 'Long'; }
+            if (pulseCanShort && sShort > topRatio) { topRatio = sShort; topCoin = sym; topSide = 'Short'; }
+            if (pulseCanLong && sLong > topRatio) { topRatio = sLong; topCoin = sym; topSide = 'Long'; }
           } else {
             const wShort = m.whaleShortRatio || 0;
             const wLong = m.whaleLongRatio || 0;
-            if (wShort > topRatio) { topRatio = wShort; topCoin = sym; topSide = 'Short'; }
-            if (wLong > topRatio) { topRatio = wLong; topCoin = sym; topSide = 'Long'; }
+            if (pulseCanShort && wShort > topRatio) { topRatio = wShort; topCoin = sym; topSide = 'Short'; }
+            if (pulseCanLong && wLong > topRatio) { topRatio = wLong; topCoin = sym; topSide = 'Long'; }
           }
         }
+
+        const btcTrendTag = btcTrendStatus
+          ? ` | BTC: ${btcTrendStatus.trend} (${pulseCanShort && !pulseCanLong ? 'Hanya Short' : pulseCanLong && !pulseCanShort ? 'Hanya Long' : pulseCanShort && pulseCanLong ? 'Both' : 'Ditahan'})`
+          : '';
 
         const topInfo = topCoin && topRatio > 0
           ? `Akumulasi terdekat: ${topCoin} (${topSide} ${(topRatio * 100).toFixed(1)}%)`
@@ -215,7 +237,7 @@ export class SmartMoneyScanner {
 
         logger.log(
           'INFO',
-          `📡 [RADAR ${driverName}] Aktif memindai ${candidateSymbols.length} koin Futures | Batch rotasi ${symbolsToScan.length} koin (TF ${period}) | ${topInfo} | Syarat pemicu: >= ${targetPct}% | Status: Berjalan normal & siaga berburu sinyal...`
+          `📡 [RADAR ${driverName}] Aktif memindai ${candidateSymbols.length} koin Futures | Batch rotasi ${symbolsToScan.length} koin (TF ${period}) | ${topInfo} | Syarat pemicu: >= ${targetPct}%${btcTrendTag} | Status: Berjalan normal & siaga berburu sinyal...`
         );
       }
     } catch (e: any) {
@@ -230,9 +252,30 @@ export class SmartMoneyScanner {
     symbol: string,
     period: string,
     thresholdShort: number,
-    thresholdLong: number
+    thresholdLong: number,
+    cachedBtcStatus?: BtcTrendStatus | null
   ) {
     if (this.isCoolingDown(symbol)) return;
+
+    let btcTrendStatus = cachedBtcStatus;
+    if (this.config.btcTrendFilterEnabled !== false && btcTrendStatus === undefined) {
+      btcTrendStatus = binanceFutures.getLastBtcTrendStatus();
+    }
+
+    // Evaluasi arah yang diizinkan konfigurasi
+    let canShort = this.config.direction === 'BOTH' || this.config.direction === 'SHORT_ONLY';
+    let canLong = this.config.direction === 'BOTH' || this.config.direction === 'LONG_ONLY';
+
+    // Sinkronisasi Izin Posisi dengan BTC Macro Trend Guard:
+    // Jika BTC filter menentukan tren BEARISH (canLong = false), maka HANYA SHORT yang dianalisis dan dicatat log-nya.
+    // Sebaliknya, jika BULLISH (canShort = false), maka HANYA LONG yang dianalisis dan dicatat log-nya.
+    if (this.config.btcTrendFilterEnabled !== false && btcTrendStatus) {
+      if (!btcTrendStatus.canShort) canShort = false;
+      if (!btcTrendStatus.canLong) canLong = false;
+    }
+
+    // Jika kedua arah dilarang (pasar volatile/whipsaw ekstrem), lewati simbol tanpa membuang kuota atau spam log
+    if (!canShort && !canLong) return;
 
     try {
       const metrics = await binanceFutures.getSmartMoneyMetrics(symbol, period);
@@ -259,8 +302,6 @@ export class SmartMoneyScanner {
 
       const smartShort = metrics.smartTraderShortRatio ?? 0.5;
       const smartLong = metrics.smartTraderLongRatio ?? 0.5;
-      const canShort = this.config.direction === 'BOTH' || this.config.direction === 'SHORT_ONLY';
-      const canLong = this.config.direction === 'BOTH' || this.config.direction === 'LONG_ONLY';
 
       if (driver === 'SMART_TRADER') {
         // MODE 1: SMART TRADER DRIVEN (Default & Rekomendasi)
@@ -603,47 +644,22 @@ export class SmartMoneyScanner {
         }
 
         // Filter Pelindung Tren Macro BTC (Anti-Dump & Anti-Pump Market Wide)
-        let btcTrendStatus: BtcTrendStatus | null = null;
         if (this.config.btcTrendFilterEnabled !== false) {
-          const btcTf = this.config.btcTrendTimeframe || '1h';
-          const btcPeriod = this.config.btcTrendEmaPeriod || 50;
-          const dropThresh = this.config.btcDropThresholdPct ?? 1.0;
-          const deadband = this.config.btcTrendDeadbandPct ?? 0.25;
-          const inheritSideways = this.config.btcTrendInheritSideways !== false;
-          btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband, inheritSideways);
+          if (!btcTrendStatus) {
+            const btcTf = this.config.btcTrendTimeframe || '1h';
+            const btcPeriod = this.config.btcTrendEmaPeriod || 50;
+            const dropThresh = this.config.btcDropThresholdPct ?? 1.0;
+            const deadband = this.config.btcTrendDeadbandPct ?? 0.25;
+            const inheritSideways = this.config.btcTrendInheritSideways !== false;
+            btcTrendStatus = await binanceFutures.getBtcTrendStatus(btcTf, btcPeriod, dropThresh, deadband, inheritSideways);
+          }
 
           if (btcTrendStatus) {
             if (detectedSide === 'LONG' && !btcTrendStatus.canLong) {
-              const dumpDetail = btcTrendStatus.isFlashDump ? ' (FLASH DUMP)' : '';
-              let sidewaysDetail = '';
-              if (btcTrendStatus.trend === 'SIDEWAYS') {
-                if (btcTrendStatus.priorTrend === 'BEARISH') {
-                  sidewaysDetail = ' (SIDEWAYS pasca-BEARISH - Long Ditahan)';
-                } else if ((btcTrendStatus.diffPct ?? 0) < 0) {
-                  sidewaysDetail = ` (SIDEWAYS di bawah EMA [${(btcTrendStatus.diffPct ?? 0).toFixed(2)}%] - Long Ditahan)`;
-                }
-              }
-              logger.log(
-                'INFO',
-                `🛡️ [BTC GUARD SKIP] ${symbol} LONG dibatalkan: BTC sedang ${btcTrendStatus.trend}${dumpDetail}${sidewaysDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko pisau jatuh pasar.`
-              );
               return;
             }
 
             if (detectedSide === 'SHORT' && !btcTrendStatus.canShort) {
-              const surgeDetail = btcTrendStatus.isFlashSurge ? ' (FLASH SURGE)' : '';
-              let sidewaysDetail = '';
-              if (btcTrendStatus.trend === 'SIDEWAYS') {
-                if (btcTrendStatus.priorTrend === 'BULLISH') {
-                  sidewaysDetail = ' (SIDEWAYS pasca-BULLISH - Short Ditahan)';
-                } else if ((btcTrendStatus.diffPct ?? 0) > 0) {
-                  sidewaysDetail = ` (SIDEWAYS di atas EMA [${(btcTrendStatus.diffPct ?? 0).toFixed(2)}%] - Short Ditahan)`;
-                }
-              }
-              logger.log(
-                'INFO',
-                `🛡️ [BTC GUARD SKIP] ${symbol} SHORT dibatalkan: BTC sedang ${btcTrendStatus.trend}${surgeDetail}${sidewaysDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko kena squeeze pump pasar.`
-              );
               return;
             }
 

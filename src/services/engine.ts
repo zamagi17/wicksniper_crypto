@@ -1032,7 +1032,10 @@ export class WickSniperEngine {
       const longMinVolRatio = longCfg?.minVolRatio ?? 4.0;
       const longMaxFunding = longCfg?.maxFundingRatePct ?? 0.05;
       const longMinSurge = longCfg?.minSurgePct ?? (this.config.scanner.spikeMinPercent || 3.0);
+      const btcTrend = this.getBtcTrendStatus();
+      const btcAllowsLong = !btcTrend || btcTrend.canLong;
       const isMomentumLongCandidate = !!longCfg?.enabled
+        && btcAllowsLong
         && alert.surgePct >= longMinSurge
         && indicators?.volRatio !== undefined
         && indicators.volRatio >= longMinVolRatio
@@ -1043,6 +1046,14 @@ export class WickSniperEngine {
         && indicators?.rsi1m !== undefined
         && indicators.rsi1m > maxRsi1m;
       const simulationSide: 'SHORT' | 'LONG' = isMomentumLongCandidate ? 'LONG' : 'SHORT';
+
+      // Jika BTC filter melarang SHORT (misal tren BULLISH / Flash Surge), jangan proses atau log skip SHORT
+      if (btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
+        const cooldownMins = this.config.scanner.cooldownMinutes || 10;
+        this.scanner.setCooldown(symbol, cooldownMins);
+        this.recordSkippedSpike(alert, `BTC sedang ${btcTrend.trend} (Short dilarang oleh BTC Macro Guard)`, 'SHORT');
+        return;
+      }
 
       if (this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0 && !isMomentumLongCandidate) {
         const emaTrend = await this.evaluateEmaTrend(symbol, alert.currentPrice);
@@ -6220,6 +6231,13 @@ export class WickSniperEngine {
     const symbol = signal.symbol;
     if (this.smartMoneyScanner.isCoolingDown(symbol) || this.scanner.isCoolingDown(symbol)) return;
     if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol) || this.pendingSignals.has(symbol)) return;
+
+    // Sinkronisasi Sinyal dengan BTC Macro Guard
+    const btcTrend = this.getBtcTrendStatus();
+    if (this.config.smartMoney?.btcTrendFilterEnabled !== false && btcTrend) {
+      if (signal.side === 'LONG' && !btcTrend.canLong) return;
+      if (signal.side === 'SHORT' && !btcTrend.canShort) return;
+    }
 
     // Proteksi Jadwal Operasional (Prime Time Saja)
     const scheduleCheck = this.isWithinTradingSchedule();
