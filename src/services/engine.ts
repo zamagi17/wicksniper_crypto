@@ -1390,6 +1390,7 @@ export class WickSniperEngine {
       status: 'SNIPING',
       trailingTpActive: false,
       highestPrice: currentPrice,
+      lowestPrice: currentPrice,
       entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
       btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
       paramsSnapshot: {
@@ -1549,6 +1550,8 @@ export class WickSniperEngine {
       totalQty: layer0Qty,
       avgEntryPrice: currentPrice,
       currentPrice,
+      highestPrice: currentPrice,
+      lowestPrice: currentPrice,
       unrealizedPnl: 0,
       pnlPct: 0,
       peakPnlPct: 0,
@@ -2076,6 +2079,8 @@ export class WickSniperEngine {
       if (currentPrice <= 0) continue;
 
       pos.currentPrice = currentPrice;
+      pos.highestPrice = Math.max(pos.highestPrice || currentPrice, currentPrice);
+      pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
       const samples = this.priceMomentum.get(symbol) || [];
       // Subsample: max 1 sample per 15s agar "bullish candle" = tren 15 detik, bukan tick noise
       const lastSample = samples.length > 0 ? samples[samples.length - 1] : null;
@@ -2117,7 +2122,7 @@ export class WickSniperEngine {
           this.recalculatePositionAverage(pos);
           this.updateTrailingSL(pos);
           pos.trailingTpActive = false;
-          pos.lowestPrice = undefined;
+          pos.trailingRunnerPrice = undefined;
           pos.peakPnlPct = 0;
           db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
         }
@@ -2263,7 +2268,7 @@ export class WickSniperEngine {
 
           if (!pos.trailingTpActive && (profitPct >= activationPct || currentPrice >= pos.targetTpPrice)) {
             pos.trailingTpActive = true;
-            pos.highestPrice = currentPrice;
+            pos.trailingRunnerPrice = currentPrice;
             logger.log(
               'INFO',
               `🚀 [LONG TRAILING AKTIF] ${pos.symbol}: Profit awal +${profitPct.toFixed(2)}% tercapai di $${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner memburu puncak...`,
@@ -2272,15 +2277,15 @@ export class WickSniperEngine {
           }
 
           if (pos.trailingTpActive) {
-            pos.highestPrice = Math.max(pos.highestPrice || currentPrice, currentPrice);
-            const dropPct = ((pos.highestPrice - currentPrice) / pos.highestPrice) * 100;
+            pos.trailingRunnerPrice = Math.max(pos.trailingRunnerPrice || currentPrice, currentPrice);
+            const dropPct = ((pos.trailingRunnerPrice - currentPrice) / pos.trailingRunnerPrice) * 100;
             // Gembok profit: Wajib minimal +0.3% di atas entry (menutupi fee)
             const minSecurePrice = pos.avgEntryPrice * 1.003;
 
             if (dropPct >= callbackPct && currentPrice >= minSecurePrice) {
               logger.log(
                 'SUCCESS',
-                `🎯 [LONG TRAILING TP HIT] ${pos.symbol}: Pullback -${dropPct.toFixed(2)}% dari puncak $${formatCryptoPrice(pos.highestPrice)} ➜ Mengamankan profit di $${formatCryptoPrice(currentPrice)} (+${profitPct.toFixed(2)}%)!`,
+                `🎯 [LONG TRAILING TP HIT] ${pos.symbol}: Pullback -${dropPct.toFixed(2)}% dari puncak $${formatCryptoPrice(pos.trailingRunnerPrice)} ➜ Mengamankan profit di $${formatCryptoPrice(currentPrice)} (+${profitPct.toFixed(2)}%)!`,
                 pos.symbol
               );
               this.closePosition(pos, 'TRAILING_TP', currentPrice);
@@ -2372,7 +2377,7 @@ export class WickSniperEngine {
               : this.config.exit.trailingTpEnabled;
             if (trailingAllowed) {
               pos.trailingTpActive = true;
-              pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
+              pos.trailingRunnerPrice = Math.min(pos.trailingRunnerPrice || currentPrice, currentPrice);
               continue;
             }
             logger.log(
@@ -2390,7 +2395,7 @@ export class WickSniperEngine {
           if (trailingAllowed) {
             if (!pos.trailingTpActive) {
               pos.trailingTpActive = true;
-              pos.lowestPrice = currentPrice;
+              pos.trailingRunnerPrice = currentPrice;
               logger.log(
                 'INFO',
                 `🚀 [TRAILING TP AKTIF] ${pos.symbol}: Target TP awal ($${formatCryptoPrice(pos.targetTpPrice)}) tercapai di $${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
@@ -2417,8 +2422,8 @@ export class WickSniperEngine {
         ? (this.config.smartMoney?.trailingTpEnabled !== false && pos.trailingTpActive)
         : (this.config.exit.trailingTpEnabled && pos.trailingTpActive);
       if (isTrailingActive && trailingAgeMs >= 3000) {
-        // Catat titik harga terendah (profit terdalam untuk posisi SHORT)
-        pos.lowestPrice = Math.min(pos.lowestPrice || currentPrice, currentPrice);
+        // Catat titik harga terendah runner (profit terdalam untuk posisi SHORT)
+        pos.trailingRunnerPrice = Math.min(pos.trailingRunnerPrice || currentPrice, currentPrice);
 
         // Batas Harga Maksimum Aman (Profit Floor):
         // Wajib minimal 0.6% di bawah avgEntryPrice (menutupi fee roundtrip taker + buffer slippage pantulan wick)
@@ -2446,7 +2451,7 @@ export class WickSniperEngine {
             pos.symbol
           );
           pos.trailingTpActive = false;
-          pos.lowestPrice = undefined;
+          pos.trailingRunnerPrice = undefined;
           pos.peakPnlPct = 0;
           if (this.config.tradingMode === 'LIVE') {
             this.syncLiveTakeProfitOrder(pos).catch(() => {});
@@ -2456,12 +2461,12 @@ export class WickSniperEngine {
 
         // PROTEKSI 2: Hitung callback dari titik terendah riil
         const callbackPct = effectiveCallbackPct;
-        const bouncePct = ((currentPrice - pos.lowestPrice) / pos.lowestPrice) * 100;
+        const bouncePct = ((currentPrice - pos.trailingRunnerPrice) / pos.trailingRunnerPrice) * 100;
 
         if (bouncePct >= callbackPct && currentPrice <= safeTrailingMaxPrice) {
           logger.log(
             'SUCCESS',
-            `🎯 [TRAILING TP HIT] ${pos.symbol}: Memantul +${bouncePct.toFixed(2)}% dari harga terendah $${pos.lowestPrice.toFixed(6)} ➜ Mengamankan profit di $${currentPrice.toFixed(6)} (Cuan aman di bawah batas $${safeTrailingMaxPrice.toFixed(6)}).`,
+            `🎯 [TRAILING TP HIT] ${pos.symbol}: Memantul +${bouncePct.toFixed(2)}% dari harga terendah $${pos.trailingRunnerPrice.toFixed(6)} ➜ Mengamankan profit di $${currentPrice.toFixed(6)} (Cuan aman di bawah batas $${safeTrailingMaxPrice.toFixed(6)}).`,
             pos.symbol
           );
           this.closePosition(pos, 'TRAILING_TP', currentPrice);
@@ -2871,11 +2876,7 @@ export class WickSniperEngine {
 
     if (trailingAllowed) {
       pos.trailingTpActive = true;
-      if (isLong) {
-        pos.highestPrice = currentPrice;
-      } else {
-        pos.lowestPrice = currentPrice;
-      }
+      pos.trailingRunnerPrice = currentPrice;
     }
 
     const tp1PctStr = Math.round(ratio * 100);
@@ -2994,7 +2995,7 @@ export class WickSniperEngine {
     if (pos.totalQty > 0) {
       if (this.config.exit.trailingTpEnabled) {
         pos.trailingTpActive = true;
-        pos.lowestPrice = orderFill?.fillPrice || pos.currentPrice || pos.targetTpPrice;
+        pos.trailingRunnerPrice = orderFill?.fillPrice || pos.currentPrice || pos.targetTpPrice;
         logger.log(
           'SUCCESS',
           `🚀 [TRAILING RUNNER DIAKTIFKAN] ${pos.symbol}: TP1 berhasil diamankan. Sisa ${pos.totalQty} koin (${tp2PctStr}%) kini memburu profit trailing lebih dalam dengan proteksi Auto BEP!`,
@@ -3212,7 +3213,7 @@ export class WickSniperEngine {
 
           // Reset status trailing runner saat layer averaging baru terisi
           pos.trailingTpActive = false;
-          pos.lowestPrice = undefined;
+          pos.trailingRunnerPrice = undefined;
           pos.peakPnlPct = 0;
 
           // Update order Limit TP di Binance dengan volume baru
@@ -3388,9 +3389,9 @@ export class WickSniperEngine {
         if (exitCfg.trailingTpEnabled) {
           pos.trailingTpActive = true;
           if (isLong) {
-            pos.highestPrice = Math.max(pos.highestPrice || pos.avgEntryPrice, pos.currentPrice || pos.avgEntryPrice);
+            pos.trailingRunnerPrice = Math.max(pos.trailingRunnerPrice || pos.avgEntryPrice, pos.currentPrice || pos.avgEntryPrice);
           } else {
-            pos.lowestPrice = Math.min(pos.lowestPrice || pos.avgEntryPrice, pos.currentPrice || pos.avgEntryPrice);
+            pos.trailingRunnerPrice = Math.min(pos.trailingRunnerPrice || pos.avgEntryPrice, pos.currentPrice || pos.avgEntryPrice);
           }
           logger.log(
             'SUCCESS',
@@ -3760,7 +3761,7 @@ export class WickSniperEngine {
           );
           pos.status = 'SNIPING';
           pos.trailingTpActive = false;
-          pos.lowestPrice = undefined;
+          pos.trailingRunnerPrice = undefined;
           pos.peakPnlPct = 0;
           this.closingSymbols.delete(pos.symbol);
           await this.syncLiveTakeProfitOrder(pos);
@@ -4131,6 +4132,19 @@ export class WickSniperEngine {
         ? Math.round(filledLayers.reduce((sum, l) => sum + l.marginUsdt, 0) * 100) / 100
         : pos.totalMarginUsed;
 
+      const isLongTrade = pos.side === 'LONG';
+      const finalHighest = Math.max(pos.highestPrice || pos.avgEntryPrice, actualExitPrice, pos.currentPrice || pos.avgEntryPrice);
+      const finalLowest = Math.min(pos.lowestPrice || pos.avgEntryPrice, actualExitPrice, pos.currentPrice || pos.avgEntryPrice);
+      pos.highestPrice = finalHighest;
+      pos.lowestPrice = finalLowest;
+
+      const mfePct = isLongTrade
+        ? parseFloat((((finalHighest - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2))
+        : parseFloat((((pos.avgEntryPrice - finalLowest) / pos.avgEntryPrice) * 100).toFixed(2));
+      const maePct = isLongTrade
+        ? parseFloat((((finalLowest - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2))
+        : parseFloat((((pos.avgEntryPrice - finalHighest) / pos.avgEntryPrice) * 100).toFixed(2));
+
       const trade: ClosedTrade = {
         id: Math.random().toString(36).substring(2, 9),
         symbol: pos.symbol,
@@ -4169,8 +4183,16 @@ export class WickSniperEngine {
         smartMoneyFlowStatus: pos.smartMoneyFlowStatus,
         slDescription: pos.slDescription,
         entryReason: pos.entryReason || pos.paramsSnapshot?.entryReason || pos.paramsSnapshot?.signalReason,
+        highestPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, finalHighest)),
+        lowestPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, finalLowest)),
+        mfePct,
+        maePct: pos.maxAdversePnlPct !== undefined ? pos.maxAdversePnlPct : maePct,
         paramsSnapshot: {
           ...(pos.paramsSnapshot || this.captureParamsSnapshot()),
+          highestPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, finalHighest)),
+          lowestPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, finalLowest)),
+          mfePct,
+          maePct: pos.maxAdversePnlPct !== undefined ? pos.maxAdversePnlPct : maePct,
           ...(pos.smartMoneyFlowStatus ? { smartMoneyFlowStatus: pos.smartMoneyFlowStatus } : {}),
           ...(pos.slDescription ? { slDescription: pos.slDescription } : {}),
           ...(pos.marketSnapshot ? { marketSnapshot: pos.marketSnapshot } : {}),
@@ -4181,7 +4203,6 @@ export class WickSniperEngine {
           hardSlPrice: pos.hardSlPrice,
         },
         marketSnapshot: pos.marketSnapshot,
-        maePct: pos.maxAdversePnlPct,
         peakPnlPct: pos.peakPnlPct,
         targetTpPrice: pos.targetTpPrice,
         targetTp2Price: pos.targetTp2Price,
@@ -4855,7 +4876,7 @@ export class WickSniperEngine {
                   // Perbarui Limit Take Profit order di Binance jika kuantitas bertambah
                   if (liveQty > oldQty) {
                     pos.trailingTpActive = false;
-                    pos.lowestPrice = undefined;
+                    pos.trailingRunnerPrice = undefined;
                     pos.peakPnlPct = 0;
                     await this.syncLiveTakeProfitOrder(pos);
                     await this.deployNextGridLayerInQueue(pos);
@@ -4939,6 +4960,8 @@ export class WickSniperEngine {
             totalQty,
             avgEntryPrice: entryPrice,
             currentPrice: entryPrice,
+            highestPrice: entryPrice,
+            lowestPrice: entryPrice,
             unrealizedPnl: livePos.unRealizedProfit || 0,
             pnlPct: 0,
             peakPnlPct: 0,
@@ -5483,7 +5506,8 @@ export class WickSniperEngine {
       });
 
       const btcOk = !isBtcFilterOn || !btcTrend || btcTrend.canLong;
-      const btcDesc = btcTrend ? `${btcTrend.trend}${btcTrend.priorTrend ? ` (${btcTrend.priorTrend})` : ''}` : 'N/A';
+      const btcDiffStr = btcTrend?.diffPct !== undefined ? ` (Δ: ${btcTrend.diffPct >= 0 ? '+' : ''}${btcTrend.diffPct.toFixed(2)}%)` : '';
+      const btcDesc = btcTrend ? `${btcTrend.trend}${btcTrend.priorTrend ? ` [Prior: ${btcTrend.priorTrend}]` : ''}${btcDiffStr}` : 'N/A';
       checks.push({
         name: 'Pelindung Macro BTC',
         passed: btcOk,
@@ -5528,7 +5552,8 @@ export class WickSniperEngine {
       });
 
       const btcOk = !isBtcFilterOn || !btcTrend || btcTrend.canShort;
-      const btcDesc = btcTrend ? `${btcTrend.trend}${btcTrend.priorTrend ? ` (${btcTrend.priorTrend})` : ''}` : 'N/A';
+      const btcDiffStr = btcTrend?.diffPct !== undefined ? ` (Δ: ${btcTrend.diffPct >= 0 ? '+' : ''}${btcTrend.diffPct.toFixed(2)}%)` : '';
+      const btcDesc = btcTrend ? `${btcTrend.trend}${btcTrend.priorTrend ? ` [Prior: ${btcTrend.priorTrend}]` : ''}${btcDiffStr}` : 'N/A';
       checks.push({
         name: 'Pelindung Macro BTC',
         passed: btcOk,
@@ -5579,6 +5604,7 @@ export class WickSniperEngine {
         price: btcTrend.btcPrice,
         trend: btcTrend.trend,
         priorTrend: btcTrend.priorTrend,
+        diffPct: btcTrend.diffPct,
         canLong: btcTrend.canLong,
         canShort: btcTrend.canShort,
       } : undefined,

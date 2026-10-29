@@ -1119,14 +1119,19 @@ function renderBtcFilter(btc) {
     // SIDEWAYS / BUFFER ZONE
     const deadbandStr = btc.deadbandPct !== undefined ? `±${btc.deadbandPct}%` : '±0.25%';
     const priorTrend = btc.priorTrend;
-    if (priorTrend === 'BEARISH' && btc.canLong === false) {
-      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) pasca-<b>BEARISH</b>. 🛡️ <b>LONG Ditahan</b> (menghindari Bear-Flag trap), hanya <b>SHORT</b> yang diizinkan.`;
-      if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
-      if (guardLabel) guardLabel.innerText = 'SIDEWAYS (Prior: BEARISH ➜ SHORT Only) ⚠️';
-    } else if (priorTrend === 'BULLISH' && btc.canShort === false) {
-      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) pasca-<b>BULLISH</b>. 🛡️ <b>SHORT Ditahan</b> (menghindari Bull-Flag trap), hanya <b>LONG</b> yang diizinkan.`;
+    if (btc.canLong && !btc.canShort) {
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) di atas EMA. 🛡️ Sinyal <b>LONG diizinkan</b>, <b>SHORT Ditahan</b>.`;
       if (guardBadge) guardBadge.className = 'btc-guard-badge success';
-      if (guardLabel) guardLabel.innerText = 'SIDEWAYS (Prior: BULLISH ➜ LONG Only) ✅';
+      if (guardLabel) guardLabel.innerText = `SIDEWAYS (Prior: ${priorTrend || 'BULL'} ➜ LONG Only) ✅`;
+    } else if (btc.canShort && !btc.canLong) {
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) di bawah EMA. 🛡️ Sinyal <b>SHORT diizinkan</b>, <b>LONG Ditahan</b>.`;
+      if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
+      if (guardLabel) guardLabel.innerText = `SIDEWAYS (Prior: ${priorTrend || 'BEAR'} ➜ SHORT Only) ⚠️`;
+    } else if (!btc.canLong && !btc.canShort) {
+      const posNote = diffPct < 0 ? 'di bawah EMA (waspada breakdown ke bearish)' : 'di atas EMA (waspada breakout ke bullish)';
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) ${posNote}. 🛡️ <b>LONG &amp; SHORT Ditahan</b> (menunggu konfirmasi arah).`;
+      if (guardBadge) guardBadge.className = 'btc-guard-badge danger';
+      if (guardLabel) guardLabel.innerText = 'SIDEWAYS (Wait / Tahan Posisi) ⛔';
     } else {
       if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%). Pasar stabil sideways: sinyal Smart Money LONG &amp; SHORT diizinkan.`;
       if (guardBadge) guardBadge.className = 'btc-guard-badge neutral';
@@ -1606,6 +1611,20 @@ function renderActivePositions(positions) {
             <div class="pos-metric-item">
               <small>Harga Saat Ini</small>
               <span>$${formatCryptoPrice(pos.currentPrice)}</span>
+            </div>
+            <div class="pos-metric-item">
+              <small>Tertinggi Dilalui (ATH)</small>
+              <span style="color: ${isLong ? '#30d158' : '#ff453a'}; font-weight: 700;">
+                $${formatCryptoPrice(pos.highestPrice || pos.avgEntryPrice)}
+                <small style="font-size: 10px; font-weight: 600; opacity: 0.9;">(${isLong ? '+' : '-'}${Math.abs(((pos.highestPrice || pos.avgEntryPrice) - pos.avgEntryPrice) / pos.avgEntryPrice * 100).toFixed(2)}%)</small>
+              </span>
+            </div>
+            <div class="pos-metric-item">
+              <small>Terendah Dilalui (ATL)</small>
+              <span style="color: ${isLong ? '#ff453a' : '#30d158'}; font-weight: 700;">
+                $${formatCryptoPrice(pos.lowestPrice || pos.avgEntryPrice)}
+                <small style="font-size: 10px; font-weight: 600; opacity: 0.9;">(${isLong ? '-' : '+'}${Math.abs((pos.avgEntryPrice - (pos.lowestPrice || pos.avgEntryPrice)) / pos.avgEntryPrice * 100).toFixed(2)}%)</small>
+              </span>
             </div>
             <div class="pos-metric-item">
               <small>Margin Terpakai</small>
@@ -2282,7 +2301,15 @@ function renderClosedTradesTable(trades) {
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
           <td><b>${t.symbol}</b> <span class="badge-side ${rowSide === 'LONG' ? 'long' : 'short'}">${rowSide}</span> ${stratBadge} ${btcBadge} ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
-          <td>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</td>
+          <td>
+            <div>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</div>
+            ${(t.highestPrice || t.lowestPrice || t.paramsSnapshot?.highestPrice || t.paramsSnapshot?.lowestPrice) ? `
+              <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;" title="Rentang harga selama trade (ATH / ATL)">
+                ▲ <span style="color: ${rowSide === 'LONG' ? '#30d158' : '#ff453a'}; font-weight: 600;">$${formatCryptoPrice(t.highestPrice || t.paramsSnapshot?.highestPrice || t.entryPrice)}</span>
+                • ▼ <span style="color: ${rowSide === 'LONG' ? '#ff453a' : '#30d158'}; font-weight: 600;">$${formatCryptoPrice(t.lowestPrice || t.paramsSnapshot?.lowestPrice || t.entryPrice)}</span>
+              </div>
+            ` : ''}
+          </td>
           <td><b>${formatDurationHms(t.durationSeconds)}</b></td>
           <td class="${pnlColor}"><b>${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
           <td>

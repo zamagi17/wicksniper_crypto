@@ -237,7 +237,7 @@ export interface SmartMoneyConfig {
   btcTrendEmaPeriod?: number;  // Periode EMA BTC (default: 50)
   btcDropThresholdPct?: number; // Ambang flash dump/surge BTC (%) (default: 1.0%)
   btcTrendDeadbandPct?: number; // Ambang batas zona netral/sideways di sekitar EMA (%) (default: 0.25%)
-  btcTrendInheritSideways?: boolean; // Jika sideways, warisi arah tren sebelumnya (bearish->sideways: short only, bullish->sideways: long only) (default: true)
+  btcTrendInheritSideways?: boolean; // Jika sideways, warisi arah tren sebelumnya (bearish->sideways: short only jika < EMA, bullish->sideways: long only jika > EMA) (default: true)
   lowVolumeAdaptiveEnabled?: boolean; // Adaptasi otomatis koin bervolume rendah (< 20M)
   lowVolumeThresholdUsdt?: number;    // Ambang batas volume 24 jam koin rendah (USDT, default: 20_000_000)
   lowVolumeMarginDivisor?: number;    // Pembagi margin untuk koin bervolume rendah (default: 2, margin dibagi 2)
@@ -383,6 +383,7 @@ export interface SymbolAnalysisResult {
     price: number;
     trend: string;
     priorTrend?: string;
+    diffPct?: number;
     canLong: boolean;
     canShort: boolean;
   };
@@ -507,8 +508,9 @@ export interface ActivePosition {
   isBepDefenseActive?: boolean;
   bepDefenseReason?: string;
   trailingTpActive?: boolean;
-  lowestPrice?: number;
-  highestPrice?: number;
+  lowestPrice?: number; // Harga terendah yang pernah dicapai koin selama posisi dibuka (ATL Posisi)
+  highestPrice?: number; // Harga tertinggi yang pernah dicapai koin selama posisi dibuka (ATH Posisi)
+  trailingRunnerPrice?: number; // Acuan harga ekstrem saat trailing runner aktif
   tpOrderId?: string;
   tp2OrderId?: string;
   lastTpOrderId?: string;
@@ -607,6 +609,9 @@ export interface ClosedTrade {
   partialTpDone?: boolean;
   paramsSnapshot?: Record<string, any>;
   marketSnapshot?: MarketSnapshot;
+  highestPrice?: number; // Harga tertinggi yang pernah dilalui koin selama trade berjalan (ATH Trade)
+  lowestPrice?: number;  // Harga terendah yang pernah dilalui koin selama trade berjalan (ATL Trade)
+  mfePct?: number;       // Maximum Favorable Excursion (% keuntungan maksimal teoretis selama posisi berjalan)
   maePct?: number;
   peakPnlPct?: number;
   postExit30m?: PostExitSnapshot;

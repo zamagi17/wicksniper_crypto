@@ -2011,13 +2011,14 @@ export class BinanceFuturesClient {
           this.lastDirectionalTrend = priorTrend;
         }
 
-        // Kebijakan Eksekusi (Anti-Whipsaw & Anti Bear/Bull Flag Trap):
+        // Kebijakan Eksekusi (Anti-Whipsaw, Anti Trap & Intra-Deadband EMA Check):
         // 1. BULLISH  -> canLong = !isFlashDump, canShort = false
         // 2. BEARISH  -> canLong = false, canShort = !isFlashSurge
-        // 3. SIDEWAYS (Regime Hysteresis / Trend Inertia):
-        //    - Pasca-BEARISH: canLong = false (LONG DITAHAN agar terhindar dari Bear-Flag Trap), canShort = !isFlashSurge
-        //    - Pasca-BULLISH: canLong = !isFlashDump, canShort = false (SHORT DITAHAN agar terhindar dari Bull-Flag Trap)
-        //    - Murni Netral / Inherit Nonaktif: canLong = !isFlashDump, canShort = !isFlashSurge
+        // 3. SIDEWAYS (Regime Hysteresis / Trend Inertia & Intra-Deadband EMA Guard):
+        //    - Long hanya diizinkan jika tren sideways membolehkan LONG dan harga masih bernilai positif di atas EMA (diffPct >= 0).
+        //      Jika harga minus / di bawah EMA (diffPct < 0), dilarang LONG karena berisiko breakdown masuk ke bearish.
+        //    - Short hanya diizinkan jika tren sideways membolehkan SHORT dan harga masih bernilai negatif di bawah EMA (diffPct <= 0).
+        //      Jika harga positif / di atas EMA (diffPct > 0), dilarang SHORT karena berisiko breakout masuk ke bullish.
         let canLong = false;
         let canShort = false;
 
@@ -2028,15 +2029,18 @@ export class BinanceFuturesClient {
           canLong = false;
           canShort = !isFlashSurge;
         } else {
+          const isAboveEma = diffPct >= 0;
+          const isBelowEma = diffPct <= 0;
+
           if (inheritSidewaysTrend && priorTrend === 'BEARISH') {
             canLong = false;
-            canShort = !isFlashSurge;
+            canShort = !isFlashSurge && isBelowEma;
           } else if (inheritSidewaysTrend && priorTrend === 'BULLISH') {
-            canLong = !isFlashDump;
+            canLong = !isFlashDump && isAboveEma;
             canShort = false;
           } else {
-            canLong = !isFlashDump;
-            canShort = !isFlashSurge;
+            canLong = !isFlashDump && isAboveEma;
+            canShort = !isFlashSurge && isBelowEma;
           }
         }
 
@@ -2044,6 +2048,15 @@ export class BinanceFuturesClient {
         let reason = `BTC $${currentPrice.toFixed(0)} (${trend}${priorLabel} vs EMA${period} $${ema.toFixed(0)}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) | 1-Candle Δ: ${candleChangePct >= 0 ? '+' : ''}${candleChangePct.toFixed(2)}%`;
         if (isFlashDump) reason += ' | ⚠️ FLASH DUMP';
         if (isFlashSurge) reason += ' | 🚀 FLASH SURGE';
+        if (trend === 'SIDEWAYS') {
+          if (inheritSidewaysTrend && priorTrend === 'BULLISH' && !canLong && !isFlashDump) {
+            reason += ' | ⛔ Di bawah EMA (Long Ditahan)';
+          } else if (inheritSidewaysTrend && priorTrend === 'BEARISH' && !canShort && !isFlashSurge) {
+            reason += ' | ⛔ Di atas EMA (Short Ditahan)';
+          } else if (!inheritSidewaysTrend && !canLong && !canShort) {
+            reason += ' | ⛔ Di luar zona aman EMA (Posisi Ditahan)';
+          }
+        }
 
         const result: BtcTrendStatus = {
           btcPrice: currentPrice,

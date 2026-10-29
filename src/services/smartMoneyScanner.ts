@@ -615,9 +615,14 @@ export class SmartMoneyScanner {
           if (btcTrendStatus) {
             if (detectedSide === 'LONG' && !btcTrendStatus.canLong) {
               const dumpDetail = btcTrendStatus.isFlashDump ? ' (FLASH DUMP)' : '';
-              const sidewaysDetail = btcTrendStatus.trend === 'SIDEWAYS' && btcTrendStatus.priorTrend === 'BEARISH'
-                ? ' (SIDEWAYS pasca-BEARISH - Long Ditahan)'
-                : '';
+              let sidewaysDetail = '';
+              if (btcTrendStatus.trend === 'SIDEWAYS') {
+                if (btcTrendStatus.priorTrend === 'BEARISH') {
+                  sidewaysDetail = ' (SIDEWAYS pasca-BEARISH - Long Ditahan)';
+                } else if ((btcTrendStatus.diffPct ?? 0) < 0) {
+                  sidewaysDetail = ` (SIDEWAYS di bawah EMA [${(btcTrendStatus.diffPct ?? 0).toFixed(2)}%] - Long Ditahan)`;
+                }
+              }
               logger.log(
                 'INFO',
                 `🛡️ [BTC GUARD SKIP] ${symbol} LONG dibatalkan: BTC sedang ${btcTrendStatus.trend}${dumpDetail}${sidewaysDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko pisau jatuh pasar.`
@@ -627,9 +632,14 @@ export class SmartMoneyScanner {
 
             if (detectedSide === 'SHORT' && !btcTrendStatus.canShort) {
               const surgeDetail = btcTrendStatus.isFlashSurge ? ' (FLASH SURGE)' : '';
-              const sidewaysDetail = btcTrendStatus.trend === 'SIDEWAYS' && btcTrendStatus.priorTrend === 'BULLISH'
-                ? ' (SIDEWAYS pasca-BULLISH - Short Ditahan)'
-                : '';
+              let sidewaysDetail = '';
+              if (btcTrendStatus.trend === 'SIDEWAYS') {
+                if (btcTrendStatus.priorTrend === 'BULLISH') {
+                  sidewaysDetail = ' (SIDEWAYS pasca-BULLISH - Short Ditahan)';
+                } else if ((btcTrendStatus.diffPct ?? 0) > 0) {
+                  sidewaysDetail = ` (SIDEWAYS di atas EMA [${(btcTrendStatus.diffPct ?? 0).toFixed(2)}%] - Short Ditahan)`;
+                }
+              }
               logger.log(
                 'INFO',
                 `🛡️ [BTC GUARD SKIP] ${symbol} SHORT dibatalkan: BTC sedang ${btcTrendStatus.trend}${surgeDetail}${sidewaysDetail} ($${btcTrendStatus.btcPrice.toFixed(0)} vs EMA${btcPeriod} $${btcTrendStatus.ema.toFixed(0)}, 1-candle Δ: ${btcTrendStatus.changePct >= 0 ? '+' : ''}${btcTrendStatus.changePct.toFixed(2)}%). Menghindari risiko kena squeeze pump pasar.`
