@@ -172,7 +172,9 @@ export interface SmartMoneyConfig {
   period: '5m' | '15m' | '1h';
   thresholdShortRatio: number; // e.g. 0.60 (Whale short >= 60%)
   thresholdLongRatio: number;  // e.g. 0.60 (Whale long >= 60%)
-  retailTrapFilter: boolean;   // Konfirmasi retail di sisi berlawanan
+  retailTrapFilter: boolean;   // Konfirmasi retail di sisi berlawanan (global/legacy fallback)
+  retailTrapFilterShort?: boolean; // Khusus konfirmasi retail trap untuk SHORT (Retail wajib Long >= 50%)
+  retailTrapFilterLong?: boolean;  // Khusus konfirmasi retail trap untuk LONG (Retail wajib Short >= 50%)
   rsiFilterEnabled?: boolean;  // Filter RSI Anti-Pucuk/Lembah
   minRsiShort?: number;        // Batas minimal RSI untuk Short (e.g. 48)
   maxRsiShort?: number;        // Batas maksimal RSI untuk Short (e.g. 65 - Anti-Parabolic Pump/Squeeze)
@@ -193,6 +195,7 @@ export interface SmartMoneyConfig {
   whaleMaxPremiumPct?: number; // Toleransi jemputan di dekat modal paus (%, default: 0.15%)
   atrPullbackMultiplier?: number; // Pengali ATR 15m untuk jarak diskon jika patokan ATR digunakan (default: 0.4x)
   reboundThresholdPct?: number; // Konfirmasi pantulan anti-pisau jatuh sebelum eksekusi (%, default: 0.15%)
+  reboundThresholdShortPct?: number; // Konfirmasi rejeksi pantulan khusus SHORT (%, default: sama dengan reboundThresholdPct)
   signalTtlMinutes?: number; // Batas waktu tunggu diskon sebelum sinyal expired (menit, default: 30)
   invalidationThresholdPct?: number; // Toleransi jebol di bawah modal paus sebelum sinyal dibatalkan (%, default: 1.2%)
   entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA

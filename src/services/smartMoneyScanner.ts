@@ -302,12 +302,14 @@ export class SmartMoneyScanner {
 
       const smartShort = metrics.smartTraderShortRatio ?? 0.5;
       const smartLong = metrics.smartTraderLongRatio ?? 0.5;
+      const retailFilterShort = this.config.retailTrapFilterShort ?? this.config.retailTrapFilter;
+      const retailFilterLong = this.config.retailTrapFilterLong ?? this.config.retailTrapFilter;
 
       if (driver === 'SMART_TRADER') {
         // MODE 1: SMART TRADER DRIVEN (Default & Rekomendasi)
         // Mengikuti arah Top 20% Akun Trader Profit Binance (murni spekulasi cuan, bebas hedging spot paus)
         if (canShort && smartShort >= thresholdShort) {
-          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
+          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= 0.50;
           const whaleAligned = !isSmartFilterOn || metrics.whaleShortRatio >= minWhaleRatioShort;
 
           if (!whaleAligned) {
@@ -328,7 +330,7 @@ export class SmartMoneyScanner {
         }
 
         if (!detectedSide && canLong && smartLong >= thresholdLong) {
-          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
+          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= 0.50;
           const whaleAligned = !isSmartFilterOn || metrics.whaleLongRatio >= minWhaleRatioLong;
 
           if (!whaleAligned) {
@@ -350,7 +352,7 @@ export class SmartMoneyScanner {
       } else if (driver === 'DUAL_CONFLUENCE') {
         // MODE 2: DUAL CONFLUENCE (Wajib Paus dan Smart Trader searah di atas threshold)
         if (canShort && metrics.whaleShortRatio >= thresholdShort && smartShort >= thresholdShort) {
-          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
+          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= 0.50;
           if (isRetailTrapped) {
             detectedSide = 'SHORT';
             smartTraderAligned = true;
@@ -361,7 +363,7 @@ export class SmartMoneyScanner {
         }
 
         if (!detectedSide && canLong && metrics.whaleLongRatio >= thresholdLong && smartLong >= thresholdLong) {
-          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
+          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= 0.50;
           if (isRetailTrapped) {
             detectedSide = 'LONG';
             smartTraderAligned = true;
@@ -373,7 +375,7 @@ export class SmartMoneyScanner {
       } else {
         // MODE 3: WHALE DRIVEN (Mode Lama)
         if (canShort && metrics.whaleShortRatio >= thresholdShort) {
-          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailLongRatio >= 0.50;
+          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= 0.50;
           smartTraderAligned = smartShort >= minSmartRatio;
 
           if (isSmartFilterOn && !smartTraderAligned) {
@@ -393,7 +395,7 @@ export class SmartMoneyScanner {
         }
 
         if (!detectedSide && canLong && metrics.whaleLongRatio >= thresholdLong) {
-          const isRetailTrapped = !this.config.retailTrapFilter || metrics.retailShortRatio >= 0.50;
+          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= 0.50;
           smartTraderAligned = smartLong >= minSmartRatio;
 
           if (isSmartFilterOn && !smartTraderAligned) {

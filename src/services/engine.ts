@@ -6356,7 +6356,9 @@ export class WickSniperEngine {
       highestPrice: !isLong ? signal.currentPrice : undefined,
       currentPrice: signal.currentPrice,
       currentReboundPct: 0,
-      targetReboundPct: smCfg.reboundThresholdPct ?? 0.15,
+      targetReboundPct: isLong
+        ? (smCfg.reboundThresholdPct ?? 0.15)
+        : (smCfg.reboundThresholdShortPct ?? smCfg.reboundThresholdPct ?? 0.15),
       createdAt: Date.now(),
       expiresAt,
       armedAt: inDiscount ? Date.now() : undefined,
