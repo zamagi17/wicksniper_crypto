@@ -172,6 +172,10 @@ export class WickSniperEngine {
       thresholdShortRatio: 0.60,
       thresholdLongRatio: 0.60,
       retailTrapFilter: true,
+      retailTrapFilterShort: false,
+      retailTrapFilterLong: false,
+      retailTrapThresholdShort: 50,
+      retailTrapThresholdLong: 50,
       rsiFilterEnabled: true,
       minRsiShort: 48,
       maxRsiShort: 65,
@@ -383,6 +387,10 @@ export class WickSniperEngine {
         thresholdShortRatio: 0.60,
         thresholdLongRatio: 0.60,
         retailTrapFilter: true,
+        retailTrapFilterShort: false,
+        retailTrapFilterLong: false,
+        retailTrapThresholdShort: 50,
+        retailTrapThresholdLong: 50,
         pullbackMinPct: 0.5,
         pullbackMaxWaitSeconds: 15,
         executionMode: 'TWO_STAGE_PULLBACK',
@@ -5456,7 +5464,12 @@ export class WickSniperEngine {
     const minWhaleShort = (rawMinWhaleShort > 1 ? rawMinWhaleShort / 100 : rawMinWhaleShort);
 
     const isSmartFilterOn = smCfg.smartTraderFilterEnabled !== false;
-    const isRetailTrapOn = smCfg.retailTrapFilter !== false;
+    const isRetailTrapLongOn = smCfg.retailTrapFilterLong ?? (smCfg.retailTrapFilter !== false);
+    const isRetailTrapShortOn = smCfg.retailTrapFilterShort ?? (smCfg.retailTrapFilter !== false);
+    const rawTrapThreshShort = smCfg.retailTrapThresholdShort ?? 50;
+    const trapThreshShort = rawTrapThreshShort > 1 ? rawTrapThreshShort / 100 : rawTrapThreshShort;
+    const rawTrapThreshLong = smCfg.retailTrapThresholdLong ?? 50;
+    const trapThreshLong = rawTrapThreshLong > 1 ? rawTrapThreshLong / 100 : rawTrapThreshLong;
     const isFundingOn = smCfg.fundingRateFilterEnabled !== false;
     const isBtcFilterOn = smCfg.btcTrendFilterEnabled !== false;
     const minFrShort = smCfg.minFundingRatePct ?? -0.02;
@@ -5501,11 +5514,11 @@ export class WickSniperEngine {
         detail: `Paus Long ${(wLong * 100).toFixed(1)}% (Syarat Min: >= ${(minWhaleLong * 100).toFixed(0)}%)`,
       });
 
-      const retailTrapOk = !isRetailTrapOn || rShort >= 0.50;
+      const retailTrapOk = !isRetailTrapLongOn || rShort >= trapThreshLong;
       checks.push({
         name: 'Konfirmasi Retail Trap',
         passed: retailTrapOk,
-        detail: `Retail Short ${(rShort * 100).toFixed(1)}% (Syarat Ritel Lawan: >= 50%)`,
+        detail: `Retail Short ${(rShort * 100).toFixed(1)}% (Syarat Ritel Lawan: >= ${(trapThreshLong * 100).toFixed(0)}%)`,
       });
 
       const frVal = fundingRatePct ?? 0;
@@ -5547,11 +5560,11 @@ export class WickSniperEngine {
         detail: `Paus Short ${(wShort * 100).toFixed(1)}% (Syarat Min: >= ${(minWhaleShort * 100).toFixed(0)}%)`,
       });
 
-      const retailTrapOk = !isRetailTrapOn || rLong >= 0.50;
+      const retailTrapOk = !isRetailTrapShortOn || rLong >= trapThreshShort;
       checks.push({
         name: 'Konfirmasi Retail Trap',
         passed: retailTrapOk,
-        detail: `Retail Long ${(rLong * 100).toFixed(1)}% (Syarat Ritel Lawan: >= 50%)`,
+        detail: `Retail Long ${(rLong * 100).toFixed(1)}% (Syarat Ritel Lawan: >= ${(trapThreshShort * 100).toFixed(0)}%)`,
       });
 
       const frVal = fundingRatePct ?? 0;

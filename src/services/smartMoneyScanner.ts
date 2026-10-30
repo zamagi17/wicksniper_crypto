@@ -304,12 +304,16 @@ export class SmartMoneyScanner {
       const smartLong = metrics.smartTraderLongRatio ?? 0.5;
       const retailFilterShort = this.config.retailTrapFilterShort ?? this.config.retailTrapFilter;
       const retailFilterLong = this.config.retailTrapFilterLong ?? this.config.retailTrapFilter;
+      const rawTrapThreshShort = this.config.retailTrapThresholdShort ?? 50;
+      const trapThreshShort = rawTrapThreshShort > 1 ? rawTrapThreshShort / 100 : rawTrapThreshShort;
+      const rawTrapThreshLong = this.config.retailTrapThresholdLong ?? 50;
+      const trapThreshLong = rawTrapThreshLong > 1 ? rawTrapThreshLong / 100 : rawTrapThreshLong;
 
       if (driver === 'SMART_TRADER') {
         // MODE 1: SMART TRADER DRIVEN (Default & Rekomendasi)
         // Mengikuti arah Top 20% Akun Trader Profit Binance (murni spekulasi cuan, bebas hedging spot paus)
         if (canShort && smartShort >= thresholdShort) {
-          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= 0.50;
+          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= trapThreshShort;
           const whaleAligned = !isSmartFilterOn || metrics.whaleShortRatio >= minWhaleRatioShort;
 
           if (!whaleAligned) {
@@ -324,13 +328,13 @@ export class SmartMoneyScanner {
           } else {
             logger.log(
               'INFO',
-              `🧠 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Smart Trader Short ${(smartShort * 100).toFixed(1)}% tapi Retail tidak tersangkut Long (Retail Long hanya ${(metrics.retailLongRatio * 100).toFixed(1)}% < min 50%). Konfirmasi Retail Trap gagal.`
+              `🧠 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Smart Trader Short ${(smartShort * 100).toFixed(1)}% tapi Retail tidak tersangkut Long (Retail Long hanya ${(metrics.retailLongRatio * 100).toFixed(1)}% < min ${(trapThreshShort * 100).toFixed(0)}%). Konfirmasi Retail Trap gagal.`
             );
           }
         }
 
         if (!detectedSide && canLong && smartLong >= thresholdLong) {
-          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= 0.50;
+          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= trapThreshLong;
           const whaleAligned = !isSmartFilterOn || metrics.whaleLongRatio >= minWhaleRatioLong;
 
           if (!whaleAligned) {
@@ -345,37 +349,37 @@ export class SmartMoneyScanner {
           } else {
             logger.log(
               'INFO',
-              `🧠 [SMART MONEY SKIP] ${symbol} LONG dilewati: Smart Trader Long ${(smartLong * 100).toFixed(1)}% tapi Retail tidak tersangkut Short (Retail Short hanya ${(metrics.retailShortRatio * 100).toFixed(1)}% < min 50%). Konfirmasi Retail Trap gagal.`
+              `🧠 [SMART MONEY SKIP] ${symbol} LONG dilewati: Smart Trader Long ${(smartLong * 100).toFixed(1)}% tapi Retail tidak tersangkut Short (Retail Short hanya ${(metrics.retailShortRatio * 100).toFixed(1)}% < min ${(trapThreshLong * 100).toFixed(0)}%). Konfirmasi Retail Trap gagal.`
             );
           }
         }
       } else if (driver === 'DUAL_CONFLUENCE') {
         // MODE 2: DUAL CONFLUENCE (Wajib Paus dan Smart Trader searah di atas threshold)
         if (canShort && metrics.whaleShortRatio >= thresholdShort && smartShort >= thresholdShort) {
-          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= 0.50;
+          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= trapThreshShort;
           if (isRetailTrapped) {
             detectedSide = 'SHORT';
             smartTraderAligned = true;
             reason = `Dual Confluence Short: Paus ${(metrics.whaleShortRatio * 100).toFixed(1)}% + Smart Trader ${(smartShort * 100).toFixed(1)}% | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
           } else {
-            logger.log('INFO', `🎯 [DUAL CONFLUENCE SKIP] ${symbol} SHORT dilewati: Paus & Smart Trader Short, tapi Retail tidak tersangkut Long (${(metrics.retailLongRatio * 100).toFixed(1)}% < 50%).`);
+            logger.log('INFO', `🎯 [DUAL CONFLUENCE SKIP] ${symbol} SHORT dilewati: Paus & Smart Trader Short, tapi Retail tidak tersangkut Long (${(metrics.retailLongRatio * 100).toFixed(1)}% < ${(trapThreshShort * 100).toFixed(0)}%).`);
           }
         }
 
         if (!detectedSide && canLong && metrics.whaleLongRatio >= thresholdLong && smartLong >= thresholdLong) {
-          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= 0.50;
+          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= trapThreshLong;
           if (isRetailTrapped) {
             detectedSide = 'LONG';
             smartTraderAligned = true;
             reason = `Dual Confluence Long: Paus ${(metrics.whaleLongRatio * 100).toFixed(1)}% + Smart Trader ${(smartLong * 100).toFixed(1)}% | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
           } else {
-            logger.log('INFO', `🎯 [DUAL CONFLUENCE SKIP] ${symbol} LONG dilewati: Paus & Smart Trader Long, tapi Retail tidak tersangkut Short (${(metrics.retailShortRatio * 100).toFixed(1)}% < 50%).`);
+            logger.log('INFO', `🎯 [DUAL CONFLUENCE SKIP] ${symbol} LONG dilewati: Paus & Smart Trader Long, tapi Retail tidak tersangkut Short (${(metrics.retailShortRatio * 100).toFixed(1)}% < ${(trapThreshLong * 100).toFixed(0)}%).`);
           }
         }
       } else {
         // MODE 3: WHALE DRIVEN (Mode Lama)
         if (canShort && metrics.whaleShortRatio >= thresholdShort) {
-          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= 0.50;
+          const isRetailTrapped = !retailFilterShort || metrics.retailLongRatio >= trapThreshShort;
           smartTraderAligned = smartShort >= minSmartRatio;
 
           if (isSmartFilterOn && !smartTraderAligned) {
@@ -390,12 +394,12 @@ export class SmartMoneyScanner {
               : '';
             reason = `Whale Short ${(metrics.whaleShortRatio * 100).toFixed(1)}%${smartTag} | Retail Long ${(metrics.retailLongRatio * 100).toFixed(1)}%`;
           } else {
-            logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% tapi Retail tidak tersangkut Long (${(metrics.retailLongRatio * 100).toFixed(1)}% < 50%).`);
+            logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Paus Short ${(metrics.whaleShortRatio * 100).toFixed(1)}% tapi Retail tidak tersangkut Long (${(metrics.retailLongRatio * 100).toFixed(1)}% < ${(trapThreshShort * 100).toFixed(0)}%).`);
           }
         }
 
         if (!detectedSide && canLong && metrics.whaleLongRatio >= thresholdLong) {
-          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= 0.50;
+          const isRetailTrapped = !retailFilterLong || metrics.retailShortRatio >= trapThreshLong;
           smartTraderAligned = smartLong >= minSmartRatio;
 
           if (isSmartFilterOn && !smartTraderAligned) {
@@ -410,7 +414,7 @@ export class SmartMoneyScanner {
               : '';
             reason = `Whale Long ${(metrics.whaleLongRatio * 100).toFixed(1)}%${smartTag} | Retail Short ${(metrics.retailShortRatio * 100).toFixed(1)}%`;
           } else {
-            logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% tapi Retail tidak tersangkut Short (${(metrics.retailShortRatio * 100).toFixed(1)}% < 50%).`);
+            logger.log('INFO', `🐋 [SMART MONEY SKIP] ${symbol} LONG dilewati: Paus Long ${(metrics.whaleLongRatio * 100).toFixed(1)}% tapi Retail tidak tersangkut Short (${(metrics.retailShortRatio * 100).toFixed(1)}% < ${(trapThreshLong * 100).toFixed(0)}%).`);
           }
         }
       }

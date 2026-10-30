@@ -650,7 +650,15 @@
                   <input type="checkbox" id="cfg-sm-retail-trap-short" style="width: 16px; height: 16px; accent-color: #ff453a;">
                   <span>🔴 Wajib Retail Trap Khusus SHORT</span>
                 </label>
-                <small class="form-hint" style="margin-top: 4px; display: block; color: #94a3b8;">Hanya buka SHORT jika mayoritas Ritel sedang tersangkut LONG (≥ 50%). Melindungi posisi Short dari bahaya short squeeze bandar.</small>
+                <small class="form-hint" style="margin-top: 4px; display: block; color: #94a3b8;">Hanya buka SHORT jika Ritel tersangkut posisi LONG (melindungi dari resiko short squeeze).</small>
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 0.8rem; color: #cbd5e1; font-weight: 500;">Ambang Min Ritel Long:</span>
+                  <div style="display: inline-flex; align-items: center; gap: 4px;">
+                    <input type="number" id="cfg-sm-retail-trap-thresh-short" class="form-control" style="width: 65px; height: 26px; padding: 2px 6px; font-size: 0.82rem; text-align: center;" placeholder="50" min="10" max="95" step="1">
+                    <span style="font-size: 0.8rem; color: #94a3b8;">%</span>
+                  </div>
+                  <span style="font-size: 0.75rem; color: #64748b;">(Default: 50% | Bisa 40%)</span>
+                </div>
               </div>
 
               <!-- Toggle Khusus LONG -->
@@ -659,7 +667,15 @@
                   <input type="checkbox" id="cfg-sm-retail-trap" style="width: 16px; height: 16px; accent-color: #2ed573;">
                   <span>🟢 Wajib Retail Trap untuk LONG</span>
                 </label>
-                <small class="form-hint" style="margin-top: 4px; display: block; color: #94a3b8;">Wajib Ritel sedang SHORT (≥ 50%) untuk buka LONG. Biarkan mati jika ingin sinyal LONG tetap bebas & agresif seperti sekarang.</small>
+                <small class="form-hint" style="margin-top: 4px; display: block; color: #94a3b8;">Wajib Ritel sedang SHORT untuk buka LONG. Biarkan mati jika ingin sinyal LONG tetap bebas & agresif.</small>
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 0.8rem; color: #cbd5e1; font-weight: 500;">Ambang Min Ritel Short:</span>
+                  <div style="display: inline-flex; align-items: center; gap: 4px;">
+                    <input type="number" id="cfg-sm-retail-trap-thresh-long" class="form-control" style="width: 65px; height: 26px; padding: 2px 6px; font-size: 0.82rem; text-align: center;" placeholder="50" min="10" max="95" step="1">
+                    <span style="font-size: 0.8rem; color: #94a3b8;">%</span>
+                  </div>
+                  <span style="font-size: 0.75rem; color: #64748b;">(Standar: 50%)</span>
+                </div>
               </div>
             </div>
           </div>

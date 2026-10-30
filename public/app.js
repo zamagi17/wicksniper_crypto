@@ -3752,7 +3752,9 @@ function populateSettingsForm(cfg) {
   const smRetailShortCheckbox = document.getElementById('cfg-sm-retail-trap-short');
   if (smRetailShortCheckbox) smRetailShortCheckbox.checked = !!smCfg.retailTrapFilterShort;
   const smRetailCheckbox = document.getElementById('cfg-sm-retail-trap');
-  if (smRetailCheckbox) smRetailCheckbox.checked = smCfg.retailTrapFilter !== false;
+  if (smRetailCheckbox) smRetailCheckbox.checked = smCfg.retailTrapFilterLong !== undefined ? !!smCfg.retailTrapFilterLong : (smCfg.retailTrapFilter !== false);
+  setVal('cfg-sm-retail-trap-thresh-short', smCfg.retailTrapThresholdShort ?? 50);
+  setVal('cfg-sm-retail-trap-thresh-long', smCfg.retailTrapThresholdLong ?? 50);
   setVal('cfg-sm-tp-pct', smCfg.takeProfitPct ?? 1.5);
   setVal('cfg-sm-sl-pct', smCfg.stopLossPct ?? 1.2);
   setVal('cfg-sm-margin', smCfg.marginUsdt ?? 5);
@@ -4183,6 +4185,8 @@ function getSettingsFormData() {
       retailTrapFilter: !!document.getElementById('cfg-sm-retail-trap')?.checked,
       retailTrapFilterShort: !!document.getElementById('cfg-sm-retail-trap-short')?.checked,
       retailTrapFilterLong: !!document.getElementById('cfg-sm-retail-trap')?.checked,
+      retailTrapThresholdShort: parseFloat(getVal('cfg-sm-retail-trap-thresh-short', '50')) || 50,
+      retailTrapThresholdLong: parseFloat(getVal('cfg-sm-retail-trap-thresh-long', '50')) || 50,
       takeProfitPct: parseFloat(getVal('cfg-sm-tp-pct', '1.5')) || 1.5,
       stopLossPct: parseFloat(getVal('cfg-sm-sl-pct', '1.2')) || 1.2,
       structuralSlEnabled: !!document.getElementById('cfg-sm-structural-sl-enabled')?.checked,

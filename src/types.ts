@@ -173,8 +173,10 @@ export interface SmartMoneyConfig {
   thresholdShortRatio: number; // e.g. 0.60 (Whale short >= 60%)
   thresholdLongRatio: number;  // e.g. 0.60 (Whale long >= 60%)
   retailTrapFilter: boolean;   // Konfirmasi retail di sisi berlawanan (global/legacy fallback)
-  retailTrapFilterShort?: boolean; // Khusus konfirmasi retail trap untuk SHORT (Retail wajib Long >= 50%)
-  retailTrapFilterLong?: boolean;  // Khusus konfirmasi retail trap untuk LONG (Retail wajib Short >= 50%)
+  retailTrapFilterShort?: boolean; // Khusus konfirmasi retail trap untuk SHORT (Retail wajib Long >= threshold)
+  retailTrapFilterLong?: boolean;  // Khusus konfirmasi retail trap untuk LONG (Retail wajib Short >= threshold)
+  retailTrapThresholdShort?: number; // Ambang minimal rasio retail Long untuk trigger Short (%, default: 50%)
+  retailTrapThresholdLong?: number;  // Ambang minimal rasio retail Short untuk trigger Long (%, default: 50%)
   rsiFilterEnabled?: boolean;  // Filter RSI Anti-Pucuk/Lembah
   minRsiShort?: number;        // Batas minimal RSI untuk Short (e.g. 48)
   maxRsiShort?: number;        // Batas maksimal RSI untuk Short (e.g. 65 - Anti-Parabolic Pump/Squeeze)
