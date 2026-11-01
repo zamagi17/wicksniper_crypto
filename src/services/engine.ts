@@ -2613,7 +2613,7 @@ export class WickSniperEngine {
     let isBep = false;
     let reason = '';
 
-    if (bepDefenseActive && !pos.partialTpDone) {
+    if (pos.strategyType !== 'SMART_MONEY' && bepDefenseActive && !pos.partialTpDone) {
       // Kondisi 1 (Prioritas Utama): Proteksi Layer Terakhir / Jaring Habis (Tanpa Jaring Pengaman Tersisa)
       const isFinalLayer = totalLayersCount > 1 && (filledLayersCount >= totalLayersCount || (pendingLayersCount === 0 && filledLayersCount > 0));
       if (finalLayerDefenseActive && isFinalLayer) {
@@ -2734,7 +2734,31 @@ export class WickSniperEngine {
 
       this.recalculatePositionSl(pos);
 
-      if (this.config.exit.atrDynamicSlTpEnabled) {
+      // Sinkronkan trigger Auto-BEP Smart Money dengan harga rata-rata baru
+      if (pos.strategyType === 'SMART_MONEY' && !pos.isAutoBepDone && this.config.smartMoney?.autoBepEnabled !== false) {
+        const smCfg = this.config.smartMoney;
+        const isShort = pos.side === 'SHORT';
+        const atrDynamic = smCfg?.atrDynamicSlTpEnabled !== false && (pos.atr || 0) > 0;
+        const atrVal = pos.atr || 0;
+        const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
+        if (atrDynamic) {
+          const bepMult = (smCfg?.atrBepTriggerMultiplier ?? 0.6) * tpMult;
+          const bepDist = atrVal * bepMult;
+          pos.bepTriggerPrice = parseFloat(binanceFutures.formatPrice(
+            pos.symbol,
+            isShort ? pos.avgEntryPrice - bepDist : pos.avgEntryPrice + bepDist
+          ));
+        } else {
+          const fallbackTpPct = smCfg?.takeProfitPct || 1.5;
+          const triggerPct = (fallbackTpPct * 0.4) / 100;
+          pos.bepTriggerPrice = parseFloat(binanceFutures.formatPrice(
+            pos.symbol,
+            isShort ? pos.avgEntryPrice * (1 - triggerPct) : pos.avgEntryPrice * (1 + triggerPct)
+          ));
+        }
+      }
+
+      if (this.config.exit.atrDynamicSlTpEnabled && (!pos.strategyType || pos.strategyType === 'WICK_SNIPER')) {
         void this.applyAtrTargetsToPosition(pos);
       }
 
@@ -3134,7 +3158,12 @@ export class WickSniperEngine {
     const realizedProfit = parseFloat(order.rp || '0');
 
     // 1. ORDER BUY TERISI: TAKE PROFIT
-    if (side === 'BUY' && (status === 'FILLED' || status === 'PARTIALLY_FILLED')) {
+    const isLong = pos.side === 'LONG';
+    const tpSide = isLong ? 'SELL' : 'BUY';
+    const gridSide = isLong ? 'BUY' : 'SELL';
+
+    // 1. ORDER TAKE PROFIT TERISI
+    if (side === tpSide && (status === 'FILLED' || status === 'PARTIALLY_FILLED')) {
       const isTpMatch = (pos.tpOrderId && String(pos.tpOrderId) === orderId) ||
                         (pos.tp2OrderId && String(pos.tp2OrderId) === orderId) ||
                         isReduceOnly;
@@ -3179,7 +3208,7 @@ export class WickSniperEngine {
     }
 
     // 2. ORDER SELL TERISI: GRID LAYER TERISI
-    if (side === 'SELL' && status === 'FILLED') {
+    if (side === gridSide && status === 'FILLED') {
       let layer = pos.layers.find((l) => l.orderId && String(l.orderId) === orderId);
       if (!layer) {
         layer = pos.layers.find((l) => l.status === 'PENDING' && fillPrice > 0 && Math.abs(l.price - fillPrice) / fillPrice < 0.005);
@@ -3226,6 +3255,30 @@ export class WickSniperEngine {
           }
 
           this.recalculatePositionSl(pos);
+
+      // Sinkronkan trigger Auto-BEP Smart Money dengan harga rata-rata baru
+      if (pos.strategyType === 'SMART_MONEY' && !pos.isAutoBepDone && this.config.smartMoney?.autoBepEnabled !== false) {
+        const smCfg = this.config.smartMoney;
+        const isShort = pos.side === 'SHORT';
+        const atrDynamic = smCfg?.atrDynamicSlTpEnabled !== false && (pos.atr || 0) > 0;
+        const atrVal = pos.atr || 0;
+        const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
+        if (atrDynamic) {
+          const bepMult = (smCfg?.atrBepTriggerMultiplier ?? 0.6) * tpMult;
+          const bepDist = atrVal * bepMult;
+          pos.bepTriggerPrice = parseFloat(binanceFutures.formatPrice(
+            pos.symbol,
+            isShort ? pos.avgEntryPrice - bepDist : pos.avgEntryPrice + bepDist
+          ));
+        } else {
+          const fallbackTpPct = smCfg?.takeProfitPct || 1.5;
+          const triggerPct = (fallbackTpPct * 0.4) / 100;
+          pos.bepTriggerPrice = parseFloat(binanceFutures.formatPrice(
+            pos.symbol,
+            isShort ? pos.avgEntryPrice * (1 - triggerPct) : pos.avgEntryPrice * (1 + triggerPct)
+          ));
+        }
+      }
           pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
 
           this.updateTrailingSL(pos);
@@ -3245,7 +3298,7 @@ export class WickSniperEngine {
     }
 
     // 3. ORDER SELL DIBATALKAN / EXPIRED
-    if (side === 'SELL' && (status === 'CANCELED' || status === 'EXPIRED')) {
+    if (side === gridSide && (status === 'CANCELED' || status === 'EXPIRED')) {
       const layer = pos.layers.find((l) => l.orderId && String(l.orderId) === orderId);
       if (layer && layer.status === 'PENDING') {
         layer.status = 'CANCELLED';
@@ -4418,7 +4471,7 @@ export class WickSniperEngine {
   }
 
   private async applyAtrTargetsToPosition(pos: ActivePosition, entryPriceOverride?: number): Promise<void> {
-    if (!this.config.exit.atrDynamicSlTpEnabled) return;
+    if (!this.config.exit.atrDynamicSlTpEnabled || (pos.strategyType && pos.strategyType !== 'WICK_SNIPER')) return;
 
     const entryPrice = entryPriceOverride ?? pos.avgEntryPrice;
     if (!entryPrice || entryPrice <= 0) return;
@@ -4432,12 +4485,13 @@ export class WickSniperEngine {
     const tpPct = Math.max(this.config.exit.takeProfitPct * tpMult, atrPct * (this.config.exit.atrTpMultiplier ?? 2.5) * tpMult);
     const slPct = Math.max(this.config.exit.hardStopLossPct * slMult, atrPct * (this.config.exit.atrSlMultiplier ?? 1.5) * slMult);
 
-    pos.targetTpPrice = entryPrice * (1 - tpPct / 100);
+    const isLong = pos.side === 'LONG';
+    pos.targetTpPrice = isLong ? entryPrice * (1 + tpPct / 100) : entryPrice * (1 - tpPct / 100);
     const tp2Pct = this.config.exit.takeProfit2Pct && this.config.exit.takeProfit2Pct > 0
       ? this.config.exit.takeProfit2Pct * tpMult
       : tpPct * 2;
-    pos.targetTp2Price = entryPrice * (1 - tp2Pct / 100);
-    pos.hardSlPrice = entryPrice * (1 + slPct / 100);
+    pos.targetTp2Price = isLong ? entryPrice * (1 + tp2Pct / 100) : entryPrice * (1 - tp2Pct / 100);
+    pos.hardSlPrice = isLong ? entryPrice * (1 - slPct / 100) : entryPrice * (1 + slPct / 100);
 
     if (this.shouldDeferHardStopForGrid(pos)) {
       pos.hardSlPrice = Number.POSITIVE_INFINITY;
@@ -4871,6 +4925,30 @@ export class WickSniperEngine {
                     pos.isBepDefenseActive = false;
                   }
                   this.recalculatePositionSl(pos);
+
+      // Sinkronkan trigger Auto-BEP Smart Money dengan harga rata-rata baru
+      if (pos.strategyType === 'SMART_MONEY' && !pos.isAutoBepDone && this.config.smartMoney?.autoBepEnabled !== false) {
+        const smCfg = this.config.smartMoney;
+        const isShort = pos.side === 'SHORT';
+        const atrDynamic = smCfg?.atrDynamicSlTpEnabled !== false && (pos.atr || 0) > 0;
+        const atrVal = pos.atr || 0;
+        const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
+        if (atrDynamic) {
+          const bepMult = (smCfg?.atrBepTriggerMultiplier ?? 0.6) * tpMult;
+          const bepDist = atrVal * bepMult;
+          pos.bepTriggerPrice = parseFloat(binanceFutures.formatPrice(
+            pos.symbol,
+            isShort ? pos.avgEntryPrice - bepDist : pos.avgEntryPrice + bepDist
+          ));
+        } else {
+          const fallbackTpPct = smCfg?.takeProfitPct || 1.5;
+          const triggerPct = (fallbackTpPct * 0.4) / 100;
+          pos.bepTriggerPrice = parseFloat(binanceFutures.formatPrice(
+            pos.symbol,
+            isShort ? pos.avgEntryPrice * (1 - triggerPct) : pos.avgEntryPrice * (1 + triggerPct)
+          ));
+        }
+      }
                   pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
 
                   // Tandai layer yang terisi secara riil di Binance
