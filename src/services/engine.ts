@@ -5205,6 +5205,55 @@ export class WickSniperEngine {
     return (h || 0) * 60 + (m || 0);
   }
 
+  private isSessionWindowActive(
+    startStr: string,
+    endStr: string,
+    nowMins: number,
+    day: number,
+    friCutoffMins: number,
+    sched: TradingScheduleConfig
+  ): boolean {
+    const startMins = this.parseTimeToMinutes(startStr);
+    let endMins = this.parseTimeToMinutes(endStr);
+    if (endMins === 0 && startMins > 0) {
+      endMins = 1440; // '00:00' atau '24:00' dianggap akhir hari jika start waktu malam
+    }
+    if (startMins === endMins) return false;
+
+    if (startMins < endMins) {
+      // Rentang waktu normal pada hari yang sama (misal 14:30 - 17:00, atau 19:30 - 24:00)
+      let effectiveEnd = endMins;
+      if (day === 5 && startMins < friCutoffMins) {
+        effectiveEnd = Math.min(effectiveEnd, friCutoffMins);
+      }
+      return nowMins >= startMins && nowMins < effectiveEnd;
+    }
+
+    // Rentang waktu melewati tengah malam / lintas hari (misal 19:30 s/d 03:00 dini hari)
+    if (nowMins >= startMins) {
+      // Sesi malam (19:30 - 23:59)
+  
+      if (day === 5) {
+        return nowMins < friCutoffMins;
+      }
+      return true;
+    } else if (nowMins < endMins) {
+      // Sesi lanjutan dini hari (00:00 - 03:00)
+      if (day >= 2 && day <= 5) {
+        // Selasa s/d Jumat dini hari (kelanjutan sesi malam Senin s/d Kamis)
+        return true;
+      } else if (day === 1) {
+        // Senin dini hari: aktif jika akhir pekan tidak diblokir atau Minggu malam diizinkan re-open
+        return !sched.blockWeekends || !!sched.sundayNightOpen;
+      } else if (day === 6) {
+        // Sabtu dini hari: hanya aktif jika blokir akhir pekan tidak aktif
+        return !sched.blockWeekends;
+      }
+    }
+
+    return false;
+  }
+
   public isWithinTradingSchedule(ts: number = Date.now()): {
     allowed: boolean;
     reason?: string;
@@ -5281,7 +5330,7 @@ export class WickSniperEngine {
     // Prime Time 3: 07:00 – 09:30 (Pagi - Arah awal candle harian & sesi Asia)
     const p3Start = this.parseTimeToMinutes(sched.primeTime3Start || '07:00');
     const p3End = this.parseTimeToMinutes(sched.primeTime3End || '09:30');
-    if (sched.primeTime3Enabled !== false && nowMins >= p3Start && nowMins < p3End) {
+    if (sched.primeTime3Enabled !== false && this.isSessionWindowActive(sched.primeTime3Start || '07:00', sched.primeTime3End || '09:30', nowMins, day, friCutoffMins, sched)) {
       return {
         allowed: true,
         activeSessionName: sched.primeTime3Name || 'Prime Time 3 (Pagi - Sesi Asia)',
@@ -5293,7 +5342,7 @@ export class WickSniperEngine {
     // Prime Time 1: 14:30 – 17:00 (Sore - Awal sesi London)
     const p1Start = this.parseTimeToMinutes(sched.primeTime1Start || '14:30');
     const p1End = this.parseTimeToMinutes(sched.primeTime1End || '17:00');
-    if (sched.primeTime1Enabled !== false && nowMins >= p1Start && nowMins < p1End) {
+    if (sched.primeTime1Enabled !== false && this.isSessionWindowActive(sched.primeTime1Start || '14:30', sched.primeTime1End || '17:00', nowMins, day, friCutoffMins, sched)) {
       return {
         allowed: true,
         activeSessionName: sched.primeTime1Name || 'Prime Time 1 (Sore - Sesi London)',
@@ -5304,11 +5353,10 @@ export class WickSniperEngine {
 
     // Prime Time 2: 19:30 – 23:30 (Malam - Sesi Utama NY Open & Indeks AS)
     const p2Start = this.parseTimeToMinutes(sched.primeTime2Start || '19:30');
-    let p2End = this.parseTimeToMinutes(sched.primeTime2End || '23:30');
-    if (day === 5) {
-      p2End = Math.min(p2End, friCutoffMins);
-    }
-    if (sched.primeTime2Enabled !== false && nowMins >= p2Start && nowMins < p2End) {
+    if (
+      sched.primeTime2Enabled !== false &&
+      this.isSessionWindowActive(sched.primeTime2Start || '19:30', sched.primeTime2End || '23:30', nowMins, day, friCutoffMins, sched)
+    ) {
       return {
         allowed: true,
         activeSessionName: sched.primeTime2Name || 'Prime Time 2 (Malam - Utama NY Open)',
