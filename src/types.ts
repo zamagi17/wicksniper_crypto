@@ -204,6 +204,8 @@ export interface SmartMoneyConfig {
   layerSpacingPct: number;     // Jarak antar layer jika entryLayers > 1 (%)
   maxTotalMarginPerCoin?: number; // Batas akumulasi modal maksimal per koin untuk Micro-Grid DCA (USDT, e.g. 35, 50, 100)
   gridEmergencySlBufferPct?: number; // Buffer darurat di luar jangkauan layer terakhir untuk Hard SL (%) (default: 3.0%)
+  ladderExitEnabled?: boolean; // Cicil keluar bertahap saat retrace profit (default true jika entryLayers > 1)
+  ladderSteps?: number;        // Jumlah tangga cicil keluar (2, 3, 4, 5 tangga; default 4)
   marginUsdt?: number;         // Modal margin per posisi (USDT)
   leverage?: number;           // Leverage
   takeProfitPct?: number;      // Take Profit (%)
@@ -515,6 +517,9 @@ export interface ActivePosition {
   isBepDefenseActive?: boolean;
   bepDefenseReason?: string;
   trailingTpActive?: boolean;
+  ladderStepIndex?: number;    // Tangga cicil keluar terakhir yang berhasil dieksekusi (0 = belum, 1 = tangga 1, dst.)
+  ladderInitialQty?: number;   // Kuantitas posisi saat ladder unwinding pertama kali dimulai
+  lastLadderStepAt?: number;   // Timestamp eksekusi tangga terakhir
   lowestPrice?: number; // Harga terendah yang pernah dicapai koin selama posisi dibuka (ATL Posisi)
   highestPrice?: number; // Harga tertinggi yang pernah dicapai koin selama posisi dibuka (ATH Posisi)
   trailingRunnerPrice?: number; // Acuan harga ekstrem saat trailing runner aktif

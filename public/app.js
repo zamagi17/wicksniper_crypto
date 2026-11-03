@@ -1406,7 +1406,25 @@ function renderActivePositions(positions) {
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
-      if (isSm && pos.isAutoBepDone) {
+      if (isSm && pos.ladderStepIndex && pos.ladderStepIndex > 0) {
+        const totalLadderSteps = pos.paramsSnapshot?.ladderSteps ?? currentConfig?.smartMoney?.ladderSteps ?? 4;
+        const currentStep = pos.ladderStepIndex;
+        tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 TANGGA ${currentStep}/${totalLadderSteps} HIT • 🛡️ AUTO BEP AKTIF</span>`;
+        tpBannerHtml = `
+          <div style="background: linear-gradient(90deg, rgba(48, 209, 88, 0.12), rgba(0, 240, 255, 0.08)); border: 1px dashed rgba(48, 209, 88, 0.35); border-radius: 6px; padding: 7px 12px; margin: 10px 0 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11.5px;">
+            <span style="color: #30d158; font-weight: 600;">
+              🪜 <b>LADDER UNWINDING (Tangga ${currentStep}/${totalLadderSteps}):</b> Cuan terealisasi <b>+${(pos.partialRealizedPnl || 0).toFixed(2)} USDT</b> aman di dompet!
+            </span>
+            <span style="color: #00f0ff; font-weight: 600;">
+              🛡️ Sisa <b>${pos.totalQty} koin</b> memburu Tangga ${currentStep + 1} dengan <b>Auto BEP @ ${formatCryptoPrice(pos.hardSlPrice)}</b>
+            </span>
+          </div>
+        `;
+        slMetricLabel = `🛡️ Stop Loss (Auto BEP)`;
+        slMetricHtml = `<span style="color: #00f0ff; font-weight: 600;">${formatCryptoPrice(pos.hardSlPrice)} <small style="color: #30d158;">(Zero Risk)</small></span>`;
+        tpMetricLabel = `🎯 Target Tangga ${currentStep + 1}`;
+        tpMetricHtml = `<span class="text-green"><b>${formatCryptoPrice(pos.targetTpPrice)}</b></span>`;
+      } else if (isSm && pos.isAutoBepDone) {
         const bepBuffer = pos.paramsSnapshot?.autoBepBufferPct ?? currentConfig?.smartMoney?.autoBepBufferPct ?? 0.3;
         tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🛡️ AUTO BEP AKTIF (+${bepBuffer}%)</span>`;
         tpBannerHtml = `
@@ -3769,6 +3787,9 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
   setVal('cfg-sm-max-coin-margin', smCfg.maxTotalMarginPerCoin ?? 50);
   setVal('cfg-sm-grid-emergency-sl', smCfg.gridEmergencySlBufferPct ?? 3.0);
+  const smLadderCb = document.getElementById('cfg-sm-ladder-exit');
+  if (smLadderCb) smLadderCb.checked = smCfg.ladderExitEnabled !== false;
+  setVal('cfg-sm-ladder-steps', smCfg.ladderSteps ?? 4);
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   const smTrailingCb = document.getElementById('cfg-sm-trailing-tp');
   if (smTrailingCb) smTrailingCb.checked = smCfg.trailingTpEnabled !== false;
@@ -4205,6 +4226,8 @@ function getSettingsFormData() {
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
       maxTotalMarginPerCoin: parseFloat(getVal('cfg-sm-max-coin-margin', '50')) || 50,
       gridEmergencySlBufferPct: parseFloat(getVal('cfg-sm-grid-emergency-sl', '3.0')) || 3.0,
+      ladderExitEnabled: !!document.getElementById('cfg-sm-ladder-exit')?.checked,
+      ladderSteps: parseInt(getVal('cfg-sm-ladder-steps', '4'), 10) || 4,
       trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
       rsiFilterEnabled: !!document.getElementById('cfg-sm-rsi-filter')?.checked,
@@ -4960,7 +4983,7 @@ function toggleSmLayerSpacing() {
     grp.style.display = val > 1 ? 'block' : 'none';
   }
   if (microPanel) {
-    microPanel.style.display = val > 3 ? 'flex' : 'none';
+    microPanel.style.display = val > 1 ? 'flex' : 'none';
   }
 }
 window.toggleSmLayerSpacing = toggleSmLayerSpacing;

@@ -202,6 +202,8 @@ export class WickSniperEngine {
       layerSpacingPct: 0.8,
       maxTotalMarginPerCoin: 50,
       gridEmergencySlBufferPct: 3.0,
+      ladderExitEnabled: true,
+      ladderSteps: 4,
       marginUsdt: 5.0,
       leverage: 5,
       takeProfitPct: 1.0,
@@ -406,6 +408,8 @@ export class WickSniperEngine {
         layerSpacingPct: 0.8,
         maxTotalMarginPerCoin: 50,
         gridEmergencySlBufferPct: 3.0,
+        ladderExitEnabled: true,
+        ladderSteps: 4,
         marginUsdt: 5.0,
         leverage: 5,
         takeProfitPct: 1.5,
@@ -2259,24 +2263,49 @@ export class WickSniperEngine {
         // B. Evaluasi Take Profit & Trailing TP untuk LONG
         const isSmLong = pos.strategyType === 'SMART_MONEY';
         const longCfg = this.config.momentumLong;
+        const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
         const trailingEnabled = isSmLong
-          ? (this.config.smartMoney?.trailingTpEnabled !== false)
+          ? (smCfg.trailingTpEnabled !== false)
           : (longCfg?.trailingTpEnabled !== false);
         const profitPct = ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
+        const isLadderSmLong = isSmLong && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1));
 
-        // 1. Dual Stage TP: Eksekusi TP 1 (Tutup Partial 50% & Kunci BEP) saat menyentuh target TP awal
-        if (this.config.exit.partialTpEnabled && !pos.partialTpDone && currentPrice >= pos.targetTpPrice && currentPrice > pos.avgEntryPrice && slAgeMs >= 3000) {
-          const executed = await this.executeStage1PartialTp(pos, currentPrice);
-          if (executed) continue;
-        }
+        if (isLadderSmLong) {
+          const totalSteps = Math.max(2, Math.min(6, smCfg.ladderSteps || 4));
+          const currentStep = (pos.ladderStepIndex || 0) + 1;
+          const baseTpPct = smCfg.takeProfitPct || 1.4;
+          const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((currentStep - 1) / (totalSteps - 1)) * 1.0);
+          const stepTargetPrice = pos.avgEntryPrice * (1 + (baseTpPct * stepMult) / 100);
+          pos.targetTpPrice = stepTargetPrice;
 
-        // 2. Jika Stage 1 Partial TP sudah selesai dan harga menyentuh target Stage 2 TP:
-        if (this.config.exit.partialTpEnabled && pos.partialTpDone) {
-          if (currentPrice >= pos.targetTpPrice && slAgeMs >= 3000) {
-            if (!trailingEnabled) {
-              logger.log('SUCCESS', `🎯 [STAGE 2 TP HIT] ${pos.symbol} LONG: Target TP2 tercapai di $${formatCryptoPrice(currentPrice)}. Menutup 100% sisa posisi!`, pos.symbol);
-              this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
-              continue;
+          const ladderAgeMs = pos.lastLadderStepAt ? (Date.now() - pos.lastLadderStepAt) : slAgeMs;
+          if (currentPrice >= stepTargetPrice && currentPrice > pos.avgEntryPrice && ladderAgeMs >= 1500) {
+            if (currentStep >= totalSteps && trailingEnabled) {
+              if (!pos.trailingTpActive) {
+                pos.trailingTpActive = true;
+                pos.trailingRunnerPrice = currentPrice;
+                logger.log('INFO', `🚀 [LADDER TRAILING AKTIF] ${pos.symbol} LONG: Tangga terakhir (${totalSteps}/${totalSteps}) tercapai @ ${formatCryptoPrice(currentPrice)} (+${profitPct.toFixed(2)}%). Mengaktifkan Trailing Runner memburu puncak...`, pos.symbol);
+              }
+            } else {
+              const executed = await this.executeLadderStep(pos, currentPrice, currentStep, totalSteps);
+              if (executed) continue;
+            }
+          }
+        } else {
+          // 1. Dual Stage TP: Eksekusi TP 1 (Tutup Partial 50% & Kunci BEP) saat menyentuh target TP awal
+          if (this.config.exit.partialTpEnabled && !pos.partialTpDone && currentPrice >= pos.targetTpPrice && currentPrice > pos.avgEntryPrice && slAgeMs >= 3000) {
+            const executed = await this.executeStage1PartialTp(pos, currentPrice);
+            if (executed) continue;
+          }
+
+          // 2. Jika Stage 1 Partial TP sudah selesai dan harga menyentuh target Stage 2 TP:
+          if (this.config.exit.partialTpEnabled && pos.partialTpDone) {
+            if (currentPrice >= pos.targetTpPrice && slAgeMs >= 3000) {
+              if (!trailingEnabled) {
+                logger.log('SUCCESS', `🎯 [STAGE 2 TP HIT] ${pos.symbol} LONG: Target TP2 tercapai di ${formatCryptoPrice(currentPrice)}. Menutup 100% sisa posisi!`, pos.symbol);
+                this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
+                continue;
+              }
             }
           }
         }
@@ -2379,14 +2408,49 @@ export class WickSniperEngine {
         continue;
       }
 
-      // B. TAKE PROFIT PULLBACK (DILENGKAPI STAGE 1 PARTIAL TP & BEP PROTECTION)
+      // B. TAKE PROFIT PULLBACK (DILENGKAPI STAGE 1 PARTIAL TP & BEP PROTECTION & LADDER UNWINDING)
       // Jika Trailing TP sedang aktif, serahkan seluruh evaluasi runner ke Section C
       if (pos.trailingTpActive) {
         // Biarkan Section C menangani trailing runner & callback
       } else {
         const tradeAgeMs = Date.now() - pos.openedAt;
         const isSmPos = pos.strategyType === 'SMART_MONEY';
-        if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
+        const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+        const isLadderSmShort = isSmPos && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1));
+
+        if (isLadderSmShort) {
+          const totalSteps = Math.max(2, Math.min(6, smCfg.ladderSteps || 4));
+          const currentStep = (pos.ladderStepIndex || 0) + 1;
+          const baseTpPct = smCfg.takeProfitPct || 1.4;
+          const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((currentStep - 1) / (totalSteps - 1)) * 1.0);
+          const stepTargetPrice = pos.avgEntryPrice * (1 - (baseTpPct * stepMult) / 100);
+          pos.targetTpPrice = stepTargetPrice;
+
+          const ladderAgeMs = pos.lastLadderStepAt ? (Date.now() - pos.lastLadderStepAt) : tradeAgeMs;
+          if (currentPrice <= stepTargetPrice && currentPrice < pos.avgEntryPrice && ladderAgeMs >= 1500) {
+            const trailingAllowed = smCfg.trailingTpEnabled !== false;
+            if (currentStep >= totalSteps && trailingAllowed) {
+              if (!pos.trailingTpActive) {
+                pos.trailingTpActive = true;
+                pos.trailingRunnerPrice = currentPrice;
+                logger.log(
+                  'INFO',
+                  `🚀 [LADDER TRAILING AKTIF] ${pos.symbol} SHORT: Tangga terakhir (${totalSteps}/${totalSteps}) tercapai @ ${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
+                  pos.symbol
+                );
+                if (pos.tpOrderId) binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
+                if (pos.tp2OrderId) binanceFutures.cancelOrder(pos.symbol, pos.tp2OrderId).catch(() => {});
+                pos.lastTpOrderId = pos.tpOrderId || pos.tp2OrderId || pos.lastTpOrderId;
+                pos.tpOrderId = undefined;
+                pos.tp2OrderId = undefined;
+              }
+              continue;
+            }
+
+            const executed = await this.executeLadderStep(pos, currentPrice, currentStep, totalSteps);
+            if (executed) continue;
+          }
+        } else if (currentPrice <= pos.targetTpPrice && currentPrice < pos.avgEntryPrice && tradeAgeMs >= 3000) {
           // 1. Dual Stage TP: Eksekusi TP 1 (Tutup Partial 50% & Kunci BEP) saat menyentuh target TP awal
           if (this.config.exit.partialTpEnabled && !pos.partialTpDone && pos.totalQty > 0) {
             const executed = await this.executeStage1PartialTp(pos, currentPrice);
@@ -2405,7 +2469,7 @@ export class WickSniperEngine {
             }
             logger.log(
               'SUCCESS',
-              `🎯 [STAGE 2 TP TERPENUHI] ${pos.symbol} SHORT: Target TP Tahap 2 tercapai di $${formatCryptoPrice(currentPrice)} (<= $${formatCryptoPrice(pos.targetTpPrice)}). Menutup 100% sisa posisi...`,
+              `🎯 [STAGE 2 TP TERPENUHI] ${pos.symbol} SHORT: Target TP Tahap 2 tercapai di ${formatCryptoPrice(currentPrice)} (<= ${formatCryptoPrice(pos.targetTpPrice)}). Menutup 100% sisa posisi...`,
               pos.symbol
             );
             this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
@@ -2421,7 +2485,7 @@ export class WickSniperEngine {
               pos.trailingRunnerPrice = currentPrice;
               logger.log(
                 'INFO',
-                `🚀 [TRAILING TP AKTIF] ${pos.symbol}: Target TP awal ($${formatCryptoPrice(pos.targetTpPrice)}) tercapai di $${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
+                `🚀 [TRAILING TP AKTIF] ${pos.symbol}: Target TP awal (${formatCryptoPrice(pos.targetTpPrice)}) tercapai di ${formatCryptoPrice(currentPrice)}. Mengaktifkan Trailing Runner untuk memburu profit lebih dalam...`,
                 pos.symbol
               );
               if (pos.tpOrderId) binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
@@ -2661,8 +2725,26 @@ export class WickSniperEngine {
 
     if (pos.strategyType === 'SMART_MONEY') {
       const isLong = pos.side === 'LONG';
-      const smCfg = this.config.smartMoney;
+      const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
       const exitCfg = this.config.exit;
+      const isLadderActive = smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1);
+
+      if (isLadderActive) {
+        const totalSteps = Math.max(2, Math.min(6, smCfg.ladderSteps || 4));
+        const currentStep = Math.min(totalSteps, (pos.ladderStepIndex || 0) + 1);
+        const baseTpPct = smCfg.takeProfitPct || 1.4;
+        const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((currentStep - 1) / (totalSteps - 1)) * 1.0);
+        const ladderTarget = parseFloat(
+          binanceFutures.formatPrice(
+            pos.symbol,
+            isLong
+              ? pos.avgEntryPrice * (1 + (baseTpPct * stepMult) / 100)
+              : pos.avgEntryPrice * (1 - (baseTpPct * stepMult) / 100)
+          )
+        );
+        return { targetTpPrice: ladderTarget, targetTp2Price: ladderTarget, isBepActive: false };
+      }
+
       let smTp1: number;
       let smTp2: number;
 
@@ -2956,6 +3038,140 @@ export class WickSniperEngine {
 
     this.broadcastStatus();
     db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+    return true;
+  }
+
+  /**
+   * Eksekusi Ladder Unwinding (Cicil Keluar Bertahap) untuk Smart Money Micro-Grid DCA
+   * Membagi volume posisi menjadi N tangga (default 4 tangga @ 25%), merealisasikan cuan bertahap,
+   * mengunci BEP risk-free pada tangga pertama, dan membatalkan sisa pending layer DCA.
+   */
+  private async executeLadderStep(
+    pos: ActivePosition,
+    currentPrice: number,
+    stepIndex: number,
+    totalSteps: number
+  ): Promise<boolean> {
+    if (pos.totalQty <= 0) return false;
+
+    const isLong = pos.side === 'LONG';
+    const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+
+    // Catat kuantitas awal ladder saat langkah pertama
+    if (!pos.ladderInitialQty || pos.ladderInitialQty <= 0) {
+      pos.ladderInitialQty = pos.totalQty;
+    }
+
+    const prec = binanceFutures.getPrecision(pos.symbol);
+    const minNotional = prec.minNotional || 5.0;
+    const currentNotional = pos.totalQty * currentPrice;
+
+    // Jika ini langkah terakhir ATAU sisa posisi tidak cukup untuk dipecah lagi (< 1.9x minNotional):
+    // Tutup seluruh sisa posisi (100%)
+    const isFinalStep = stepIndex >= totalSteps || currentNotional < (minNotional * 1.9);
+
+    let sliceQty: number;
+    let remainingQty: number;
+
+    if (isFinalStep) {
+      sliceQty = pos.totalQty;
+      remainingQty = 0;
+    } else {
+      const idealSlice = pos.ladderInitialQty / totalSteps;
+      const formattedSlice = parseFloat(binanceFutures.formatQty(pos.symbol, idealSlice));
+      sliceQty = Math.min(pos.totalQty, formattedSlice);
+      remainingQty = parseFloat(binanceFutures.formatQty(pos.symbol, Math.max(0, pos.totalQty - sliceQty)));
+
+      const sliceNotional = sliceQty * currentPrice;
+      const remNotional = remainingQty * currentPrice;
+
+      // Jika slice atau remainder di bawah minNotional:
+      if (sliceNotional < (minNotional * 0.95) || remNotional < (minNotional * 0.95)) {
+        // Fallback: Jika langkah 1 dan total notional < 2x minNotional, langsung tutup 100%
+        sliceQty = pos.totalQty;
+        remainingQty = 0;
+      }
+    }
+
+    if (sliceQty <= 0) return false;
+
+    // Eksekusi order market close di Binance jika mode LIVE
+    if (this.config.tradingMode === 'LIVE') {
+      const closeSide = isLong ? 'SELL' : 'BUY';
+      try {
+        await binanceFutures.closePositionMarket(pos.symbol, closeSide, sliceQty);
+      } catch (err: any) {
+        logger.log(
+          'ERROR',
+          `❌ [LADDER TP ERROR] ${pos.symbol}: Gagal eksekusi ladder close tangga ${stepIndex}/${totalSteps}: ${err?.message || err}`,
+          pos.symbol
+        );
+        return false;
+      }
+    }
+
+    const partialPnl = Math.round(
+      (isLong ? (currentPrice - pos.avgEntryPrice) : (pos.avgEntryPrice - currentPrice)) * sliceQty * 100
+    ) / 100;
+
+    if (this.config.tradingMode !== 'LIVE') {
+      this.virtualBalance += partialPnl;
+    }
+
+    pos.totalQty = remainingQty;
+    pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / pos.leverage;
+    pos.ladderStepIndex = stepIndex;
+    pos.lastLadderStepAt = Date.now();
+    pos.partialRealizedPnl = (pos.partialRealizedPnl || 0) + partialPnl;
+    pos.partialExitPrice = currentPrice;
+    pos.partialTpDone = true;
+
+    // Pada tangga pertama: Batalkan sisa pending layer DCA dan geser SL ke Auto-BEP (Risk Free)
+    if (stepIndex === 1) {
+      if (pos.layers) {
+        for (const l of pos.layers) {
+          if (l.status === 'PENDING') l.status = 'CANCELLED';
+        }
+      }
+
+      const effectiveBufferPct = smCfg.autoBepBufferPct ?? 0.25;
+      pos.hardSlPrice = parseFloat(
+        binanceFutures.formatPrice(
+          pos.symbol,
+          isLong
+            ? pos.avgEntryPrice * (1 + effectiveBufferPct / 100)
+            : pos.avgEntryPrice * (1 - effectiveBufferPct / 100)
+        )
+      );
+      pos.isAutoBepDone = true;
+      pos.breakEvenPrice = pos.hardSlPrice;
+      pos.slDescription = `Auto-BEP Impas Pasca-Ladder TP1 (+${effectiveBufferPct}% @ ${formatCryptoPrice(pos.hardSlPrice)})`;
+    }
+
+    const pctRealized = Math.round((sliceQty / (pos.ladderInitialQty || sliceQty)) * 100);
+
+    logger.log(
+      'SUCCESS',
+      `🎯 [LADDER UNWIND TANGGA ${stepIndex}/${totalSteps}] ${pos.symbol} ${pos.side}: Cicil keluar ${pctRealized}% (${sliceQty} koin) @ ${formatCryptoPrice(currentPrice)} ➜ Cuan +${partialPnl.toFixed(2)} USDT diamankan! (Sisa: ${pos.totalQty} koin, SL BEP: ${formatCryptoPrice(pos.hardSlPrice)})`,
+      pos.symbol
+    );
+
+    telegram.notifyPartialTp(
+      pos.symbol,
+      partialPnl,
+      pos.totalQty,
+      pos.hardSlPrice,
+      pos.targetTpPrice
+    );
+
+    // Jika posisi sudah habis atau ini langkah terakhir:
+    if (remainingQty <= 0) {
+      await this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
+    } else {
+      this.broadcastStatus();
+      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+    }
+
     return true;
   }
 
@@ -3357,6 +3573,20 @@ export class WickSniperEngine {
         logger.log(
           'WARN',
           `⚠️ [TARGET TP TIDAK VALID] ${pos.symbol}: Target TP ($${pos.targetTpPrice.toFixed(6)}) ${isLong ? '<=' : '>='} Avg Entry ($${pos.avgEntryPrice.toFixed(6)}). Menunda order limit.`,
+          pos.symbol
+        );
+        return;
+      }
+
+      const isSm = pos.strategyType === 'SMART_MONEY';
+      const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+      const isLadderActive = isSm && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1));
+
+      if (isLadderActive) {
+        const totalSteps = Math.max(2, Math.min(6, smCfg.ladderSteps || 4));
+        logger.log(
+          'INFO',
+          `🪜 [LADDER TP SIAGA] ${pos.symbol}: Mode Cicil Keluar Bertahap aktif (${totalSteps} Tangga @ ${Math.round(100 / totalSteps)}%). Bot mengawal eksekusi retrace secara dinamis.`,
           pos.symbol
         );
         return;
@@ -6902,6 +7132,7 @@ export class WickSniperEngine {
       targetTpPrice: effectiveTpPrice,
       targetTp2Price: effectiveTp2Price,
       partialTpDone: false,
+      ladderStepIndex: 0,
       hardSlPrice: effectiveSlPrice,
       status: 'SNIPING',
       trailingTpActive: false,
@@ -6923,6 +7154,8 @@ export class WickSniperEngine {
         side: signal.side,
         entryLayers: numLayers,
         layerSpacingPct: spacingPct,
+        ladderExitEnabled: smCfg.ladderExitEnabled !== false,
+        ladderSteps: smCfg.ladderSteps || 4,
         whaleShortRatio: signal.whaleShortRatio,
         whaleLongRatio: signal.whaleLongRatio,
         whaleAvgEntry: signal.whaleAvgEntry,

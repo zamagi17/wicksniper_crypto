@@ -713,6 +713,24 @@
                 <input type="number" id="cfg-sm-grid-emergency-sl" min="0.5" max="20" step="0.5" class="form-control" placeholder="3.0">
                 <small class="form-hint" style="color: #94a3b8;">Hard SL darurat baru aktif jika harga menembus di luar jangkauan layer terakhir + buffer ini (DCA bebas bernafas tanpa cut-loss prematur).</small>
               </div>
+              <div style="flex: 1; min-width: 200px;">
+                <label style="font-weight: 600; font-size: 0.82rem; color: #4ade80;">🪜 Ladder Unwinding (Cicil Keluar Bertahap)</label>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+                  <input type="checkbox" id="cfg-sm-ladder-exit" style="width: 18px; height: 18px; cursor: pointer;">
+                  <span style="font-size: 0.84rem; color: #e2e8f0;">Aktifkan Cicil Keluar Bertahap (Gaya Leader Binance)</span>
+                </div>
+                <small class="form-hint" style="color: #94a3b8;">Menutup posisi bertahap saat retrace profit (Tangga 1 kunci BEP + cancel sisa DCA, tangga berikutnya cicil cuan).</small>
+              </div>
+              <div style="flex: 1; min-width: 200px;">
+                <label style="font-weight: 600; font-size: 0.82rem; color: #4ade80;">🎯 Jumlah Tangga Cicil Keluar</label>
+                <select id="cfg-sm-ladder-steps" class="form-control">
+                  <option value="2">2 Tangga (50% / 50%)</option>
+                  <option value="3">3 Tangga (33% / 33% / 34%)</option>
+                  <option value="4" selected>4 Tangga (25% per tangga - Standar Leader)</option>
+                  <option value="5">5 Tangga (20% per tangga)</option>
+                </select>
+                <small class="form-hint" style="color: #94a3b8;">Jumlah pecahan porsi take profit (Otomatis dijaga Min Notional Binance ≥ $5 USDT).</small>
+              </div>
             </div>
           </div>
 
