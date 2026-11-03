@@ -1821,18 +1821,18 @@ export class BinanceFuturesClient {
     return undefined;
   }
 
-  private atrCache: Map<string, { timestamp: number; atr: number; atrPct: number; currentPrice: number }> = new Map();
+  private atrCache: Map<string, { timestamp: number; atr: number; atrPct: number; currentPrice: number; rvol?: number }> = new Map();
 
   public async getSymbolAtr(
     symbol: string,
     interval: string = '15m',
     period: number = 14
-  ): Promise<{ atr: number; atrPct: number; currentPrice: number } | undefined> {
+  ): Promise<{ atr: number; atrPct: number; currentPrice: number; rvol?: number } | undefined> {
     const cacheKey = `${symbol}_${interval}_${period}`;
     const cached = this.atrCache.get(cacheKey);
     const now = Date.now();
     if (cached && now - cached.timestamp < 30_000) {
-      return { atr: cached.atr, atrPct: cached.atrPct, currentPrice: cached.currentPrice };
+      return { atr: cached.atr, atrPct: cached.atrPct, currentPrice: cached.currentPrice, rvol: cached.rvol };
     }
 
     try {
@@ -1865,11 +1865,21 @@ export class BinanceFuturesClient {
             atr = (atr * (period - 1) + trValues[i]) / period;
           }
 
+          let rvol: number | undefined = undefined;
+          if (res.data.length >= 10) {
+            const pastCandles = res.data.slice(-11, -1);
+            const avgQuoteVol = pastCandles.reduce((sum: number, c: any) => sum + parseFloat(c[7] || c[5] || '0'), 0) / pastCandles.length;
+            const currentQuoteVol = parseFloat(res.data[res.data.length - 1][7] || res.data[res.data.length - 1][5] || '0');
+            if (avgQuoteVol > 0 && currentQuoteVol > 0) {
+              rvol = parseFloat((currentQuoteVol / avgQuoteVol).toFixed(2));
+            }
+          }
+
           const currentPrice = parseFloat(res.data[res.data.length - 1][4]);
           if (currentPrice > 0) {
             const atrPct = (atr / currentPrice) * 100;
-            const result = { atr, atrPct, currentPrice };
-            this.atrCache.set(cacheKey, { timestamp: now, atr, atrPct, currentPrice });
+            const result = { atr, atrPct, currentPrice, rvol };
+            this.atrCache.set(cacheKey, { timestamp: now, atr, atrPct, currentPrice, rvol });
             return result;
           }
         }

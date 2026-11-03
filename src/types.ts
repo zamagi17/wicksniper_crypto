@@ -208,6 +208,12 @@ export interface SmartMoneyConfig {
   ladderSteps?: number;        // Jumlah tangga cicil keluar (2, 3, 4, 5 tangga; default 4)
   martingaleMultiplier?: number; // Pengali ukuran per layer (1.0 = Flat, 1.1 = +10% per layer gaya Leader Binance)
   martingaleMaxCap?: number;     // Batas pengali maksimal ukuran per layer (default: 1.5x)
+  min24hRangeFilterEnabled?: boolean; // Filter rentang ayunan harian (High-Low Range)
+  min24hRangePct?: number;           // Batas minimal rentang ayunan 24 jam (%, default: 12.0%)
+  min24hChangeFilterEnabled?: boolean;// Filter batas minimal % pergerakan harga 24 jam
+  min24hChangePct?: number;          // Batas minimal perubahan harga 24 jam (%, default: 7.0%)
+  rvolFilterEnabled?: boolean;       // Filter lonjakan volume terkini (Relative Volume / RVOL)
+  minRvolMultiplier?: number;        // Pengali volume 15m terkini vs rata-rata (default: 1.5x)
   marginUsdt?: number;         // Modal margin per posisi (USDT)
   leverage?: number;           // Leverage
   takeProfitPct?: number;      // Take Profit (%)

@@ -3832,6 +3832,17 @@ function populateSettingsForm(cfg) {
   if (smFundingCb) smFundingCb.checked = smCfg.fundingRateFilterEnabled !== false;
   setVal('cfg-sm-min-funding-short', smCfg.minFundingRatePct ?? -0.02);
   setVal('cfg-sm-max-funding-long', smCfg.maxFundingRatePct ?? 0.10);
+  const smRangeCb = document.getElementById('cfg-sm-range-filter-enabled');
+  if (smRangeCb) smRangeCb.checked = !!smCfg.min24hRangeFilterEnabled;
+  setVal('cfg-sm-min-range-pct', smCfg.min24hRangePct ?? 12);
+
+  const smChangeCb = document.getElementById('cfg-sm-change-filter-enabled');
+  if (smChangeCb) smChangeCb.checked = !!smCfg.min24hChangeFilterEnabled;
+  setVal('cfg-sm-min-change-pct', smCfg.min24hChangePct ?? 7);
+
+  const smRvolCb = document.getElementById('cfg-sm-rvol-filter-enabled');
+  if (smRvolCb) smRvolCb.checked = !!smCfg.rvolFilterEnabled;
+  setVal('cfg-sm-min-rvol-mult', smCfg.minRvolMultiplier ?? 1.5);
   const smPullbackCb = document.getElementById('cfg-sm-pullback-enabled');
   if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false && smCfg.executionMode !== 'DIRECT_MARKET';
   setVal('cfg-sm-execution-mode', smCfg.executionMode || 'TWO_STAGE_PULLBACK');
@@ -4268,6 +4279,12 @@ function getSettingsFormData() {
       fundingRateFilterEnabled: !!document.getElementById('cfg-sm-funding-filter-enabled')?.checked,
       minFundingRatePct: parseFloat(getVal('cfg-sm-min-funding-short', '-0.02')) ?? -0.02,
       maxFundingRatePct: parseFloat(getVal('cfg-sm-max-funding-long', '0.10')) ?? 0.10,
+      min24hRangeFilterEnabled: !!document.getElementById('cfg-sm-range-filter-enabled')?.checked,
+      min24hRangePct: parseFloat(getVal('cfg-sm-min-range-pct', '12')) || 12,
+      min24hChangeFilterEnabled: !!document.getElementById('cfg-sm-change-filter-enabled')?.checked,
+      min24hChangePct: parseFloat(getVal('cfg-sm-min-change-pct', '7')) || 7,
+      rvolFilterEnabled: !!document.getElementById('cfg-sm-rvol-filter-enabled')?.checked,
+      minRvolMultiplier: parseFloat(getVal('cfg-sm-min-rvol-mult', '1.5')) || 1.5,
       pullbackConfirmationEnabled: !!document.getElementById('cfg-sm-pullback-enabled')?.checked,
       executionMode: document.getElementById('cfg-sm-pullback-enabled')?.checked ? getVal('cfg-sm-execution-mode', 'TWO_STAGE_PULLBACK') : 'DIRECT_MARKET',
       pullbackTargetAnchor: getVal('cfg-sm-target-anchor', 'WHALE_VWAP_OR_ATR'),

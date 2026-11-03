@@ -22,6 +22,7 @@ export class SmartMoneyScanner {
   private lastPrices: Map<string, number> = new Map();
   private tickerVol24h: Map<string, number> = new Map();
   private tickerChange24h: Map<string, number> = new Map();
+  private tickerRange24h: Map<string, number> = new Map();
   private scanCursor: number = 0;
   private lastPulseLogAt: number = 0;
 
@@ -63,6 +64,13 @@ export class SmartMoneyScanner {
         const pChange = parseFloat(t.P);
         if (!isNaN(pChange)) {
           this.tickerChange24h.set(t.s, pChange);
+        }
+      }
+      if (t.h && t.l) {
+        const h = parseFloat(t.h);
+        const l = parseFloat(t.l);
+        if (h > 0 && l > 0 && h >= l) {
+          this.tickerRange24h.set(t.s, ((h - l) / l) * 100);
         }
       }
     }
@@ -157,10 +165,25 @@ export class SmartMoneyScanner {
       // Filter volume minimal & maksimal 24 jam (Sweet Spot: $3M - $200M USDT, buang koin mati & koin raksasa BTC/ETH)
       const minVol = this.botScannerConfig?.min24hVolumeUsdt || 3_000_000;
       const maxVol = this.botScannerConfig?.max24hVolumeUsdt || 200_000_000;
+      const minRange = this.config.min24hRangeFilterEnabled ? (this.config.min24hRangePct ?? 12.0) : 0;
+      const minChange = this.config.min24hChangeFilterEnabled ? (this.config.min24hChangePct ?? 7.0) : 0;
+
       if (this.tickerVol24h.size > 0) {
         const filtered = candidateSymbols.filter(s => {
           const v = this.tickerVol24h.get(s) || 0;
-          return v >= minVol && (maxVol <= 0 || v <= maxVol);
+          if (v < minVol || (maxVol > 0 && v > maxVol)) return false;
+
+          if (minRange > 0) {
+            const range = this.tickerRange24h.get(s) || 0;
+            if (range < minRange) return false;
+          }
+
+          if (minChange > 0) {
+            const change = Math.abs(this.tickerChange24h.get(s) || 0);
+            if (change < minChange) return false;
+          }
+
+          return true;
         });
         if (filtered.length > 0) {
           candidateSymbols = filtered;
@@ -590,31 +613,46 @@ export class SmartMoneyScanner {
           }
         }
 
-        // Filter ATR Volatilitas: Cegah koin mati gaya (sideways) & koin volatilitas liar tak terkendali
-        let atrData: { atr: number; atrPct: number; currentPrice: number } | undefined;
-        if (this.config.atrFilterEnabled !== false) {
-          const tf = this.config.atrTimeframe || '15m';
-          const period = this.config.atrPeriod || 14;
+        // Filter ATR Volatilitas & Lonjakan Volume RVOL
+        let atrData: { atr: number; atrPct: number; currentPrice: number; rvol?: number } | undefined;
+        const tf = this.config.atrTimeframe || '15m';
+        const period = this.config.atrPeriod || 14;
+
+        if (this.config.atrFilterEnabled !== false || this.config.rvolFilterEnabled) {
           atrData = await binanceFutures.getSymbolAtr(symbol, tf, period);
-          if (atrData && atrData.atrPct !== undefined) {
-            const minAtr = this.config.minAtrPct ?? 0.8;
-            const maxAtr = this.config.maxAtrPct ?? 3.0;
-            if (atrData.atrPct < minAtr) {
-              logger.log(
-                'INFO',
-                `🐋 [SMART MONEY SKIP] ${symbol} ${detectedSide} dilewati: ATR ${tf} (${atrData.atrPct.toFixed(2)}%) < ${minAtr}% (Koin sedang flat/sideways mati gaya, target TP rawan gagal/lama).`
-              );
-              return;
-            }
-            if (atrData.atrPct > maxAtr) {
-              logger.log(
-                'INFO',
-                `🐋 [SMART MONEY SKIP] ${symbol} ${detectedSide} dilewati: ATR ${tf} (${atrData.atrPct.toFixed(2)}%) > ${maxAtr}% (Volatilitas terlalu liar & berbahaya).`
-              );
-              return;
-            }
-            reason += ` | ATR ${tf}: ${atrData.atrPct.toFixed(2)}% ($${formatCryptoPrice(atrData.atr)})`;
+        }
+
+        if (this.config.atrFilterEnabled !== false && atrData && atrData.atrPct !== undefined) {
+          const minAtr = this.config.minAtrPct ?? 0.8;
+          const maxAtr = this.config.maxAtrPct ?? 3.0;
+          if (atrData.atrPct < minAtr) {
+            logger.log(
+              'INFO',
+              `🐋 [SMART MONEY SKIP] ${symbol} ${detectedSide} dilewati: ATR ${tf} (${atrData.atrPct.toFixed(2)}%) < ${minAtr}% (Koin sedang flat/sideways mati gaya, target TP rawan gagal/lama).`
+            );
+            return;
           }
+          if (atrData.atrPct > maxAtr) {
+            logger.log(
+              'INFO',
+              `🐋 [SMART MONEY SKIP] ${symbol} ${detectedSide} dilewati: ATR ${tf} (${atrData.atrPct.toFixed(2)}%) > ${maxAtr}% (Volatilitas terlalu liar & berbahaya).`
+            );
+            return;
+          }
+          reason += ` | ATR ${tf}: ${atrData.atrPct.toFixed(2)}% ($${formatCryptoPrice(atrData.atr)})`;
+        }
+
+        // Filter Lonjakan Volume Terkini (Relative Volume / RVOL 15m)
+        if (this.config.rvolFilterEnabled && atrData && atrData.rvol !== undefined) {
+          const minRvol = this.config.minRvolMultiplier ?? 1.5;
+          if (atrData.rvol < minRvol) {
+            logger.log(
+              'INFO',
+              `📊 [RVOL SKIP] ${symbol} ${detectedSide} dilewati: Volume 15m saat ini (${atrData.rvol}x) < min ${minRvol}x rata-rata. Koin sedang sepi aktivitas/kurang dorongan volume.`
+            );
+            return;
+          }
+          reason += ` | RVOL 15m: ${atrData.rvol}x`;
         }
 
         // Filter Funding Rate: Cegah Short saat Negative Funding Squeeze & Long saat pasar Overheated

@@ -881,6 +881,57 @@
             </div>
           </div>
 
+          <!-- FILTER KOIN SUPER AKTIF (VOLATILITAS & VOLUME SURGE) -->
+          <div class="form-group" style="grid-column: span 2; background: rgba(251, 191, 36, 0.05); border: 1px solid rgba(251, 191, 36, 0.25); border-radius: var(--radius-sm); padding: 10px 14px;">
+            <div style="font-weight: 700; color: #fbbf24; margin-bottom: 8px; font-size: 12.5px; display: flex; align-items: center; justify-content: space-between;">
+              <span>🔥 Filter Koin Super Aktif (Gaya Leader Binance) <span class="badge-tag badge-smart-money">Smart Money</span></span>
+              <span class="badge-tag" style="background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3);">High Velocity</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+              <!-- 1. Rentang Ayunan 24 Jam -->
+              <div style="background: rgba(0, 0, 0, 0.2); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11.5px; color: #e2e8f0; margin-bottom: 4px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-sm-range-filter-enabled" style="width: 15px; height: 15px; accent-color: #fbbf24;">
+                  <span>1. Rentang Ayunan 24h (High-Low)</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                  <span style="font-size: 11px; color: #94a3b8;">Min:</span>
+                  <input type="number" id="cfg-sm-min-range-pct" min="1" max="100" step="1" class="form-control" placeholder="12" style="padding: 3px 6px; height: 26px; font-size: 11.5px;">
+                  <span style="font-size: 11px; color: #94a3b8;">%</span>
+                </div>
+                <small class="form-hint" style="color: #94a3b8; font-size: 10px;">Buang koin sideways yang rentang harga tertingginya &lt; 12%.</small>
+              </div>
+
+              <!-- 2. Ambang Minimal Pergerakan 24 Jam -->
+              <div style="background: rgba(0, 0, 0, 0.2); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11.5px; color: #e2e8f0; margin-bottom: 4px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-sm-change-filter-enabled" style="width: 15px; height: 15px; accent-color: #fbbf24;">
+                  <span>2. Min Pergerakan 24 Jam</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                  <span style="font-size: 11px; color: #94a3b8;">Min:</span>
+                  <input type="number" id="cfg-sm-min-change-pct" min="1" max="50" step="0.5" class="form-control" placeholder="7" style="padding: 3px 6px; height: 26px; font-size: 11.5px;">
+                  <span style="font-size: 11px; color: #94a3b8;">%</span>
+                </div>
+                <small class="form-hint" style="color: #94a3b8; font-size: 10px;">Hanya proses koin yang bergerak &ge; &plusmn;7% hari ini.</small>
+              </div>
+
+              <!-- 3. Lonjakan Volume Terkini (RVOL) -->
+              <div style="background: rgba(0, 0, 0, 0.2); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11.5px; color: #e2e8f0; margin-bottom: 4px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-sm-rvol-filter-enabled" style="width: 15px; height: 15px; accent-color: #fbbf24;">
+                  <span>3. Volume Meledak (RVOL 15m)</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                  <span style="font-size: 11px; color: #94a3b8;">Min:</span>
+                  <input type="number" id="cfg-sm-min-rvol-mult" min="1.0" max="10.0" step="0.1" class="form-control" placeholder="1.5" style="padding: 3px 6px; height: 26px; font-size: 11.5px;">
+                  <span style="font-size: 11px; color: #94a3b8;">x Rata-rata</span>
+                </div>
+                <small class="form-hint" style="color: #94a3b8; font-size: 10px;">Volume lilin 15m terkini wajib &ge; 1.5x rata-rata.</small>
+              </div>
+            </div>
+          </div>
+
           <!-- 2-STAGE EXECUTION & PULLBACK CONFIRMATION (THE GOLDEN TRIAD) -->
           <div class="form-group" style="grid-column: span 2; background: linear-gradient(135deg, rgba(0, 240, 255, 0.06), rgba(56, 189, 248, 0.03)); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: var(--radius-sm); padding: 12px 14px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
