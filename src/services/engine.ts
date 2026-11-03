@@ -1919,6 +1919,12 @@ export class WickSniperEngine {
       if (p > 0) tickerPriceMap.set(t.s, p);
     }
 
+    if (smCfg.executionMode === 'DIRECT_MARKET' || smCfg.pullbackConfirmationEnabled === false) {
+      this.pendingSignals.clear();
+      this.broadcastStatus();
+      return;
+    }
+
     const items = Array.from(this.pendingSignals.values());
     for (const item of items) {
       const symbol = item.symbol;
@@ -6681,7 +6687,7 @@ export class WickSniperEngine {
     );
 
     // MODE 1: Direct Market Execution (Eksekusi Langsung)
-    if (smCfg.executionMode === 'DIRECT_MARKET') {
+    if (smCfg.executionMode === 'DIRECT_MARKET' || smCfg.pullbackConfirmationEnabled === false) {
       this.deployingSymbols.add(symbol);
       try {
         await this.deploySmartMoneyPosition(signal);

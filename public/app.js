@@ -3805,7 +3805,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-min-funding-short', smCfg.minFundingRatePct ?? -0.02);
   setVal('cfg-sm-max-funding-long', smCfg.maxFundingRatePct ?? 0.10);
   const smPullbackCb = document.getElementById('cfg-sm-pullback-enabled');
-  if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false;
+  if (smPullbackCb) smPullbackCb.checked = smCfg.pullbackConfirmationEnabled !== false && smCfg.executionMode !== 'DIRECT_MARKET';
   setVal('cfg-sm-execution-mode', smCfg.executionMode || 'TWO_STAGE_PULLBACK');
   setVal('cfg-sm-target-anchor', smCfg.pullbackTargetAnchor || 'WHALE_VWAP_OR_ATR');
   setVal('cfg-sm-whale-premium', smCfg.whaleMaxPremiumPct ?? 0.15);
@@ -4241,7 +4241,7 @@ function getSettingsFormData() {
       minFundingRatePct: parseFloat(getVal('cfg-sm-min-funding-short', '-0.02')) ?? -0.02,
       maxFundingRatePct: parseFloat(getVal('cfg-sm-max-funding-long', '0.10')) ?? 0.10,
       pullbackConfirmationEnabled: !!document.getElementById('cfg-sm-pullback-enabled')?.checked,
-      executionMode: getVal('cfg-sm-execution-mode', 'TWO_STAGE_PULLBACK'),
+      executionMode: document.getElementById('cfg-sm-pullback-enabled')?.checked ? getVal('cfg-sm-execution-mode', 'TWO_STAGE_PULLBACK') : 'DIRECT_MARKET',
       pullbackTargetAnchor: getVal('cfg-sm-target-anchor', 'WHALE_VWAP_OR_ATR'),
       whaleMaxPremiumPct: parseFloat(getVal('cfg-sm-whale-premium', '0.15')) || 0.15,
       atrPullbackMultiplier: parseFloat(getVal('cfg-sm-atr-pullback-mult', '0.4')) || 0.4,
@@ -5012,8 +5012,12 @@ window.toggleSmRsiInput = toggleSmRsiInput;
 function toggleSmPullbackInput() {
   const cb = document.getElementById('cfg-sm-pullback-enabled');
   const box = document.getElementById('cfg-sm-pullback-box');
+  const modeSel = document.getElementById('cfg-sm-execution-mode');
   if (box) {
     box.style.display = cb && cb.checked ? 'flex' : 'none';
+  }
+  if (modeSel && cb) {
+    modeSel.value = cb.checked ? 'TWO_STAGE_PULLBACK' : 'DIRECT_MARKET';
   }
 }
 window.toggleSmPullbackInput = toggleSmPullbackInput;
