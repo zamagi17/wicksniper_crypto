@@ -21,6 +21,7 @@ export class SmartMoneyScanner {
   private trackedMetrics: Map<string, any> = new Map();
   private lastPrices: Map<string, number> = new Map();
   private tickerVol24h: Map<string, number> = new Map();
+  private tickerChange24h: Map<string, number> = new Map();
   private scanCursor: number = 0;
   private lastPulseLogAt: number = 0;
 
@@ -56,6 +57,12 @@ export class SmartMoneyScanner {
         const qVol = parseFloat(t.q);
         if (qVol > 0) {
           this.tickerVol24h.set(t.s, qVol);
+        }
+      }
+      if (t.P) {
+        const pChange = parseFloat(t.P);
+        if (!isNaN(pChange)) {
+          this.tickerChange24h.set(t.s, pChange);
         }
       }
     }
@@ -147,14 +154,27 @@ export class SmartMoneyScanner {
         candidateSymbols = candidateSymbols.filter(s => whiteSet.has(s));
       }
 
-      // Filter volume minimal 24 jam & sortir dari volume tertinggi (Paling Likuid/Institusional)
-      const minVol = this.botScannerConfig?.min24hVolumeUsdt || 1_000_000;
+      // Filter volume minimal & maksimal 24 jam (Sweet Spot: $3M - $200M USDT, buang koin mati & koin raksasa BTC/ETH)
+      const minVol = this.botScannerConfig?.min24hVolumeUsdt || 3_000_000;
+      const maxVol = this.botScannerConfig?.max24hVolumeUsdt || 200_000_000;
       if (this.tickerVol24h.size > 0) {
-        const filtered = candidateSymbols.filter(s => (this.tickerVol24h.get(s) || 0) >= minVol);
+        const filtered = candidateSymbols.filter(s => {
+          const v = this.tickerVol24h.get(s) || 0;
+          return v >= minVol && (maxVol <= 0 || v <= maxVol);
+        });
         if (filtered.length > 0) {
           candidateSymbols = filtered;
         }
-        candidateSymbols.sort((a, b) => (this.tickerVol24h.get(b) || 0) - (this.tickerVol24h.get(a) || 0));
+        // PRIORITASKAN TOP GAINERS / KOIN PALING VOLATIL HARI INI (Gaya Leader Binance)
+        // Koin dengan pergerakan harga 24h tertinggi (% pump/dump terbesar) dipindai terlebih dahulu!
+        candidateSymbols.sort((a, b) => {
+          const changeA = Math.abs(this.tickerChange24h.get(a) || 0);
+          const changeB = Math.abs(this.tickerChange24h.get(b) || 0);
+          if (changeB !== changeA) {
+            return changeB - changeA;
+          }
+          return (this.tickerVol24h.get(b) || 0) - (this.tickerVol24h.get(a) || 0);
+        });
       }
 
       // Ambil batch berputar (rotating window) agar seluruh koin likuid terpindai secara merata

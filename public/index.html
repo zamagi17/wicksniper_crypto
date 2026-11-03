@@ -731,6 +731,17 @@
                 </select>
                 <small class="form-hint" style="color: #94a3b8;">Jumlah pecahan porsi take profit (Otomatis dijaga Min Notional Binance ≥ $5 USDT).</small>
               </div>
+              <div style="flex: 1; min-width: 200px;">
+                <label style="font-weight: 600; font-size: 0.82rem; color: #fbbf24;">📈 Model Sizing / Martingale Layer</label>
+                <select id="cfg-sm-martingale-mult" class="form-control">
+                  <option value="1.0">1.0x (Flat Sizing - Semua Layer Ukuran Sama Rata)</option>
+                  <option value="1.05">1.05x (+5% per layer - Linear Konservatif)</option>
+                  <option value="1.10" selected>1.10x (+10% per layer - Standar Leader Binance)</option>
+                  <option value="1.15">1.15x (+15% per layer - Agresif Moderat)</option>
+                  <option value="1.20">1.20x (+20% per layer - Agresif Cepat Average)</option>
+                </select>
+                <small class="form-hint" style="color: #94a3b8;">Pertumbuhan ukuran modal per layer (Gaya Leader: +10% per step, otomatis di-cap maksimal 1.5x agar aman).</small>
+              </div>
             </div>
           </div>
 

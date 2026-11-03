@@ -206,6 +206,8 @@ export interface SmartMoneyConfig {
   gridEmergencySlBufferPct?: number; // Buffer darurat di luar jangkauan layer terakhir untuk Hard SL (%) (default: 3.0%)
   ladderExitEnabled?: boolean; // Cicil keluar bertahap saat retrace profit (default true jika entryLayers > 1)
   ladderSteps?: number;        // Jumlah tangga cicil keluar (2, 3, 4, 5 tangga; default 4)
+  martingaleMultiplier?: number; // Pengali ukuran per layer (1.0 = Flat, 1.1 = +10% per layer gaya Leader Binance)
+  martingaleMaxCap?: number;     // Batas pengali maksimal ukuran per layer (default: 1.5x)
   marginUsdt?: number;         // Modal margin per posisi (USDT)
   leverage?: number;           // Leverage
   takeProfitPct?: number;      // Take Profit (%)

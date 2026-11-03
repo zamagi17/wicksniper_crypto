@@ -3790,6 +3790,7 @@ function populateSettingsForm(cfg) {
   const smLadderCb = document.getElementById('cfg-sm-ladder-exit');
   if (smLadderCb) smLadderCb.checked = smCfg.ladderExitEnabled !== false;
   setVal('cfg-sm-ladder-steps', smCfg.ladderSteps ?? 4);
+  setVal('cfg-sm-martingale-mult', smCfg.martingaleMultiplier ?? 1.10);
   if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   const smTrailingCb = document.getElementById('cfg-sm-trailing-tp');
   if (smTrailingCb) smTrailingCb.checked = smCfg.trailingTpEnabled !== false;
@@ -4228,6 +4229,8 @@ function getSettingsFormData() {
       gridEmergencySlBufferPct: parseFloat(getVal('cfg-sm-grid-emergency-sl', '3.0')) || 3.0,
       ladderExitEnabled: !!document.getElementById('cfg-sm-ladder-exit')?.checked,
       ladderSteps: parseInt(getVal('cfg-sm-ladder-steps', '4'), 10) || 4,
+      martingaleMultiplier: parseFloat(getVal('cfg-sm-martingale-mult', '1.10')) || 1.10,
+      martingaleMaxCap: 1.5,
       trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
       rsiFilterEnabled: !!document.getElementById('cfg-sm-rsi-filter')?.checked,

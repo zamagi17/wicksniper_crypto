@@ -204,6 +204,8 @@ export class WickSniperEngine {
       gridEmergencySlBufferPct: 3.0,
       ladderExitEnabled: true,
       ladderSteps: 4,
+      martingaleMultiplier: 1.10,
+      martingaleMaxCap: 1.5,
       marginUsdt: 5.0,
       leverage: 5,
       takeProfitPct: 1.0,
@@ -410,6 +412,8 @@ export class WickSniperEngine {
         gridEmergencySlBufferPct: 3.0,
         ladderExitEnabled: true,
         ladderSteps: 4,
+        martingaleMultiplier: 1.10,
+        martingaleMaxCap: 1.5,
         marginUsdt: 5.0,
         leverage: 5,
         takeProfitPct: 1.5,
@@ -7093,7 +7097,10 @@ export class WickSniperEngine {
         : realEntryPrice * (1 - (i * spacingPct) / 100);
       const layerPrice = parseFloat(binanceFutures.formatPrice(symbol, layerPriceRaw));
       // Gaya Leader Binance: Sizing linear bertahap (+10% per layer) dengan batas maksimal (cap 1.5x)
-      const sizeMultiplier = isMicroGrid ? Math.min(1.5, 1.0 + (i * 0.10)) : 1.0;
+      const mult = smCfg.martingaleMultiplier ?? 1.10;
+      const maxCap = smCfg.martingaleMaxCap ?? 1.5;
+      const stepGrowth = Math.max(0, mult - 1.0);
+      const sizeMultiplier = isMicroGrid ? Math.min(maxCap, 1.0 + (i * stepGrowth)) : 1.0;
       let layerPlanned = ((marginPerLayer * sizeMultiplier) * leverage) / layerPrice;
       if (layerPlanned * layerPrice < prec.minNotional) {
         layerPlanned = (prec.minNotional * 1.05) / layerPrice;
@@ -7156,6 +7163,8 @@ export class WickSniperEngine {
         layerSpacingPct: spacingPct,
         ladderExitEnabled: smCfg.ladderExitEnabled !== false,
         ladderSteps: smCfg.ladderSteps || 4,
+        martingaleMultiplier: smCfg.martingaleMultiplier ?? 1.10,
+        martingaleMaxCap: smCfg.martingaleMaxCap ?? 1.5,
         whaleShortRatio: signal.whaleShortRatio,
         whaleLongRatio: signal.whaleLongRatio,
         whaleAvgEntry: signal.whaleAvgEntry,
