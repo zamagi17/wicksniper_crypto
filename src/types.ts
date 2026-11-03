@@ -200,8 +200,10 @@ export interface SmartMoneyConfig {
   reboundThresholdShortPct?: number; // Konfirmasi rejeksi pantulan khusus SHORT (%, default: sama dengan reboundThresholdPct)
   signalTtlMinutes?: number; // Batas waktu tunggu diskon sebelum sinyal expired (menit, default: 30)
   invalidationThresholdPct?: number; // Toleransi jebol di bawah modal paus sebelum sinyal dibatalkan (%, default: 1.2%)
-  entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA
-  layerSpacingPct: number;     // Jarak antar layer jika entryLayers > 1
+  entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA, 5-30 = Micro-Grid DCA (Gaya Leader Binance)
+  layerSpacingPct: number;     // Jarak antar layer jika entryLayers > 1 (%)
+  maxTotalMarginPerCoin?: number; // Batas akumulasi modal maksimal per koin untuk Micro-Grid DCA (USDT, e.g. 35, 50, 100)
+  gridEmergencySlBufferPct?: number; // Buffer darurat di luar jangkauan layer terakhir untuk Hard SL (%) (default: 3.0%)
   marginUsdt?: number;         // Modal margin per posisi (USDT)
   leverage?: number;           // Leverage
   takeProfitPct?: number;      // Take Profit (%)

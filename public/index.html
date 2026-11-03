@@ -685,16 +685,33 @@
               <div style="flex: 1; min-width: 220px;">
                 <label style="font-weight: 600; margin-bottom: 4px;">Model Entry & Layering <span class="badge-tag badge-smart-money">Smart Money</span></label>
                 <select id="cfg-sm-layers" class="form-control" onchange="toggleSmLayerSpacing()">
-                  <option value="1" selected>🎯 1 Layer (Single Sniper Entry - Sangat Direkomendasikan)</option>
+                  <option value="1" selected>🎯 1 Layer (Single Sniper Entry - Standar)</option>
                   <option value="2">🪜 2 Layer (Defensive Limit Re-entry)</option>
                   <option value="3">🪜 3 Layer (Defensive Limit Bertingkat)</option>
+                  <option value="5">⚡ 5 Layer (Micro-Grid Scalper)</option>
+                  <option value="10">🌊 10 Layer (High Volatility Grid)</option>
+                  <option value="15">🌊 15 Layer (Deep DCA Grid)</option>
+                  <option value="20">👑 20 Layer (Leader Copy Mimic - Rekomendasi Lev 2x-5x)</option>
+                  <option value="30">🛡️ 30 Layer (Maximum Endurance Grid)</option>
                 </select>
-                <small class="form-hint">Smart money cukup 1 sniper entry, atau maks 2-3 limit order defensif.</small>
+                <small class="form-hint" id="hint-sm-layers">Smart money sniper 1 entry, atau aktifkan Micro-Grid 5-30 layer gaya Binance Copy Trading Leader.</small>
               </div>
               <div id="cfg-sm-layer-spacing-group" style="flex: 1; min-width: 200px; display: none;">
-                <label style="font-weight: 600; margin-bottom: 4px;">Jarak Antar Layer Retest (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
+                <label style="font-weight: 600; margin-bottom: 4px;">Jarak Step Antar Layer (%) <span class="badge-tag badge-smart-money">Smart Money</span></label>
                 <input type="number" id="cfg-sm-layer-spacing" min="0.3" max="5.0" step="0.1" class="form-control" placeholder="0.8">
-                <small class="form-hint">Jarak harga untuk memasang layer limit ke-2 dan ke-3 jika harga sedikit overshoot (Standar: 0.8%).</small>
+                <small class="form-hint">Jarak harga untuk memasang antrean limit DCA berikutnya (Standar: 0.8% - 1.2%).</small>
+              </div>
+            </div>
+            <div id="cfg-sm-microgrid-panel" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, 0.1); gap: 14px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 200px;">
+                <label style="font-weight: 600; font-size: 0.82rem; color: #38bdf8;">👑 Budget Maksimal Margin per Koin ($)</label>
+                <input type="number" id="cfg-sm-max-coin-margin" min="5" max="1000" step="1" class="form-control" placeholder="50">
+                <small class="form-hint" style="color: #94a3b8;">Batas total akumulasi margin kas (Budget Cap) agar DCA tidak menguras seluruh saldo wallet (Standar: $30 - $70 USDT).</small>
+              </div>
+              <div style="flex: 1; min-width: 200px;">
+                <label style="font-weight: 600; font-size: 0.82rem; color: #f87171;">🛑 Buffer Hard SL di Luar Layer Terakhir (%)</label>
+                <input type="number" id="cfg-sm-grid-emergency-sl" min="0.5" max="20" step="0.5" class="form-control" placeholder="3.0">
+                <small class="form-hint" style="color: #94a3b8;">Hard SL darurat baru aktif jika harga menembus di luar jangkauan layer terakhir + buffer ini (DCA bebas bernafas tanpa cut-loss prematur).</small>
               </div>
             </div>
           </div>

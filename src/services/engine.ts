@@ -2792,6 +2792,17 @@ export class WickSniperEngine {
 
     if (pos.strategyType === 'SMART_MONEY') {
       const smCfg = this.config.smartMoney;
+      const totalLayers = pos.layers?.length || 1;
+      const isMicroGrid = totalLayers > 3;
+      if (isMicroGrid && pos.layers && pos.layers.length > 0) {
+        const lastLayer = pos.layers[pos.layers.length - 1];
+        const emergencyBuffer = smCfg?.gridEmergencySlBufferPct ?? 3.0;
+        pos.hardSlPrice = pos.side === 'LONG'
+          ? parseFloat(binanceFutures.formatPrice(pos.symbol, lastLayer.price * (1 - emergencyBuffer / 100)))
+          : parseFloat(binanceFutures.formatPrice(pos.symbol, lastLayer.price * (1 + emergencyBuffer / 100)));
+        pos.slDescription = `Micro-Grid Emergency SL (${pos.side === 'LONG' ? '-' : '+'}${emergencyBuffer}% di luar Layer Terakhir #${totalLayers - 1})`;
+        return;
+      }
       const fallbackSl = smCfg?.stopLossPct || 1.2;
       const bufferPct = (smCfg?.structuralSlBufferPct ?? 0.3) / 100;
       const whaleEntry = pos.smartMoneyFlowStatus?.whaleAvgEntry || pos.paramsSnapshot?.whaleAvgEntry;
@@ -6537,7 +6548,8 @@ export class WickSniperEngine {
     const isShort = signal.side === 'SHORT';
     const currentPrice = signal.currentPrice;
     const leverage = smCfg.leverage || this.config.leverage || 5;
-    const numLayers = Math.max(1, Math.min(3, smCfg.entryLayers || 1));
+    const numLayers = Math.max(1, Math.min(50, smCfg.entryLayers || 1));
+    const isMicroGrid = numLayers > 3;
     // Evaluasi Volume 24 Jam & Adaptasi Koin Volume Rendah (< 20M USDT)
     const vol24h = this.scanner.getTickerStats(symbol)?.vol24hUsdt
       || this.smartMoneyScanner.get24hVolume(symbol)
@@ -6552,8 +6564,17 @@ export class WickSniperEngine {
     const isLowVolume = lowVolEnabled && vol24h > 0 && vol24h < lowVolThreshold;
 
     const baseMargin = smCfg.marginUsdt || this.config.grid?.marginPerLayerUsdt || 5.0;
-    const totalMargin = isLowVolume ? (baseMargin / lowVolMarginDivisor) : baseMargin;
-    const marginPerLayer = numLayers > 1 ? totalMargin / numLayers : totalMargin;
+    let totalMargin: number;
+    let marginPerLayer: number;
+    if (isMicroGrid) {
+      // Gaya Leader Binance: marginUsdt adalah modal awal layer pertama (e.g.  -  USDT)
+      marginPerLayer = isLowVolume ? (baseMargin / lowVolMarginDivisor) : baseMargin;
+      const budgetCap = smCfg.maxTotalMarginPerCoin || (marginPerLayer * numLayers);
+      totalMargin = isLowVolume ? (budgetCap / lowVolMarginDivisor) : budgetCap;
+    } else {
+      totalMargin = isLowVolume ? (baseMargin / lowVolMarginDivisor) : baseMargin;
+      marginPerLayer = numLayers > 1 ? totalMargin / numLayers : totalMargin;
+    }
     const prec = binanceFutures.getPrecision(symbol);
 
     let plannedQty = (marginPerLayer * leverage) / currentPrice;
@@ -6599,14 +6620,19 @@ export class WickSniperEngine {
       const tpTarget = parseFloat(binanceFutures.formatPrice(symbol, targetTpRaw));
       const tp2Target = parseFloat(binanceFutures.formatPrice(symbol, targetTp2Raw));
 
-      // 2. Stop Loss Hybrid
+      // 2. Stop Loss Hybrid & Micro-Grid Emergency SL
       let slRaw: number;
       let desc = '';
-      const useWhaleStructuralSl = smCfg.structuralSlEnabled !== false &&
-        signal.whaleAvgEntry &&
-        signal.whaleAvgEntry > 0;
-
-      if (useWhaleStructuralSl && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
+      if (isMicroGrid) {
+        // Gaya Leader Binance: Hard SL diletakkan aman di luar jangkauan layer terakhir + buffer
+        const spacingPct = smCfg.layerSpacingPct || 0.8;
+        const emergencyBuffer = smCfg.gridEmergencySlBufferPct ?? 3.0;
+        const totalDistancePct = (numLayers * spacingPct) + emergencyBuffer;
+        slRaw = isShort
+          ? basePrice * (1 + totalDistancePct / 100)
+          : basePrice * (1 - totalDistancePct / 100);
+        desc = `Micro-Grid Emergency SL (${isShort ? '+' : '-'}${totalDistancePct.toFixed(1)}% [${numLayers} Layers + ${emergencyBuffer}% Buffer])`;
+      } else if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;
         const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
         const effectiveBuffer = Math.max(staticBuffer, dynamicBuffer);
@@ -6821,18 +6847,26 @@ export class WickSniperEngine {
 
     const layers: GridLayer[] = [layer0];
     const spacingPct = smCfg.layerSpacingPct || 0.8;
+    let cumulativeMargin = effectiveMargin;
+    const maxBudget = smCfg.maxTotalMarginPerCoin || 0;
 
     for (let i = 1; i < numLayers; i++) {
+      if (maxBudget > 0 && cumulativeMargin >= maxBudget) {
+        break;
+      }
       const layerPriceRaw = isShort
         ? realEntryPrice * (1 + (i * spacingPct) / 100)
         : realEntryPrice * (1 - (i * spacingPct) / 100);
       const layerPrice = parseFloat(binanceFutures.formatPrice(symbol, layerPriceRaw));
-      let layerPlanned = (marginPerLayer * leverage) / layerPrice;
+      // Gaya Leader Binance: Sizing linear bertahap (+10% per layer) dengan batas maksimal (cap 1.5x)
+      const sizeMultiplier = isMicroGrid ? Math.min(1.5, 1.0 + (i * 0.10)) : 1.0;
+      let layerPlanned = ((marginPerLayer * sizeMultiplier) * leverage) / layerPrice;
       if (layerPlanned * layerPrice < prec.minNotional) {
         layerPlanned = (prec.minNotional * 1.05) / layerPrice;
       }
       const layerQty = parseFloat(binanceFutures.formatQty(symbol, layerPlanned));
       const layerMargin = (layerQty * layerPrice) / leverage;
+      cumulativeMargin += layerMargin;
 
       layers.push({
         layerIndex: i,

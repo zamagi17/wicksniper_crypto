@@ -3767,6 +3767,9 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-limit-wait-sec', smCfg.limitWaitSeconds ?? 15);
   setVal('cfg-sm-layers', smCfg.entryLayers ?? 1);
   setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
+  setVal('cfg-sm-max-coin-margin', smCfg.maxTotalMarginPerCoin ?? 50);
+  setVal('cfg-sm-grid-emergency-sl', smCfg.gridEmergencySlBufferPct ?? 3.0);
+  if (typeof toggleSmLayerSpacing === 'function') toggleSmLayerSpacing();
   const smTrailingCb = document.getElementById('cfg-sm-trailing-tp');
   if (smTrailingCb) smTrailingCb.checked = smCfg.trailingTpEnabled !== false;
   setVal('cfg-sm-trailing-callback', smCfg.trailingCallbackPct ?? 0.3);
@@ -4200,6 +4203,8 @@ function getSettingsFormData() {
       limitWaitSeconds: parseInt(getVal('cfg-sm-limit-wait-sec', '15'), 10) || 15,
       entryLayers: parseInt(getVal('cfg-sm-layers', '1'), 10) || 1,
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
+      maxTotalMarginPerCoin: parseFloat(getVal('cfg-sm-max-coin-margin', '50')) || 50,
+      gridEmergencySlBufferPct: parseFloat(getVal('cfg-sm-grid-emergency-sl', '3.0')) || 3.0,
       trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
       rsiFilterEnabled: !!document.getElementById('cfg-sm-rsi-filter')?.checked,
@@ -4949,9 +4954,13 @@ window.toggleStrategySettingsView = toggleStrategySettingsView;
 function toggleSmLayerSpacing() {
   const sel = document.getElementById('cfg-sm-layers');
   const grp = document.getElementById('cfg-sm-layer-spacing-group');
+  const microPanel = document.getElementById('cfg-sm-microgrid-panel');
+  const val = parseInt(sel?.value || '1', 10);
   if (grp) {
-    const val = parseInt(sel?.value || '1', 10);
     grp.style.display = val > 1 ? 'block' : 'none';
+  }
+  if (microPanel) {
+    microPanel.style.display = val > 3 ? 'flex' : 'none';
   }
 }
 window.toggleSmLayerSpacing = toggleSmLayerSpacing;
