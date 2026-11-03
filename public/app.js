@@ -3309,7 +3309,21 @@ function applySnapshotParamsToConfig() {
   // Helper set form values
   const setVal = (id, val) => {
     const el = document.getElementById(id);
-    if (el && val !== undefined && val !== null) el.value = val;
+    if (!el || val === undefined || val === null) return;
+    if (el.tagName === 'SELECT' && !isNaN(Number(val))) {
+      const numVal = Number(val);
+      let matched = false;
+      for (const opt of el.options) {
+        if (!isNaN(Number(opt.value)) && Math.abs(Number(opt.value) - numVal) < 0.001) {
+          el.value = opt.value;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) el.value = String(val);
+    } else {
+      el.value = val;
+    }
   };
   const setChecked = (id, val) => {
     const el = document.getElementById(id);
@@ -3755,7 +3769,21 @@ function populateSettingsForm(cfg) {
   if (!cfg) return;
   const setVal = (id, val) => {
     const el = document.getElementById(id);
-    if (el && val !== undefined && val !== null) el.value = val;
+    if (!el || val === undefined || val === null) return;
+    if (el.tagName === 'SELECT' && !isNaN(Number(val))) {
+      const numVal = Number(val);
+      let matched = false;
+      for (const opt of el.options) {
+        if (!isNaN(Number(opt.value)) && Math.abs(Number(opt.value) - numVal) < 0.001) {
+          el.value = opt.value;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) el.value = String(val);
+    } else {
+      el.value = val;
+    }
   };
 
   setVal('cfg-trigger-strategy', cfg.triggerStrategy || 'SMART_MONEY');
@@ -4229,7 +4257,7 @@ function getSettingsFormData() {
       gridEmergencySlBufferPct: parseFloat(getVal('cfg-sm-grid-emergency-sl', '3.0')) || 3.0,
       ladderExitEnabled: !!document.getElementById('cfg-sm-ladder-exit')?.checked,
       ladderSteps: parseInt(getVal('cfg-sm-ladder-steps', '4'), 10) || 4,
-      martingaleMultiplier: parseFloat(getVal('cfg-sm-martingale-mult', '1.10')) || 1.10,
+      martingaleMultiplier: (!isNaN(parseFloat(getVal('cfg-sm-martingale-mult', '1.10'))) && parseFloat(getVal('cfg-sm-martingale-mult', '1.10')) >= 1.0) ? parseFloat(getVal('cfg-sm-martingale-mult', '1.10')) : 1.10,
       martingaleMaxCap: 1.5,
       trailingTpEnabled: !!document.getElementById('cfg-sm-trailing-tp')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-sm-trailing-callback', '0.3')) || 0.3,
