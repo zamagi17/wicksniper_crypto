@@ -1869,9 +1869,26 @@ export class BinanceFuturesClient {
           if (res.data.length >= 10) {
             const pastCandles = res.data.slice(-11, -1);
             const avgQuoteVol = pastCandles.reduce((sum: number, c: any) => sum + parseFloat(c[7] || c[5] || '0'), 0) / pastCandles.length;
-            const currentQuoteVol = parseFloat(res.data[res.data.length - 1][7] || res.data[res.data.length - 1][5] || '0');
-            if (avgQuoteVol > 0 && currentQuoteVol > 0) {
-              rvol = parseFloat((currentQuoteVol / avgQuoteVol).toFixed(2));
+            const currentCandle = res.data[res.data.length - 1];
+            const currentQuoteVol = parseFloat(currentCandle[7] || currentCandle[5] || '0');
+
+            if (avgQuoteVol > 0) {
+              // 1. RVOL lilin 15m sebelumnya yang sudah tertutup penuh (mencegah blind spot saat pergantian lilin)
+              const prevCandle = res.data[res.data.length - 2];
+              const prevQuoteVol = parseFloat(prevCandle[7] || prevCandle[5] || '0');
+              const prevRvol = parseFloat((prevQuoteVol / avgQuoteVol).toFixed(2));
+
+              // 2. RVOL lilin 15m berjalan yang dinormalisasi dengan durasi waktu (pro-rated)
+              const openTime = Number(currentCandle[0]) || now;
+              const closeTime = Number(currentCandle[6]) || (openTime + 900_000);
+              const durationMs = Math.max(60_000, (closeTime - openTime) + 1);
+              const elapsedMs = Math.max(30_000, Math.min(durationMs, now - openTime));
+              const progressRatio = Math.max(0.05, Math.min(1.0, elapsedMs / durationMs));
+              const expectedVolSoFar = avgQuoteVol * progressRatio;
+              const currentProratedRvol = parseFloat((currentQuoteVol / expectedVolSoFar).toFixed(2));
+
+              // Gunakan nilai tertinggi antara momentum lilin sebelumnya vs lonjakan lilin berjalan
+              rvol = Math.max(prevRvol, currentProratedRvol);
             }
           }
 
