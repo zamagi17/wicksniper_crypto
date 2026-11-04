@@ -2171,11 +2171,12 @@ export class WickSniperEngine {
             layer.status = 'FILLED';
             layer.filledAt = Date.now();
             layer.volumeUsdt = layer.volumeUsdt || parseFloat((layer.qty * layer.price).toFixed(2));
-            this.enrichLayerMarketData(pos.symbol, layer).catch(() => {});
+            await this.enrichLayerMarketData(pos.symbol, layer).catch(() => {});
             layersChanged = true;
+            const emaTag = layer.emaDesc ? ` • ${layer.emaDesc}` : '';
             logger.log(
               'SNIPER',
-              `🕸️ [LAYER TERISI PAPER] ${symbol} Layer #${layer.layerIndex} terisi @ $${layer.price} (Qty: ${layer.qty}, Margin: $${layer.marginUsdt.toFixed(2)})`,
+              `🕸️ [LAYER TERISI PAPER] ${symbol} Layer #${layer.layerIndex} terisi @ ${layer.price} (Qty: ${layer.qty}, Margin: ${layer.marginUsdt.toFixed(2)})${emaTag}`,
               symbol
             );
             telegram.notifyLayerFill(
@@ -4537,6 +4538,9 @@ export class WickSniperEngine {
           vol24hUsdt: l.vol24hUsdt,
           rsi: l.rsi,
           marketVolume1mUsdt: l.marketVolume1mUsdt,
+          ema: l.ema,
+          emaRelation: l.emaRelation,
+          emaDesc: l.emaDesc,
           status: l.status,
           filledAt: l.filledAt,
         })),
@@ -5019,6 +5023,19 @@ export class WickSniperEngine {
       const indicators = await this.fetchMarketIndicators(symbol);
       if (indicators.rsi1m !== undefined) layer.rsi = indicators.rsi1m;
       if (indicators.vol1mUsdt !== undefined) layer.marketVolume1mUsdt = indicators.vol1mUsdt;
+
+      // Ambil status tren EMA koin saat layer terisi
+      const smCfg = this.config.smartMoney;
+      const emaTf = smCfg?.emaTimeframe || '15m';
+      const emaPeriod = smCfg?.emaPeriod || 50;
+      const emaVal = await binanceFutures.getSymbolEma(symbol, emaTf, emaPeriod);
+      if (emaVal !== undefined && emaVal > 0) {
+        layer.ema = emaVal;
+        layer.emaRelation = layer.price >= emaVal ? 'ABOVE' : 'BELOW';
+        const diffPct = Math.abs(((layer.price - emaVal) / emaVal) * 100).toFixed(2);
+        const posDesc = layer.price >= emaVal ? 'Diatas' : 'Dibawah';
+        layer.emaDesc = `${posDesc} EMA ${emaPeriod} ${emaTf} (${formatCryptoPrice(emaVal)} | ${layer.price >= emaVal ? '+' : '-'}${diffPct}%)`;
+      }
     } catch {}
   }
 
@@ -7122,6 +7139,7 @@ export class WickSniperEngine {
       filledAt: Date.now(),
       orderId: liveOrderId,
     };
+    this.enrichLayerMarketData(symbol, layer0).catch(() => {});
 
     const layers: GridLayer[] = [layer0];
     const spacingPct = smCfg.layerSpacingPct || 0.8;

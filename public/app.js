@@ -1472,7 +1472,8 @@ function renderActivePositions(positions) {
           const volUsdt = l.volumeUsdt !== undefined ? Number(l.volumeUsdt) : ((Number(l.price || 0) * Number(l.qty || 0)) || (Number(l.marginUsdt || 0) * Number(pos.leverage || 5)));
           const vol24hTag = l.vol24hUsdt ? ` • 🌐Vol24h: $${formatShortUsdt(l.vol24hUsdt)}` : '';
           const rsiTag = l.rsi !== undefined ? ` • 📊RSI ${Number(l.rsi).toFixed(1)}` : '';
-          return `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status}${timeTag} • $${Number(l.marginUsdt || 0).toFixed(2)} Mgn • $${volUsdt.toFixed(1)} Vol${vol24hTag}${rsiTag})</span>`;
+          const emaTag = l.emaDesc ? ` • 📉${l.emaDesc}` : (l.ema ? ` • 📉EMA $${formatCryptoPrice(l.ema)} (${l.emaRelation || (l.price >= l.ema ? 'ABOVE' : 'BELOW')})` : '');
+          return `<span class="layer-badge ${l.status.toLowerCase()}">L#${l.layerIndex}: $${formatCryptoPrice(l.price)} (${l.status}${timeTag} • $${Number(l.marginUsdt || 0).toFixed(2)} Mgn • $${volUsdt.toFixed(1)} Vol${vol24hTag}${rsiTag}${emaTag})</span>`;
         })
         .join('');
 
@@ -2685,6 +2686,14 @@ function openTradeDetailModal(tradeId, tradeIndex) {
                 vol1mHtml = `<span class="badge-vol1m" title="Volume pasar koin 1m saat layer terisi">🌊 Vol 1m: <b>$${formatShortUsdt(l.marketVolume1mUsdt)}</b></span>`;
               }
 
+              let emaHtml = '';
+              if (l.emaDesc) {
+                emaHtml = `<span class="badge-ema" title="Posisi harga terhadap EMA saat layer terisi">📉 ${l.emaDesc}</span>`;
+              } else if (l.ema) {
+                const rel = l.emaRelation || (priceNum >= l.ema ? 'Diatas' : 'Dibawah');
+                emaHtml = `<span class="badge-ema" title="EMA koin saat layer terisi">📉 ${rel} EMA ($${formatCryptoPrice(l.ema)})</span>`;
+              }
+
               return `
                 <div class="td-layer-row ${statusStr === 'FILLED' ? 'filled' : ''}">
                   <span><b>Layer #${layerIdx}</b>: $${formatCryptoPrice(priceNum)}</span>
@@ -2692,6 +2701,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
                   <span>Vol Order: <b class="text-cyan">$${volUsdt.toFixed(2)}</b> USDT</span>
                   ${vol24hHtml}
                   ${rsiHtml}
+                  ${emaHtml}
                   ${vol1mHtml}
                   ${timeHtml}
                   <span class="${statusStr === 'FILLED' ? 'text-green' : 'text-muted'}"><b>[${statusStr}]</b></span>

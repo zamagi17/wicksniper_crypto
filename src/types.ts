@@ -487,6 +487,9 @@ export interface GridLayer {
   vol24hUsdt?: number;
   marketVolume1mUsdt?: number;
   rsi?: number;
+  ema?: number;
+  emaRelation?: 'ABOVE' | 'BELOW';
+  emaDesc?: string;
   status: 'PENDING' | 'FILLED' | 'CANCELLED';
   filledAt?: number;
 }
@@ -620,6 +623,9 @@ export interface ClosedTrade {
     vol24hUsdt?: number;
     marketVolume1mUsdt?: number;
     rsi?: number;
+    ema?: number;
+    emaRelation?: 'ABOVE' | 'BELOW';
+    emaDesc?: string;
     status: string;
     filledAt?: number;
   }[];

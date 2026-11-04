@@ -1778,6 +1778,20 @@ body {
   font-weight: 500;
 }
 
+.badge-ema {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  font-family: monospace;
+}
+
 .badge-vol24h {
   display: inline-flex;
   align-items: center;
