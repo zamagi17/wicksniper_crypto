@@ -716,6 +716,11 @@ export class WickSniperEngine {
           this.updateActivePositionsSmartMoneyFlow().catch(() => {});
         }
 
+        // Fallback Watchdog: Sinkronisasi berkala harga posisi aktif via REST untuk mencegah koin stuck
+        if (tickCount % 5 === 0 && this.activePositions.size > 0) {
+          this.syncActivePositionPricesViaRest().catch(() => {});
+        }
+
         // Relaksasi interval sync posisi dan balance ke 5 detik (dari 3 detik) untuk menghemat kuota REST
         if (tickCount % 5 === 0 && this.config.tradingMode === 'LIVE') {
           await this.syncLivePositions();
@@ -2105,6 +2110,23 @@ export class WickSniperEngine {
     }
     this.broadcastStatus();
     return true;
+  }
+
+  /**
+   * Fallback Watchdog: Sinkronisasi harga posisi aktif via REST jika stream WebSocket drop/stuck
+   */
+  private async syncActivePositionPricesViaRest(): Promise<void> {
+    if (this.activePositions.size === 0) return;
+    try {
+      const symbols = Array.from(this.activePositions.keys());
+      const tickers = await binanceFutures.fetchAllTickerPrices();
+      if (tickers && tickers.length > 0) {
+        const activeTickers = tickers.filter((t: any) => symbols.includes(t.s));
+        if (activeTickers.length > 0) {
+          await this.onPriceTick(activeTickers);
+        }
+      }
+    } catch {}
   }
 
   /**

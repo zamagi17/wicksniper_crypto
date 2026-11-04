@@ -22,7 +22,7 @@ export class BinanceFuturesClient {
   private isTestnet: boolean = false;
   private restBaseUrl: string = 'https://fapi.binance.com';
   private wsDomainIndex: number = 0;
-  private wsDomains: string[] = ['fstream.binance.com', 'stream.binancefuture.com', 'fstream.binance.me'];
+  private wsDomains: string[] = ['fstream.binance.com', 'fstream.binance.me'];
   private wsUrl: string = `wss://${this.wsDomains[0]}/market/ws/!ticker@arr`;
   private currentDataSource: 'WEBSOCKET' | 'POLLING' = 'WEBSOCKET';
   private wsClient: WebSocket | null = null;
@@ -74,9 +74,12 @@ export class BinanceFuturesClient {
 
     if (isTestnet) {
       this.restBaseUrl = 'https://testnet.binancefuture.com';
+      this.wsDomains = ['stream.binancefuture.com'];
+      this.wsDomainIndex = 0;
       this.wsUrl = 'wss://stream.binancefuture.com/market/ws/!ticker@arr';
     } else {
       this.restBaseUrl = 'https://fapi.binance.com';
+      this.wsDomains = ['fstream.binance.com', 'fstream.binance.me'];
       this.wsDomainIndex = 0;
       this.wsUrl = `wss://${this.wsDomains[this.wsDomainIndex]}/market/ws/!ticker@arr`;
     }
