@@ -261,6 +261,8 @@ ${slLine}
         ? '📈 Trailing Take Profit'
         : trade.exitReason === 'HARD_STOP_LOSS'
         ? '🛑 Hard Stop Loss (Cut-Off)'
+        : trade.exitReason === 'LADDER_BEP'
+        ? '🪜 Ladder BEP (Impas Pasca-Ladder TP1)'
         : trade.exitReason === 'BEP_DEFENSE'
         ? '🛡️ BEP Defense (Penyelamatan Modal)'
         : trade.exitReason === 'TOTAL_PROFIT_TARGET'

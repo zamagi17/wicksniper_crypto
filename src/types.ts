@@ -531,6 +531,7 @@ export interface ActivePosition {
   ladderStepIndex?: number;    // Tangga cicil keluar terakhir yang berhasil dieksekusi (0 = belum, 1 = tangga 1, dst.)
   ladderInitialQty?: number;   // Kuantitas posisi saat ladder unwinding pertama kali dimulai
   lastLadderStepAt?: number;   // Timestamp eksekusi tangga terakhir
+  ladderBepPendingSince?: number; // Timestamp saat harga pertama kali menembus level ladder BEP (anti-wick debounce)
   lowestPrice?: number; // Harga terendah yang pernah dicapai koin selama posisi dibuka (ATL Posisi)
   highestPrice?: number; // Harga tertinggi yang pernah dicapai koin selama posisi dibuka (ATH Posisi)
   trailingRunnerPrice?: number; // Acuan harga ekstrem saat trailing runner aktif
@@ -609,7 +610,7 @@ export interface ClosedTrade {
   fee?: number;
   pnlPct: number;
   durationSeconds: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'MANUAL_CLOSE' | 'TOTAL_PROFIT_TARGET' | 'TREND_SHIFT_EXIT';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'LADDER_BEP' | 'MANUAL_CLOSE' | 'TOTAL_PROFIT_TARGET' | 'TREND_SHIFT_EXIT';
   isPaper: boolean;
   closedAt: string;
   timestamp: number;

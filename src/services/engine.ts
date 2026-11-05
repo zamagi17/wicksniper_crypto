@@ -658,7 +658,7 @@ export class WickSniperEngine {
             ? (this.config.exit.hardStopCooldownMinutes || 60)
             : t.exitReason === 'EARLY_MOMENTUM_EXIT'
               ? (this.config.exit.earlyExitCooldownMinutes || 60)
-              : t.exitReason === 'BEP_DEFENSE'
+              : (t.exitReason === 'BEP_DEFENSE' || t.exitReason === 'LADDER_BEP')
                 ? (this.config.exit.bepCooldownMinutes || 15)
                 : isSmTrade
                   ? (this.config.smartMoney?.cooldownMinutes || 30)
@@ -2121,7 +2121,7 @@ export class WickSniperEngine {
       const symbols = Array.from(this.activePositions.keys());
       const tickers = await binanceFutures.fetchAllTickerPrices();
       if (tickers && tickers.length > 0) {
-        const activeTickers = tickers.filter((t: any) => symbols.includes(t.s));
+        const activeTickers = tickers.filter((t: any) => symbols.includes(t.s || t.symbol));
         if (activeTickers.length > 0) {
           await this.onPriceTick(activeTickers);
         }
@@ -2141,12 +2141,12 @@ export class WickSniperEngine {
     if (this.activePositions.size === 0) return;
 
     for (const t of tickers) {
-      const symbol = t.s;
+      const symbol = t.s || t.symbol;
       const pos = this.activePositions.get(symbol);
       if (!pos) continue;
       if (pos.status === 'CLOSING' || pos.status === 'CLOSED') continue;
 
-      const currentPrice = parseFloat(t.c || t.p || '0');
+      const currentPrice = parseFloat(t.c || t.p || t.price || '0');
       if (currentPrice <= 0) continue;
 
       pos.currentPrice = currentPrice;
@@ -2285,24 +2285,46 @@ export class WickSniperEngine {
         // A. Hard Stop Loss & Auto-BEP untuk LONG
         if (currentPrice <= pos.hardSlPrice && (pos.isAutoBepDone || slAgeMs >= 3000)) {
           if (pos.isAutoBepDone) {
+            const isLadder = (pos.ladderStepIndex || 0) > 0;
+            if (isLadder) {
+              const timeSinceLadderMs = Date.now() - (pos.lastLadderStepAt || 0);
+              // Grace period: beri ruang bernapas minimal 15 detik pasca eksekusi ladder step
+              if (timeSinceLadderMs < 15000) {
+                continue;
+              }
+              // Anti-wick debounce: harga harus bertahan di bawah hardSlPrice minimal 3 detik
+              if (!pos.ladderBepPendingSince) {
+                pos.ladderBepPendingSince = Date.now();
+                continue;
+              }
+              if (Date.now() - pos.ladderBepPendingSince < 3000) {
+                continue;
+              }
+            }
+
+            const exitReason = isLadder ? 'LADDER_BEP' : 'BEP_DEFENSE';
             const bepBufferPct = pos.strategyType === 'SMART_MONEY'
               ? (this.config.smartMoney?.autoBepBufferPct ?? 0.3)
               : 0.08;
             logger.log(
               'INFO',
-              `🛡️ [BEP DEFENSE TRIGGERED] ${pos.symbol}: Harga kembali ke BEP $${formatCryptoPrice(pos.hardSlPrice)}. Posisi LONG ditutup impas (+buffer ${bepBufferPct}%)!`,
+              isLadder
+                ? `🪜 [LADDER BEP TRIGGERED] ${pos.symbol}: Harga kembali ke titik impas ladder ${formatCryptoPrice(pos.hardSlPrice)}. Posisi LONG ditutup impas (+buffer ${bepBufferPct}%)!`
+                : `🛡️ [BEP DEFENSE TRIGGERED] ${pos.symbol}: Harga kembali ke BEP ${formatCryptoPrice(pos.hardSlPrice)}. Posisi LONG ditutup impas (+buffer ${bepBufferPct}%)!`,
               pos.symbol
             );
-            this.closePosition(pos, 'BEP_DEFENSE', currentPrice);
+            this.closePosition(pos, exitReason, currentPrice);
           } else {
             logger.log(
               'WARN',
-              `🛑 [LONG HARD SL TRIGGERED] ${pos.symbol}: Harga $${formatCryptoPrice(currentPrice)} <= Hard SL $${formatCryptoPrice(pos.hardSlPrice)} (Avg Entry: $${formatCryptoPrice(pos.avgEntryPrice)}, SL%: ${(((pos.hardSlPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2)}%)`,
+              `🛑 [LONG HARD SL TRIGGERED] ${pos.symbol}: Harga ${formatCryptoPrice(currentPrice)} <= Hard SL ${formatCryptoPrice(pos.hardSlPrice)} (Avg Entry: ${formatCryptoPrice(pos.avgEntryPrice)}, SL%: ${(((pos.hardSlPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2)}%)`,
               pos.symbol
             );
             this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
           }
           continue;
+        } else if (pos.ladderBepPendingSince && currentPrice > pos.hardSlPrice) {
+          pos.ladderBepPendingSince = undefined;
         }
 
         // B. Evaluasi Take Profit & Trailing TP untuk LONG
@@ -2420,24 +2442,44 @@ export class WickSniperEngine {
       const slAgeMs = Date.now() - pos.openedAt;
       if (currentPrice >= pos.hardSlPrice && (pos.partialTpDone || pos.isAutoBepDone || slAgeMs >= 5000)) {
         if (pos.partialTpDone || pos.isAutoBepDone) {
+          const isLadder = (pos.ladderStepIndex || 0) > 0;
+          if (isLadder) {
+            const timeSinceLadderMs = Date.now() - (pos.lastLadderStepAt || 0);
+            if (timeSinceLadderMs < 15000) {
+              continue;
+            }
+            if (!pos.ladderBepPendingSince) {
+              pos.ladderBepPendingSince = Date.now();
+              continue;
+            }
+            if (Date.now() - pos.ladderBepPendingSince < 3000) {
+              continue;
+            }
+          }
+
+          const exitReason = isLadder ? 'LADDER_BEP' : 'BEP_DEFENSE';
           const bepBufferPct = pos.strategyType === 'SMART_MONEY'
             ? (this.config.smartMoney?.autoBepBufferPct ?? 0.3)
             : (this.config.exit.bepBufferPct ?? 0.08);
           logger.log(
             'INFO',
-            `🛡️ [BEP PROTECTION TRIGGERED] ${pos.symbol}: Harga kembali ke BEP $${pos.hardSlPrice.toFixed(6)}. Posisi SHORT ditutup impas (+buffer ${bepBufferPct}%)!`,
+            isLadder
+              ? `🪜 [LADDER BEP TRIGGERED] ${pos.symbol}: Harga kembali ke titik impas ladder ${pos.hardSlPrice.toFixed(6)}. Posisi SHORT ditutup impas (+buffer ${bepBufferPct}%)!`
+              : `🛡️ [BEP PROTECTION TRIGGERED] ${pos.symbol}: Harga kembali ke BEP ${pos.hardSlPrice.toFixed(6)}. Posisi SHORT ditutup impas (+buffer ${bepBufferPct}%)!`,
             pos.symbol
           );
-          this.closePosition(pos, 'BEP_DEFENSE', currentPrice);
+          this.closePosition(pos, exitReason, currentPrice);
         } else {
           logger.log(
             'WARN',
-            `🛑 [HARD SL TRIGGERED] ${pos.symbol}: Harga $${currentPrice} >= Hard SL $${pos.hardSlPrice.toFixed(6)} (Avg Entry: $${pos.avgEntryPrice.toFixed(6)}, SL%: ${((pos.hardSlPrice / pos.avgEntryPrice - 1) * 100).toFixed(2)}%, Umur: ${(slAgeMs / 1000).toFixed(1)}s)`,
+            `🛑 [HARD SL TRIGGERED] ${pos.symbol}: Harga ${currentPrice} >= Hard SL ${pos.hardSlPrice.toFixed(6)} (Avg Entry: ${pos.avgEntryPrice.toFixed(6)}, SL%: ${((pos.hardSlPrice / pos.avgEntryPrice - 1) * 100).toFixed(2)}%, Umur: ${(slAgeMs / 1000).toFixed(1)}s)`,
             pos.symbol
           );
           this.closePosition(pos, 'HARD_STOP_LOSS', currentPrice);
         }
         continue;
+      } else if (pos.ladderBepPendingSince && currentPrice < pos.hardSlPrice) {
+        pos.ladderBepPendingSince = undefined;
       }
 
       if (this.shouldEarlyExitMomentum(pos, recentSamples)) {
@@ -3190,7 +3232,7 @@ export class WickSniperEngine {
       );
       pos.isAutoBepDone = true;
       pos.breakEvenPrice = pos.hardSlPrice;
-      pos.slDescription = `Auto-BEP Impas Pasca-Ladder TP1 (+${effectiveBufferPct}% @ ${formatCryptoPrice(pos.hardSlPrice)})`;
+      pos.slDescription = `Ladder BEP Impas Pasca-TP1 (+${effectiveBufferPct}% @ ${formatCryptoPrice(pos.hardSlPrice)})`;
     }
 
     const pctRealized = Math.round((sliceQty / (pos.ladderInitialQty || sliceQty)) * 100);
@@ -4399,12 +4441,12 @@ export class WickSniperEngine {
               if (reason === 'TAKE_PROFIT' && isPositionAlreadyClosed && !isTpOrderMatch) {
                 reason = 'MANUAL_CLOSE';
                 logger.log('INFO', `⚡ [MANUAL CLOSE TERDETEKSI] ${pos.symbol}: Posisi ditutup secara manual di Binance.`, pos.symbol);
-              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP' || reason === 'BEP_DEFENSE') && actualRealizedPnl < 0) {
+              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP') && actualRealizedPnl < 0) {
                 const origReason = reason;
                 reason = 'FEE_LOSS_EXIT';
                 logger.log(
                   'WARN',
-                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'BEP_DEFENSE' ? 'BEP Defense' : origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
+                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'LADDER_BEP' ? 'Ladder BEP' : origReason === 'BEP_DEFENSE' ? 'BEP Defense' : origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
                   pos.symbol
                 );
               }
@@ -4436,7 +4478,7 @@ export class WickSniperEngine {
             // userTrades kosong (error/belum terindeks): jangan simpan PnL kotor tanpa fee
             const fbLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
             const fbTotalQty = fbLayers.length > 0 ? fbLayers.reduce((sum, l) => sum + l.qty, 0) : pos.totalQty;
-            const exitFeeRate = (reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE') ? 0.0002 : 0.0005;
+            const exitFeeRate = (reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP') ? 0.0002 : 0.0005;
             const estFee = pos.avgEntryPrice * fbTotalQty * 0.0005 + closePrice * fbTotalQty * exitFeeRate;
             actualFee = Math.round(estFee * 1000) / 1000;
             actualRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0) - actualFee) * 100) / 100;
@@ -4463,7 +4505,7 @@ export class WickSniperEngine {
 
         const partialQty = (pos.partialTpDone && paperTradeQty > pos.totalQty) ? (paperTradeQty - pos.totalQty) : 0;
         const entryFee = pos.avgEntryPrice * paperTradeQty * 0.00035;
-        const isMakerExit = reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE';
+        const isMakerExit = reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP';
         const exitFee = (partialQty * pos.avgEntryPrice * 0.0002) + (closePrice * pos.totalQty * (isMakerExit ? 0.0002 : 0.0005));
         actualFee = Math.round((entryFee + exitFee) * 1000) / 1000;
         actualRealizedPnl = Math.round((finalRealizedPnl - actualFee) * 100) / 100;
@@ -4609,7 +4651,7 @@ export class WickSniperEngine {
         cooldownMinutes = this.config.exit.hardStopCooldownMinutes || 60;
       } else if (trade.exitReason === 'EARLY_MOMENTUM_EXIT') {
         cooldownMinutes = this.config.exit.earlyExitCooldownMinutes || 60;
-      } else if (trade.exitReason === 'BEP_DEFENSE') {
+      } else if (trade.exitReason === 'BEP_DEFENSE' || trade.exitReason === 'LADDER_BEP') {
         cooldownMinutes = this.config.exit.bepCooldownMinutes || 15;
       } else if (isSmTrade) {
         cooldownMinutes = this.config.smartMoney?.cooldownMinutes || 30;
@@ -4648,6 +4690,8 @@ export class WickSniperEngine {
           ? '🎯 Take Profit (Pullback Wick)'
           : trade.exitReason === 'TRAILING_TP'
             ? '📈 Trailing Take Profit'
+            : trade.exitReason === 'LADDER_BEP'
+              ? '🪜 Ladder BEP (Impas Pasca-Ladder TP1)'
             : trade.exitReason === 'BEP_DEFENSE'
               ? '🛡️ BEP Defense (Penyelamatan Modal)'
             : trade.exitReason === 'TOTAL_PROFIT_TARGET'
@@ -5163,7 +5207,7 @@ export class WickSniperEngine {
                   if (bPnl < 0) {
                     detectedReason = 'HARD_STOP_LOSS';
                   } else if (pos.isBepDefenseActive || pos.isAutoBepDone) {
-                    detectedReason = 'BEP_DEFENSE';
+                    detectedReason = (pos.ladderStepIndex || 0) > 0 ? 'LADDER_BEP' : 'BEP_DEFENSE';
                   } else if (
                     (pos.tpOrderId && String(latestClose.orderId) === String(pos.tpOrderId)) ||
                     (pos.tp2OrderId && String(latestClose.orderId) === String(pos.tp2OrderId)) ||

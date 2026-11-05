@@ -2336,7 +2336,7 @@ function renderClosedTradesTable(trades) {
               <small class="${t.exitReason === 'HARD_STOP_LOSS' ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
                 t.exitReason === 'TAKE_PROFIT' ? '🎯 TP' :
                 t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
-                t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense' :
+                t.exitReason === 'LADDER_BEP' ? '🪜 Ladder BEP' : t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense' :
                 t.exitReason === 'TOTAL_PROFIT_TARGET' ? '🎯 Portfolio TP' :
                 t.exitReason === 'TREND_SHIFT_EXIT' ? '🔄 Trend Shift' :
                 t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard SL' :
@@ -2885,14 +2885,14 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           <div class="td-kpi-card">
             <div class="td-kpi-label">Alasan Selesai</div>
             <div class="td-kpi-val" style="font-size: 12px; color: ${
-              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' || t.exitReason === 'TOTAL_PROFIT_TARGET' || t.exitReason === 'TREND_SHIFT_EXIT' ? 'var(--green)' :
+              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' || t.exitReason === 'LADDER_BEP' || t.exitReason === 'TOTAL_PROFIT_TARGET' || t.exitReason === 'TREND_SHIFT_EXIT' ? 'var(--green)' :
               t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
               t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
               'var(--text-muted)'
             }">${
               t.exitReason === 'TAKE_PROFIT' ? '🎯 Take Profit' :
               t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
-              t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense (Penyelamatan Modal)' :
+              t.exitReason === 'LADDER_BEP' ? '🪜 Ladder BEP (Impas Pasca-Ladder TP1)' : t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense (Penyelamatan Modal)' :
               t.exitReason === 'TOTAL_PROFIT_TARGET' ? '🎯 Total Floating Profit Target' :
               t.exitReason === 'TREND_SHIFT_EXIT' ? '🔄 Exit Pergeseran Trend (Regime Shift)' :
               t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
@@ -5815,6 +5815,7 @@ async function executeBacktest() {
           let exitReasonLabel = t.exitReason;
           if (t.exitReason === 'TAKE_PROFIT') exitReasonLabel = '🎯 Take Profit';
           else if (t.exitReason === 'TRAILING_TP') exitReasonLabel = t.partialTpTaken ? '🎯 Stage 2 TP / BEP' : '📈 Trailing TP';
+          else if (t.exitReason === 'LADDER_BEP') exitReasonLabel = '🪜 Ladder BEP';
           else if (t.exitReason === 'BEP_DEFENSE') exitReasonLabel = '🛡️ BEP Defense';
           else if (t.exitReason === 'TOTAL_PROFIT_TARGET') exitReasonLabel = '🎯 Portfolio TP';
           else if (t.exitReason === 'TREND_SHIFT_EXIT') exitReasonLabel = '🔄 Trend Shift';
