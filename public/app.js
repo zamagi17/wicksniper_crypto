@@ -2333,12 +2333,12 @@ function renderClosedTradesTable(trades) {
           <td class="${pnlColor}"><b>${sign}$${realizedPnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</b>${feeIndicator}</td>
           <td>
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-              <small class="${t.exitReason === 'HARD_STOP_LOSS' ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
+              <small class="${t.exitReason === 'HARD_STOP_LOSS' || (t.exitReason === 'TREND_SHIFT_EXIT' && Number(t.realizedPnl || 0) < 0) ? 'text-red' : t.exitReason === 'FEE_LOSS_EXIT' ? 'text-gold' : 'text-green'}"><b>${
                 t.exitReason === 'TAKE_PROFIT' ? '🎯 TP' :
                 t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
                 t.exitReason === 'LADDER_TP' ? '🪜 Ladder TP' : t.exitReason === 'LADDER_BEP' ? '🪜 Ladder BEP' : t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense' :
                 t.exitReason === 'TOTAL_PROFIT_TARGET' ? '🎯 Portfolio TP' :
-                t.exitReason === 'TREND_SHIFT_EXIT' ? '🔄 Trend Shift' :
+                t.exitReason === 'TREND_SHIFT_EXIT' ? (Number(t.realizedPnl || 0) >= 0 ? '🔄 Trend Shift TP' : '🚨 Macro Cut-Loss') :
                 t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard SL' :
                 t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
                 t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
@@ -2885,8 +2885,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
           <div class="td-kpi-card">
             <div class="td-kpi-label">Alasan Selesai</div>
             <div class="td-kpi-val" style="font-size: 12px; color: ${
-              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' || t.exitReason === 'LADDER_BEP' || t.exitReason === 'LADDER_TP' || t.exitReason === 'TOTAL_PROFIT_TARGET' || t.exitReason === 'TREND_SHIFT_EXIT' ? 'var(--green)' :
-              t.exitReason === 'HARD_STOP_LOSS' ? 'var(--red, #ff4d4d)' :
+              t.exitReason === 'TAKE_PROFIT' || t.exitReason === 'TRAILING_TP' || t.exitReason === 'BEP_DEFENSE' || t.exitReason === 'LADDER_BEP' || t.exitReason === 'LADDER_TP' || t.exitReason === 'TOTAL_PROFIT_TARGET' || (t.exitReason === 'TREND_SHIFT_EXIT' && Number(t.realizedPnl || 0) >= 0) ? 'var(--green)' :
+              t.exitReason === 'HARD_STOP_LOSS' || (t.exitReason === 'TREND_SHIFT_EXIT' && Number(t.realizedPnl || 0) < 0) ? 'var(--red, #ff4d4d)' :
               t.exitReason === 'FEE_LOSS_EXIT' ? 'var(--gold, #f0b90b)' :
               'var(--text-muted)'
             }">${
@@ -2894,7 +2894,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               t.exitReason === 'TRAILING_TP' ? '📈 Trailing TP' :
               t.exitReason === 'LADDER_TP' ? '🪜 Ladder Take Profit (Tangga Selesai)' : t.exitReason === 'LADDER_BEP' ? '🪜 Ladder BEP (Impas Pasca-Ladder TP1)' : t.exitReason === 'BEP_DEFENSE' ? '🛡️ BEP Defense (Penyelamatan Modal)' :
               t.exitReason === 'TOTAL_PROFIT_TARGET' ? '🎯 Total Floating Profit Target' :
-              t.exitReason === 'TREND_SHIFT_EXIT' ? '🔄 Exit Pergeseran Trend (Regime Shift)' :
+              t.exitReason === 'TREND_SHIFT_EXIT' ? (Number(t.realizedPnl || 0) >= 0 ? '🔄 Exit Pergeseran Trend (Amankan Profit)' : '🚨 Cut-Loss Pergeseran Trend (Macro Regime Shift)') :
               t.exitReason === 'HARD_STOP_LOSS' ? '🛑 Hard Stop Loss' :
               t.exitReason === 'FEE_LOSS_EXIT' ? '💸 TP Minus Fee' :
               t.exitReason === 'TIME_LIMIT_EXIT' ? '⏰ Batas Waktu' :
@@ -4046,6 +4046,11 @@ function populateSettingsForm(cfg) {
     trendShiftCheckbox.checked = cfg.exit?.trendShiftExitEnabled !== false;
   }
   setVal('cfg-trend-shift-min-profit', cfg.exit?.trendShiftMinProfitPct ?? 0.5);
+  const trendShiftLossCheckbox = document.getElementById('cfg-trend-shift-close-on-loss');
+  if (trendShiftLossCheckbox) {
+    trendShiftLossCheckbox.checked = cfg.exit?.trendShiftCloseOnLoss !== false;
+  }
+  setVal('cfg-trend-shift-btc-delta', cfg.exit?.trendShiftBtcDeltaPct ?? 0.5);
 
   // Emergency BEP Defense
   const bepDefCheckbox = document.getElementById('cfg-bep-defense-enabled');
@@ -4423,6 +4428,8 @@ function getSettingsFormData() {
       portfolioTpMinProfitPct: parseFloat(getVal('cfg-portfolio-tp-min-profit', '0.5')) || 0.5,
       trendShiftExitEnabled: document.getElementById('cfg-trend-shift-exit-enabled') ? !!document.getElementById('cfg-trend-shift-exit-enabled').checked : true,
       trendShiftMinProfitPct: parseFloat(getVal('cfg-trend-shift-min-profit', '0.5')) || 0.5,
+      trendShiftCloseOnLoss: document.getElementById('cfg-trend-shift-close-on-loss') ? !!document.getElementById('cfg-trend-shift-close-on-loss').checked : true,
+      trendShiftBtcDeltaPct: parseFloat(getVal('cfg-trend-shift-btc-delta', '0.5')) || 0.5,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
       trailingTpEnabled: !!document.getElementById('cfg-trailing-tp-enabled')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-trailing-tp-callback', '0.4')) || 0.4,
@@ -5819,7 +5826,7 @@ async function executeBacktest() {
           else if (t.exitReason === 'LADDER_BEP') exitReasonLabel = '🪜 Ladder BEP';
           else if (t.exitReason === 'BEP_DEFENSE') exitReasonLabel = '🛡️ BEP Defense';
           else if (t.exitReason === 'TOTAL_PROFIT_TARGET') exitReasonLabel = '🎯 Portfolio TP';
-          else if (t.exitReason === 'TREND_SHIFT_EXIT') exitReasonLabel = '🔄 Trend Shift';
+          else if (t.exitReason === 'TREND_SHIFT_EXIT') exitReasonLabel = Number(t.realizedPnl || 0) >= 0 ? '🔄 Trend Shift TP' : '🚨 Macro Cut-Loss';
           else if (t.exitReason === 'HARD_STOP_LOSS') exitReasonLabel = '🛑 Hard SL';
           else if (t.exitReason === 'TIME_LIMIT_EXIT') exitReasonLabel = '⏰ Batas Waktu';
           else if (t.exitReason === 'EARLY_MOMENTUM_EXIT') exitReasonLabel = '⚠️ Early Momentum';

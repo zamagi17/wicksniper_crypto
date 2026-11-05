@@ -270,7 +270,7 @@ ${slLine}
         : trade.exitReason === 'TOTAL_PROFIT_TARGET'
         ? '🎯 Total Floating Profit Target (Portfolio TP)'
         : trade.exitReason === 'TREND_SHIFT_EXIT'
-        ? '🔄 Exit Pergeseran Trend (Regime Shift)'
+        ? (trade.realizedPnl >= 0 ? '🔄 Exit Pergeseran Trend (Amankan Profit)' : '🚨 Cut-Loss Pergeseran Trend (Macro Regime Shift)')
         : trade.exitReason === 'FEE_LOSS_EXIT'
         ? '💸 TP Minus Fee (Biaya > Profit)'
         : trade.exitReason === 'TIME_LIMIT_EXIT'

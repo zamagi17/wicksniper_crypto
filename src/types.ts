@@ -101,6 +101,8 @@ export interface BotConfig {
     portfolioTpMinProfitPct?: number; // Minimal profit pergerakan harga koin yang ditutup (%) (default: 0.5%)
     trendShiftExitEnabled?: boolean; // Tutup segera saat trend bergeser (default: true)
     trendShiftMinProfitPct?: number; // Minimal profit pergerakan harga saat trend bergeser (%) (default: 0.5%)
+    trendShiftCloseOnLoss?: boolean; // Tutup posisi rugi (Cut Loss Darurat) saat tren BTC bergeser berlawanan (default: true)
+    trendShiftBtcDeltaPct?: number; // Toleransi pergeseran/penurunan BTC (%) untuk trigger cut loss darurat (default: 0.5%)
   };
   paperTrading: {
     initialVirtualBalance: number;
@@ -560,6 +562,7 @@ export interface ActivePosition {
   fundingRatePct?: number;
   rsi15m?: number;
   entryTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  entryBtcPrice?: number;
 }
 
 export interface SmartMoneyFlowStatus {

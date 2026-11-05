@@ -1704,14 +1704,28 @@
               <input type="checkbox" id="cfg-trend-shift-exit-enabled" style="width: 16px; height: 16px; accent-color: #ff9f0a;">
               🔄 Tutup Segera saat Trend Bergeser (Regime Shift Exit) <span class="badge-tag badge-shared">🌐 Global / Seluruh Posisi</span>
             </label>
-            <small class="form-hint">Jika posisi dibuka saat pasar Sideways lalu tiba-tiba bergeser ke Bearish (atau Bullish ke Sideways/Bearish untuk LONG; dan sebaliknya untuk SHORT), posisi yang sudah profit minimal 0.5% harga langsung ditutup segera demi mengamankan keuntungan sebelum tergerus.</small>
+            <small class="form-hint">Proteksi makro: Menutup posisi saat tren BTC berbalik melawan arah posisi (BULLISH/SIDEWAYS ➜ BEARISH untuk LONG, atau BEARISH/SIDEWAYS ➜ BULLISH untuk SHORT) demi melindungi seluruh modal dari drawdown berkepanjangan.</small>
           </div>
 
           <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
             <div class="form-group" style="flex: 1; min-width: 140px;">
-              <label>Minimal Profit Pergerakan Harga saat Trend Geser (%)</label>
+              <label>Amankan Profit saat Trend Bergeser (Minimal Cuan %)</label>
               <input type="number" id="cfg-trend-shift-min-profit" step="0.1" class="form-control" placeholder="0.5">
-              <small class="form-hint">Hanya menutup jika sudah untung minimal X% pergerakan harga (Default: 0.5%).</small>
+              <small class="form-hint">Jika posisi sedang untung &ge; X%, segera kunci keuntungan sebelum tergerus (Default: 0.5%).</small>
+            </div>
+
+            <div class="form-group" style="flex: 1; min-width: 140px;">
+              <label>Batas Pergeseran BTC untuk Tutup Darurat (%)</label>
+              <input type="number" id="cfg-trend-shift-btc-delta" step="0.05" class="form-control" placeholder="0.5">
+              <small class="form-hint">LONG ditutup darurat jika BTC berbalik ke Bearish dan drop &ge; X% (dari entry atau di bawah EMA). SHORT ditutup jika BTC berbalik ke Bullish &ge; X% (Default: 0.5%).</small>
+            </div>
+
+            <div class="form-group" style="width: 100%; margin-top: 4px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; color: var(--text-color);">
+                <input type="checkbox" id="cfg-trend-shift-close-on-loss" style="width: 15px; height: 15px; accent-color: #ff453a;">
+                🚨 Tutup Darurat Posisi Floating Loss (Cut Loss saat Macro Trend Hancur)
+              </label>
+              <small class="form-hint">Bila dicentang (direkomendasikan), posisi yang sedang minus sekalipun akan langsung ditutup darurat saat BTC berbalik arah &ge; ambang batas % di atas, demi mencegah koin terseret waterfall dump / likuidasi.</small>
             </div>
           </div>
         </div>
