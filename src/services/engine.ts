@@ -94,6 +94,34 @@ export function calculateAtr(candles: Candle[], period: number = 14): number | u
   return atr;
 }
 
+/**
+ * Menghitung persentase jarak kumulatif dari harga entry awal untuk layer ke-i.
+ * Jika progressive spacing aktif, jarak antar-layer akan melebar secara bertahap:
+ * - Layer 1: baseSpacing * 0.70 (scalping awal rapat)
+ * - Layer 2: baseSpacing * 0.85
+ * - Layer 3: baseSpacing * 1.00 (jarak normal)
+ * - Layer 4: baseSpacing * 1.15
+ * - Layer 5: baseSpacing * 1.30
+ * - Layer 6: baseSpacing * 1.45
+ * - Layer 7+: baseSpacing * 1.60 (benteng flash dump)
+ */
+export function calculateLayerCumulativeDistancePct(
+  layerIndex: number,
+  baseSpacingPct: number,
+  isProgressive: boolean = false
+): number {
+  if (layerIndex <= 0) return 0;
+  if (!isProgressive) {
+    return layerIndex * baseSpacingPct;
+  }
+  let cumulative = 0;
+  for (let k = 1; k <= layerIndex; k++) {
+    const factor = Math.min(1.6, 0.70 + (k - 1) * 0.15);
+    cumulative += baseSpacingPct * factor;
+  }
+  return parseFloat(cumulative.toFixed(4));
+}
+
 export class WickSniperEngine {
   private config: BotConfig;
   private configPath: string;
@@ -414,6 +442,7 @@ export class WickSniperEngine {
         invalidationThresholdPct: 1.2,
         entryLayers: 1,
         layerSpacingPct: 0.8,
+        progressiveSpacingEnabled: false,
         maxTotalMarginPerCoin: 50,
         gridEmergencySlBufferPct: 3.0,
         ladderExitEnabled: true,
@@ -6980,12 +7009,13 @@ export class WickSniperEngine {
       if (isMicroGrid) {
         // Gaya Leader Binance: Hard SL diletakkan aman di luar jangkauan layer terakhir + buffer
         const spacingPct = smCfg.layerSpacingPct || 0.8;
+        const isProgressive = smCfg.progressiveSpacingEnabled === true;
         const emergencyBuffer = smCfg.gridEmergencySlBufferPct ?? 3.0;
-        const totalDistancePct = (numLayers * spacingPct) + emergencyBuffer;
+        const totalDistancePct = calculateLayerCumulativeDistancePct(numLayers - 1, spacingPct, isProgressive) + emergencyBuffer;
         slRaw = isShort
           ? basePrice * (1 + totalDistancePct / 100)
           : basePrice * (1 - totalDistancePct / 100);
-        desc = `Micro-Grid Emergency SL (${isShort ? '+' : '-'}${totalDistancePct.toFixed(1)}% [${numLayers} Layers + ${emergencyBuffer}% Buffer])`;
+        desc = `Micro-Grid Emergency SL (${isShort ? '+' : '-'}${totalDistancePct.toFixed(1)}% [${numLayers} Layers${isProgressive ? ' Progressive' : ''} + ${emergencyBuffer}% Buffer])`;
       } else if (smCfg.structuralSlEnabled !== false && signal.whaleAvgEntry && signal.whaleAvgEntry > 0) {
         const staticBuffer = signal.whaleAvgEntry * bufferPct;
         const dynamicBuffer = atrDynamic ? (atrVal * Math.min(1.0, atrSlMult * 0.67)) : 0;
@@ -7202,6 +7232,7 @@ export class WickSniperEngine {
 
     const layers: GridLayer[] = [layer0];
     const spacingPct = smCfg.layerSpacingPct || 0.8;
+    const isProgressive = smCfg.progressiveSpacingEnabled === true;
     let cumulativeMargin = effectiveMargin;
     const maxBudget = smCfg.maxTotalMarginPerCoin || 0;
 
@@ -7209,9 +7240,10 @@ export class WickSniperEngine {
       if (maxBudget > 0 && cumulativeMargin >= maxBudget) {
         break;
       }
+      const distPct = calculateLayerCumulativeDistancePct(i, spacingPct, isProgressive);
       const layerPriceRaw = isShort
-        ? realEntryPrice * (1 + (i * spacingPct) / 100)
-        : realEntryPrice * (1 - (i * spacingPct) / 100);
+        ? realEntryPrice * (1 + distPct / 100)
+        : realEntryPrice * (1 - distPct / 100);
       const layerPrice = parseFloat(binanceFutures.formatPrice(symbol, layerPriceRaw));
       // Gaya Leader Binance: Sizing linear bertahap (+10% per layer) dengan batas maksimal (cap 1.5x)
       const mult = smCfg.martingaleMultiplier ?? 1.10;
@@ -7278,6 +7310,7 @@ export class WickSniperEngine {
         side: signal.side,
         entryLayers: numLayers,
         layerSpacingPct: spacingPct,
+        progressiveSpacingEnabled: isProgressive,
         ladderExitEnabled: smCfg.ladderExitEnabled !== false,
         ladderSteps: smCfg.ladderSteps || 4,
         martingaleMultiplier: smCfg.martingaleMultiplier ?? 1.10,

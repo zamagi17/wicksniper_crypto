@@ -202,6 +202,7 @@ export interface SmartMoneyConfig {
   invalidationThresholdPct?: number; // Toleransi jebol di bawah modal paus sebelum sinyal dibatalkan (%, default: 1.2%)
   entryLayers: number;         // 1 = Single Sniper, 2-3 = Light DCA, 5-30 = Micro-Grid DCA (Gaya Leader Binance)
   layerSpacingPct: number;     // Jarak antar layer jika entryLayers > 1 (%)
+  progressiveSpacingEnabled?: boolean; // Jarak antar-layer melebar bertahap (L1-2 rapat, L3-4 sedang, L5+ lebar)
   maxTotalMarginPerCoin?: number; // Batas akumulasi modal maksimal per koin untuk Micro-Grid DCA (USDT, e.g. 35, 50, 100)
   gridEmergencySlBufferPct?: number; // Buffer darurat di luar jangkauan layer terakhir untuk Hard SL (%) (default: 3.0%)
   ladderExitEnabled?: boolean; // Cicil keluar bertahap saat retrace profit (default true jika entryLayers > 1)
