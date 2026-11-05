@@ -610,7 +610,7 @@ export interface ClosedTrade {
   fee?: number;
   pnlPct: number;
   durationSeconds: number;
-  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'LADDER_BEP' | 'MANUAL_CLOSE' | 'TOTAL_PROFIT_TARGET' | 'TREND_SHIFT_EXIT';
+  exitReason: 'TAKE_PROFIT' | 'TRAILING_TP' | 'HARD_STOP_LOSS' | 'FEE_LOSS_EXIT' | 'TIME_LIMIT_EXIT' | 'EARLY_MOMENTUM_EXIT' | 'BEP_DEFENSE' | 'LADDER_BEP' | 'LADDER_TP' | 'MANUAL_CLOSE' | 'TOTAL_PROFIT_TARGET' | 'TREND_SHIFT_EXIT';
   isPaper: boolean;
   closedAt: string;
   timestamp: number;

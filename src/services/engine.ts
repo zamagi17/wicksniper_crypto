@@ -2407,7 +2407,8 @@ export class WickSniperEngine {
                 `🎯 [LONG TRAILING TP HIT] ${pos.symbol}: Pullback -${dropPct.toFixed(2)}% dari puncak $${formatCryptoPrice(pos.trailingRunnerPrice)} ➜ Mengamankan profit di $${formatCryptoPrice(currentPrice)} (+${profitPct.toFixed(2)}%)!`,
                 pos.symbol
               );
-              this.closePosition(pos, 'TRAILING_TP', currentPrice);
+              const isLadder = (pos.ladderStepIndex || 0) > 0;
+              this.closePosition(pos, isLadder ? 'LADDER_TP' : 'TRAILING_TP', currentPrice);
               continue;
             }
           }
@@ -2643,7 +2644,8 @@ export class WickSniperEngine {
             `🎯 [TRAILING TP HIT] ${pos.symbol}: Memantul +${bouncePct.toFixed(2)}% dari harga terendah $${pos.trailingRunnerPrice.toFixed(6)} ➜ Mengamankan profit di $${currentPrice.toFixed(6)} (Cuan aman di bawah batas $${safeTrailingMaxPrice.toFixed(6)}).`,
             pos.symbol
           );
-          this.closePosition(pos, 'TRAILING_TP', currentPrice);
+          const isLadder = (pos.ladderStepIndex || 0) > 0;
+          this.closePosition(pos, isLadder ? 'LADDER_TP' : 'TRAILING_TP', currentPrice);
           continue;
         }
       }
@@ -3253,7 +3255,7 @@ export class WickSniperEngine {
 
     // Jika posisi sudah habis atau ini langkah terakhir:
     if (remainingQty <= 0) {
-      await this.closePosition(pos, 'TAKE_PROFIT', currentPrice);
+      await this.closePosition(pos, 'LADDER_TP', currentPrice);
     } else {
       this.broadcastStatus();
       db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
@@ -4441,12 +4443,12 @@ export class WickSniperEngine {
               if (reason === 'TAKE_PROFIT' && isPositionAlreadyClosed && !isTpOrderMatch) {
                 reason = 'MANUAL_CLOSE';
                 logger.log('INFO', `⚡ [MANUAL CLOSE TERDETEKSI] ${pos.symbol}: Posisi ditutup secara manual di Binance.`, pos.symbol);
-              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP') && actualRealizedPnl < 0) {
+              } else if ((reason === 'TAKE_PROFIT' || reason === 'TRAILING_TP' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP' || reason === 'LADDER_TP') && actualRealizedPnl < 0) {
                 const origReason = reason;
                 reason = 'FEE_LOSS_EXIT';
                 logger.log(
                   'WARN',
-                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'LADDER_BEP' ? 'Ladder BEP' : origReason === 'BEP_DEFENSE' ? 'BEP Defense' : origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
+                  `💸 [FEE / SLIPPAGE > PROFIT] ${pos.symbol}: ${origReason === 'LADDER_BEP' ? 'Ladder BEP' : origReason === 'LADDER_TP' ? 'Ladder TP' : origReason === 'BEP_DEFENSE' ? 'BEP Defense' : origReason === 'TRAILING_TP' ? 'Trailing TP' : 'TP'} tereksekusi tapi PnL riil -$${Math.abs(actualRealizedPnl).toFixed(2)} (fee/slippage melebihi profit). Margin: $${pos.totalMarginUsed.toFixed(2)}`,
                   pos.symbol
                 );
               }
@@ -4478,7 +4480,7 @@ export class WickSniperEngine {
             // userTrades kosong (error/belum terindeks): jangan simpan PnL kotor tanpa fee
             const fbLayers = (pos.layers || []).filter((l) => l.status === 'FILLED');
             const fbTotalQty = fbLayers.length > 0 ? fbLayers.reduce((sum, l) => sum + l.qty, 0) : pos.totalQty;
-            const exitFeeRate = (reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP') ? 0.0002 : 0.0005;
+            const exitFeeRate = (reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP' || reason === 'LADDER_TP') ? 0.0002 : 0.0005;
             const estFee = pos.avgEntryPrice * fbTotalQty * 0.0005 + closePrice * fbTotalQty * exitFeeRate;
             actualFee = Math.round(estFee * 1000) / 1000;
             actualRealizedPnl = Math.round((pnl + (pos.partialRealizedPnl || 0) - actualFee) * 100) / 100;
@@ -4505,7 +4507,7 @@ export class WickSniperEngine {
 
         const partialQty = (pos.partialTpDone && paperTradeQty > pos.totalQty) ? (paperTradeQty - pos.totalQty) : 0;
         const entryFee = pos.avgEntryPrice * paperTradeQty * 0.00035;
-        const isMakerExit = reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP';
+        const isMakerExit = reason === 'TAKE_PROFIT' || reason === 'BEP_DEFENSE' || reason === 'LADDER_BEP' || reason === 'LADDER_TP';
         const exitFee = (partialQty * pos.avgEntryPrice * 0.0002) + (closePrice * pos.totalQty * (isMakerExit ? 0.0002 : 0.0005));
         actualFee = Math.round((entryFee + exitFee) * 1000) / 1000;
         actualRealizedPnl = Math.round((finalRealizedPnl - actualFee) * 100) / 100;
@@ -4690,6 +4692,8 @@ export class WickSniperEngine {
           ? '🎯 Take Profit (Pullback Wick)'
           : trade.exitReason === 'TRAILING_TP'
             ? '📈 Trailing Take Profit'
+            : trade.exitReason === 'LADDER_TP'
+              ? '🪜 Ladder Take Profit (Tangga Selesai)'
             : trade.exitReason === 'LADDER_BEP'
               ? '🪜 Ladder BEP (Impas Pasca-Ladder TP1)'
             : trade.exitReason === 'BEP_DEFENSE'

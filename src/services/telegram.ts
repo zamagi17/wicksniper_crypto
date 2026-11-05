@@ -261,6 +261,8 @@ ${slLine}
         ? '📈 Trailing Take Profit'
         : trade.exitReason === 'HARD_STOP_LOSS'
         ? '🛑 Hard Stop Loss (Cut-Off)'
+        : trade.exitReason === 'LADDER_TP'
+        ? '🪜 Ladder Take Profit (Tangga Selesai)'
         : trade.exitReason === 'LADDER_BEP'
         ? '🪜 Ladder BEP (Impas Pasca-Ladder TP1)'
         : trade.exitReason === 'BEP_DEFENSE'
