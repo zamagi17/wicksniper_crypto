@@ -2196,6 +2196,9 @@ export class WickSniperEngine {
           pos.trailingTpActive = false;
           pos.trailingRunnerPrice = undefined;
           pos.peakPnlPct = 0;
+          // Reset acuan puncak ATH/ATL agar tidak mewarisi harga ekstrem sebelum averaging
+          pos.highestPrice = currentPrice;
+          pos.lowestPrice = currentPrice;
           db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
         }
       }
@@ -2889,6 +2892,10 @@ export class WickSniperEngine {
       pos.totalQty = parseFloat(binanceFutures.formatQty(pos.symbol, totalQty));
       pos.avgEntryPrice = totalNotional / totalQty;
       pos.totalMarginUsed = totalMargin;
+      if (pos.currentPrice && pos.currentPrice > 0) {
+        pos.highestPrice = pos.currentPrice;
+        pos.lowestPrice = pos.currentPrice;
+      }
 
       const exitCfg = this.config.exit;
       const tpCalc = this.calculatePositionTpPrices(pos);
@@ -3603,10 +3610,12 @@ export class WickSniperEngine {
 
           this.updateTrailingSL(pos);
 
-          // Reset status trailing runner saat layer averaging baru terisi
+          // Reset status trailing runner & acuan ATH/ATL saat layer averaging baru terisi
           pos.trailingTpActive = false;
           pos.trailingRunnerPrice = undefined;
           pos.peakPnlPct = 0;
+          pos.highestPrice = pos.currentPrice || pos.avgEntryPrice;
+          pos.lowestPrice = pos.currentPrice || pos.avgEntryPrice;
 
           // Update order Limit TP di Binance dengan volume baru
           await this.syncLiveTakeProfitOrder(pos);
@@ -5329,6 +5338,8 @@ export class WickSniperEngine {
                     pos.trailingTpActive = false;
                     pos.trailingRunnerPrice = undefined;
                     pos.peakPnlPct = 0;
+                    pos.highestPrice = pos.currentPrice || pos.avgEntryPrice;
+                    pos.lowestPrice = pos.currentPrice || pos.avgEntryPrice;
                     await this.syncLiveTakeProfitOrder(pos);
                     await this.deployNextGridLayerInQueue(pos);
                   }
