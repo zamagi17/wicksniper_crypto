@@ -3681,3 +3681,72 @@ body {
 .btn-preset-chip:active {
   transform: translateY(0);
 }
+
+/* ==============================================================
+   SETTINGS MODAL MODERN TABS & SMART MONEY CLEAN LAYOUT
+   ============================================================== */
+.settings-tabs-nav {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px 0 16px;
+  background: rgba(15, 23, 42, 0.75);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  flex-shrink: 0;
+}
+
+.settings-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.settings-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-tab-btn.active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.3) rgba(56, 189, 248, 0.3) transparent rgba(56, 189, 248, 0.3);
+  border-bottom: 2px solid #38bdf8;
+  box-shadow: 0 -2px 10px rgba(56, 189, 248, 0.15);
+}
+
+.settings-tab-pane {
+  display: none;
+  animation: fadeInSettingsPane 0.2s ease-in-out;
+}
+
+.settings-tab-pane.active {
+  display: block;
+}
+
+@keyframes fadeInSettingsPane {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* SMART MONEY CLEAN LAYOUT - HIDE SPIKE RADAR */
+.radar-hidden,
+.strategy-smart-money #panel-radar {
+  display: none !important;
+}
+
+.radar-tab-hidden,
+.strategy-smart-money .seg-tab[data-tab="radar"] {
+  display: none !important;
+}

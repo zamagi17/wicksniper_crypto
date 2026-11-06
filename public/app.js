@@ -715,6 +715,9 @@ function formatSmartMoneyReasonChips(rawReason) {
 
 function renderStatus(status) {
   currentStatus = status;
+  if (typeof updateDashboardStrategyLayout === 'function') {
+    updateDashboardStrategyLayout();
+  }
 
   // 1. Tombol Jalankan / Hentikan
   const btnIcon = document.getElementById('btn-engine-icon');
@@ -3823,6 +3826,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-sm-limit-wait-sec', smCfg.limitWaitSeconds ?? 15);
   setVal('cfg-sm-layers', smCfg.entryLayers ?? 1);
   setVal('cfg-sm-layer-spacing', smCfg.layerSpacingPct ?? 0.8);
+  const smProgSpaceCb = document.getElementById('cfg-sm-progressive-spacing');
+  if (smProgSpaceCb) smProgSpaceCb.checked = smCfg.progressiveSpacingEnabled !== false;
   setVal('cfg-sm-max-coin-margin', smCfg.maxTotalMarginPerCoin ?? 50);
   setVal('cfg-sm-grid-emergency-sl', smCfg.gridEmergencySlBufferPct ?? 3.0);
   const smLadderCb = document.getElementById('cfg-sm-ladder-exit');
@@ -4279,6 +4284,7 @@ function getSettingsFormData() {
       limitWaitSeconds: parseInt(getVal('cfg-sm-limit-wait-sec', '15'), 10) || 15,
       entryLayers: parseInt(getVal('cfg-sm-layers', '1'), 10) || 1,
       layerSpacingPct: parseFloat(getVal('cfg-sm-layer-spacing', '0.8')) || 0.8,
+      progressiveSpacingEnabled: !!document.getElementById('cfg-sm-progressive-spacing')?.checked,
       maxTotalMarginPerCoin: parseFloat(getVal('cfg-sm-max-coin-margin', '50')) || 50,
       gridEmergencySlBufferPct: parseFloat(getVal('cfg-sm-grid-emergency-sl', '3.0')) || 3.0,
       ladderExitEnabled: !!document.getElementById('cfg-sm-ladder-exit')?.checked,
@@ -4538,6 +4544,10 @@ async function reloadConfigFromServer() {
 async function openSettingsModal(skipReload = false) {
   const modal = document.getElementById('settings-modal');
   if (modal) modal.classList.add('open');
+  const activeStrat = currentConfig?.triggerStrategy || 'SMART_MONEY';
+  if (typeof switchSettingsTab === 'function') {
+    switchSettingsTab(activeStrat === 'WICK_SNIPER' ? 'wick-sniper' : 'smart-money');
+  }
 
   if (skipReload) return;
 
@@ -5029,12 +5039,75 @@ function toggleDataSourceGroup() {
 }
 window.toggleDataSourceGroup = toggleDataSourceGroup;
 
+function switchSettingsTab(tabKey) {
+  const tabs = document.querySelectorAll('.settings-tab-btn');
+  tabs.forEach((tab) => {
+    if (tab.getAttribute('data-tab') === tabKey) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  });
+
+  const panes = document.querySelectorAll('.settings-tab-pane');
+  panes.forEach((pane) => {
+    if (pane.getAttribute('data-tab-pane') === tabKey) {
+      pane.classList.add('active');
+    } else {
+      pane.classList.remove('active');
+    }
+  });
+
+  try {
+    localStorage.setItem('wicksniper_settings_tab', tabKey);
+  } catch (e) {}
+}
+window.switchSettingsTab = switchSettingsTab;
+
+function updateDashboardStrategyLayout() {
+  const strategy = currentConfig?.triggerStrategy || 'SMART_MONEY';
+  const radarPanel = document.getElementById('panel-radar');
+  const radarTabBtn = document.querySelector('.seg-tab[data-tab="radar"]');
+  const kpiLabelSpikes = document.getElementById('kpi-label-spikes');
+  const kpiSubSpikes = document.getElementById('kpi-sub-spikes');
+
+  if (strategy === 'SMART_MONEY') {
+    document.body.classList.add('strategy-smart-money');
+    if (radarPanel) {
+      radarPanel.classList.add('radar-hidden');
+    }
+    if (radarTabBtn) {
+      radarTabBtn.classList.add('radar-tab-hidden');
+    }
+    const container = document.getElementById('dashboard-columns');
+    if (container && container.getAttribute('data-active-tab') === 'radar') {
+      if (typeof switchMobileTab === 'function') switchMobileTab('pos');
+    }
+    if (kpiLabelSpikes) kpiLabelSpikes.innerText = 'Sinyal / Alert Hari Ini';
+    if (kpiSubSpikes) kpiSubSpikes.innerText = 'Smart Money Hunter';
+  } else {
+    document.body.classList.remove('strategy-smart-money');
+    if (radarPanel) {
+      radarPanel.classList.remove('radar-hidden');
+    }
+    if (radarTabBtn) {
+      radarTabBtn.classList.remove('radar-tab-hidden');
+    }
+    if (kpiLabelSpikes) kpiLabelSpikes.innerText = 'Spike Terdeteksi Hari Ini';
+    if (kpiSubSpikes) kpiSubSpikes.innerText = 'Sensor WebSocket Live';
+  }
+}
+window.updateDashboardStrategyLayout = updateDashboardStrategyLayout;
+
 function toggleStrategySettingsView() {
   const select = document.getElementById('cfg-trigger-strategy');
   const panel = document.getElementById('smart-money-panel');
   if (panel) {
     const val = select ? select.value : 'SMART_MONEY';
     panel.style.display = (val === 'SMART_MONEY' || val === 'HYBRID') ? 'grid' : 'none';
+  }
+  if (typeof updateDashboardStrategyLayout === 'function') {
+    updateDashboardStrategyLayout();
   }
 }
 window.toggleStrategySettingsView = toggleStrategySettingsView;
