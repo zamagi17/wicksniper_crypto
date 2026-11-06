@@ -318,7 +318,9 @@ export class DatabaseService {
                 params_snapshot AS "paramsSnapshot",
                 layers_detail AS "layersDetail",
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
-                post_exit_30m AS "postExit30m"
+                post_exit_30m AS "postExit30m",
+                highest_price AS "highestPrice", lowest_price AS "lowestPrice",
+                mfe_pct AS "mfePct", mae_pct AS "maePct"
          FROM wicksniper_trades
          ${whereMode}
          ORDER BY timestamp DESC
@@ -391,7 +393,9 @@ export class DatabaseService {
                 params_snapshot AS "paramsSnapshot",
                 layers_detail AS "layersDetail",
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
-                post_exit_30m AS "postExit30m"
+                post_exit_30m AS "postExit30m",
+                highest_price AS "highestPrice", lowest_price AS "lowestPrice",
+                mfe_pct AS "mfePct", mae_pct AS "maePct"
          FROM wicksniper_trades
          WHERE id = $1 LIMIT 1;`,
         [tradeId]
@@ -423,6 +427,13 @@ export class DatabaseService {
         targetTpPrice: parsedSnap?.targetTpPrice || undefined,
         targetTp2Price: parsedSnap?.targetTp2Price || undefined,
         hardSlPrice: parsedSnap?.hardSlPrice || undefined,
+        highestPrice: r.highestPrice !== null && r.highestPrice !== undefined ? parseFloat(r.highestPrice) : (parsedSnap?.highestPrice !== undefined ? parseFloat(parsedSnap.highestPrice) : undefined),
+        lowestPrice: r.lowestPrice !== null && r.lowestPrice !== undefined ? parseFloat(r.lowestPrice) : (parsedSnap?.lowestPrice !== undefined ? parseFloat(parsedSnap.lowestPrice) : undefined),
+        mfePct: r.mfePct !== null && r.mfePct !== undefined ? parseFloat(r.mfePct) : (parsedSnap?.mfePct !== undefined ? parseFloat(parsedSnap.mfePct) : undefined),
+        maePct: r.maePct !== null && r.maePct !== undefined ? parseFloat(r.maePct) : (parsedSnap?.maePct !== undefined ? parseFloat(parsedSnap.maePct) : undefined),
+        entryReason: parsedSnap?.entryReason || parsedSnap?.signalReason || undefined,
+        btcTrendStatus: parsedSnap?.btcTrendStatus || undefined,
+        fundingRatePct: parsedSnap?.fundingRatePct !== undefined ? parseFloat(parsedSnap.fundingRatePct) : undefined,
         paramsSnapshot: parsedSnap,
         marketSnapshot: parsedSnap?.marketSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
@@ -640,7 +651,9 @@ export class DatabaseService {
                 params_snapshot AS "paramsSnapshot",
                 layers_detail AS "layersDetail",
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
-                post_exit_30m AS "postExit30m"
+                post_exit_30m AS "postExit30m",
+                highest_price AS "highestPrice", lowest_price AS "lowestPrice",
+                mfe_pct AS "mfePct", mae_pct AS "maePct"
          FROM wicksniper_trades
          ${whereClause}
          ORDER BY timestamp DESC
@@ -674,6 +687,13 @@ export class DatabaseService {
           targetTpPrice: parsedSnap?.targetTpPrice || undefined,
           targetTp2Price: parsedSnap?.targetTp2Price || undefined,
           hardSlPrice: parsedSnap?.hardSlPrice || undefined,
+          highestPrice: r.highestPrice !== null && r.highestPrice !== undefined ? parseFloat(r.highestPrice) : (parsedSnap?.highestPrice !== undefined ? parseFloat(parsedSnap.highestPrice) : undefined),
+          lowestPrice: r.lowestPrice !== null && r.lowestPrice !== undefined ? parseFloat(r.lowestPrice) : (parsedSnap?.lowestPrice !== undefined ? parseFloat(parsedSnap.lowestPrice) : undefined),
+          mfePct: r.mfePct !== null && r.mfePct !== undefined ? parseFloat(r.mfePct) : (parsedSnap?.mfePct !== undefined ? parseFloat(parsedSnap.mfePct) : undefined),
+          maePct: r.maePct !== null && r.maePct !== undefined ? parseFloat(r.maePct) : (parsedSnap?.maePct !== undefined ? parseFloat(parsedSnap.maePct) : undefined),
+          entryReason: parsedSnap?.entryReason || parsedSnap?.signalReason || undefined,
+          btcTrendStatus: parsedSnap?.btcTrendStatus || undefined,
+          fundingRatePct: parsedSnap?.fundingRatePct !== undefined ? parseFloat(parsedSnap.fundingRatePct) : undefined,
           paramsSnapshot: parsedSnap,
           marketSnapshot: parsedSnap?.marketSnapshot || null,
           layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,

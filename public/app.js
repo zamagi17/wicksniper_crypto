@@ -2910,6 +2910,36 @@ function openTradeDetailModal(tradeId, tradeIndex) {
             <div class="td-kpi-label">Layer Terisi</div>
             <div class="td-kpi-val text-purple">${t.layersFilled || '-'}</div>
           </div>
+          ${(() => {
+            const athVal = t.highestPrice || snap?.highestPrice;
+            if (!athVal) return '';
+            const diffPct = t.entryPrice ? (((athVal - t.entryPrice) / t.entryPrice) * 100) : 0;
+            const diffSign = detailSide === 'LONG' ? '+' : '-';
+            const colorClass = detailSide === 'LONG' ? 'text-green' : 'text-red';
+            return `
+            <div class="td-kpi-card">
+              <div class="td-kpi-label">🔺 Tertinggi Dilalui (ATH)</div>
+              <div class="td-kpi-val ${colorClass}">
+                ${formatCryptoPrice(athVal)}
+                <small style="font-size: 10px; font-weight: 600; opacity: 0.9;">(${diffSign}${Math.abs(diffPct).toFixed(2)}%)</small>
+              </div>
+            </div>`;
+          })()}
+          ${(() => {
+            const atlVal = t.lowestPrice || snap?.lowestPrice;
+            if (!atlVal) return '';
+            const diffPct = t.entryPrice ? (((t.entryPrice - atlVal) / t.entryPrice) * 100) : 0;
+            const diffSign = detailSide === 'LONG' ? '-' : '+';
+            const colorClass = detailSide === 'LONG' ? 'text-red' : 'text-green';
+            return `
+            <div class="td-kpi-card">
+              <div class="td-kpi-label">🔻 Terendah Dilalui (ATL)</div>
+              <div class="td-kpi-val ${colorClass}">
+                ${formatCryptoPrice(atlVal)}
+                <small style="font-size: 10px; font-weight: 600; opacity: 0.9;">(${diffSign}${Math.abs(diffPct).toFixed(2)}%)</small>
+              </div>
+            </div>`;
+          })()}
           ${t.maePct !== undefined && t.maePct !== null ? `
           <div class="td-kpi-card">
             <div class="td-kpi-label">Drawdown Terdalam (MAE)</div>
