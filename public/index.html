@@ -1795,8 +1795,9 @@
               </div>
 
               <div class="form-group" style="flex: 1; min-width: 140px;">
-                <label>Batas Pergeseran BTC (%)</label>
+                <label>Batas Jarak Tembus EMA BTC (%)</label>
                 <input type="number" id="cfg-trend-shift-btc-delta" step="0.05" class="form-control" placeholder="0.5">
+                <small class="form-hint">Posisi ditutup darurat jika jarak BTC &ge; X% dari EMA 50 (Short jika BTC &ge; +X% di atas EMA; Long jika BTC &le; -X% di bawah EMA).</small>
               </div>
 
               <div class="form-group" style="width: 100%; margin-top: 4px;">

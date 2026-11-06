@@ -2286,65 +2286,41 @@ export class WickSniperEngine {
               continue;
             }
 
-            // 2. Cut Loss Darurat (Tutup posisi rugi/floating loss saat BTC hancur/berbalik > 0.5%)
+            // 2. Cut Loss Darurat (Tutup posisi rugi/floating loss saat BTC berbalik dan menembus jarak >= btcDeltaThreshold% dari EMA 50)
             if (this.config.exit.trendShiftCloseOnLoss !== false) {
               const btcDeltaThreshold = this.config.exit.trendShiftBtcDeltaPct ?? 0.5;
-              const entryBtcPrice = pos.entryBtcPrice || pos.btcTrendStatus?.btcPrice;
               const currentBtcPrice = currentBtcStatus?.btcPrice;
+              const btcEma = currentBtcStatus?.ema;
 
               let isBtcDeltaTriggered = false;
               let btcDeltaDetail = '';
 
               if (isLong && isLongAdverseShift) {
-                // Long hancur jika BTC berbalik ke BEARISH dan drop >= btcDeltaThreshold%
-                const btcDropFromEntry = (entryBtcPrice && currentBtcPrice && entryBtcPrice > 0)
-                  ? ((entryBtcPrice - currentBtcPrice) / entryBtcPrice) * 100
-                  : 0;
+                // Long ditutup darurat jika BTC berbalik ke BEARISH dan breakdown >= btcDeltaThreshold% di bawah EMA 50
                 const btcBelowEma = (currentBtcStatus?.diffPct !== undefined && currentBtcStatus.diffPct < 0)
                   ? Math.abs(currentBtcStatus.diffPct)
                   : 0;
-                const btcCandleDrop = (currentBtcStatus?.changePct !== undefined && currentBtcStatus.changePct < 0)
-                  ? Math.abs(currentBtcStatus.changePct)
-                  : 0;
 
-                if (btcDropFromEntry >= btcDeltaThreshold) {
+                if (btcBelowEma >= btcDeltaThreshold) {
                   isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC turun ${btcDropFromEntry.toFixed(2)}% dari entry ($${entryBtcPrice?.toFixed(0)} ➜ $${currentBtcPrice?.toFixed(0)})`;
-                } else if (btcBelowEma >= btcDeltaThreshold) {
-                  isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC breakdown ${btcBelowEma.toFixed(2)}% di bawah EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${currentBtcStatus?.ema?.toFixed(0)})`;
-                } else if (btcCandleDrop >= btcDeltaThreshold) {
-                  isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC candle drop ${btcCandleDrop.toFixed(2)}%`;
+                  btcDeltaDetail = `BTC breakdown -${btcBelowEma.toFixed(2)}% di bawah EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${btcEma?.toFixed(0)})`;
                 }
               } else if (!isLong && isShortAdverseShift) {
-                // Short hancur jika BTC berbalik ke BULLISH dan surge >= btcDeltaThreshold%
-                const btcSurgeFromEntry = (entryBtcPrice && currentBtcPrice && entryBtcPrice > 0)
-                  ? ((currentBtcPrice - entryBtcPrice) / entryBtcPrice) * 100
-                  : 0;
+                // Short ditutup darurat jika BTC berbalik ke BULLISH dan breakout >= btcDeltaThreshold% di atas EMA 50
                 const btcAboveEma = (currentBtcStatus?.diffPct !== undefined && currentBtcStatus.diffPct > 0)
                   ? currentBtcStatus.diffPct
                   : 0;
-                const btcCandleSurge = (currentBtcStatus?.changePct !== undefined && currentBtcStatus.changePct > 0)
-                  ? currentBtcStatus.changePct
-                  : 0;
 
-                if (btcSurgeFromEntry >= btcDeltaThreshold) {
+                if (btcAboveEma >= btcDeltaThreshold) {
                   isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC naik +${btcSurgeFromEntry.toFixed(2)}% dari entry ($${entryBtcPrice?.toFixed(0)} ➜ $${currentBtcPrice?.toFixed(0)})`;
-                } else if (btcAboveEma >= btcDeltaThreshold) {
-                  isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC breakout +${btcAboveEma.toFixed(2)}% di atas EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${currentBtcStatus?.ema?.toFixed(0)})`;
-                } else if (btcCandleSurge >= btcDeltaThreshold) {
-                  isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC candle surge +${btcCandleSurge.toFixed(2)}%`;
+                  btcDeltaDetail = `BTC breakout +${btcAboveEma.toFixed(2)}% di atas EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${btcEma?.toFixed(0)})`;
                 }
               }
 
               if (isBtcDeltaTriggered) {
                 logger.log(
                   'WARN',
-                  `🚨 [REGIME SHIFT CUT-LOSS] ${pos.symbol} (${pos.side}): Trend Macro BTC berbalik ${entryTrend} ➜ ${currentTrend} & ${btcDeltaDetail} (>= ${btcDeltaThreshold}%)! Menutup posisi darurat @ $${formatCryptoPrice(currentPrice)} (PnL: ${priceProfitPct >= 0 ? '+' : ''}${priceProfitPct.toFixed(2)}%) demi memotong risiko kerugian lebih dalam.`,
+                  `🚨 [REGIME SHIFT CUT-LOSS] ${pos.symbol} (${pos.side}): Trend Macro BTC berbalik ${entryTrend} ➜ ${currentTrend} & ${btcDeltaDetail} (jarak EMA >= ${btcDeltaThreshold}%)! Menutup posisi darurat @ $${formatCryptoPrice(currentPrice)} (PnL: ${priceProfitPct >= 0 ? '+' : ''}${priceProfitPct.toFixed(2)}%) demi memotong risiko kerugian lebih dalam.`,
                   pos.symbol
                 );
                 this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
