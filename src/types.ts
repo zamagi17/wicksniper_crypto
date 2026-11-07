@@ -252,6 +252,7 @@ export interface SmartMoneyConfig {
   emaFilterEnabled?: boolean;  // Filter Konfirmasi Tren EMA (e.g. EMA 50 15m)
   emaTimeframe?: '5m' | '15m' | '1h'; // Timeframe EMA (default: '15m')
   emaPeriod?: number;          // Periode EMA (default: 50)
+  maxEmaDistancePct?: number;  // Batas toleransi jarak maksimal harga dari EMA (%) (Anti-Pucuk/Lembah, default: 5.0%)
   btcTrendFilterEnabled?: boolean; // Filter Arah Tren Macro BTC (Anti-Dump & Anti-Pump Market Wide)
   btcTrendTimeframe?: '15m' | '1h' | '4h'; // Timeframe tren BTC (default: '1h')
   btcTrendEmaPeriod?: number;  // Periode EMA BTC (default: 50)

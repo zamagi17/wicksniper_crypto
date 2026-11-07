@@ -683,27 +683,51 @@ export class SmartMoneyScanner {
           }
         }
 
-        // Filter Konfirmasi Tren EMA (e.g. EMA 50 pada timeframe 15m)
-        if (this.config.emaFilterEnabled) {
+        // Filter Konfirmasi Tren EMA & Batas Jarak Maksimal (Anti-Pucuk & Anti-Lembah Ekstrim)
+        const maxEmaDist = this.config.maxEmaDistancePct ?? 5.0;
+        if (this.config.emaFilterEnabled || maxEmaDist > 0) {
           const emaTf = this.config.emaTimeframe || '15m';
           const emaPeriod = this.config.emaPeriod || 50;
           const emaVal = await binanceFutures.getSymbolEma(symbol, emaTf, emaPeriod);
-          if (emaVal !== undefined) {
-            if (detectedSide === 'LONG' && currentPrice < emaVal) {
-              logger.log(
-                'INFO',
-                `📈 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) masih di bawah EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}). Belum terkonfirmasi bullish reclaim.`
-              );
-              return;
+          if (emaVal !== undefined && emaVal > 0) {
+            const emaDiffPct = ((currentPrice - emaVal) / emaVal) * 100;
+
+            if (this.config.emaFilterEnabled) {
+              if (detectedSide === 'LONG' && currentPrice < emaVal) {
+                logger.log(
+                  'INFO',
+                  `📈 [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) masih di bawah EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}). Belum terkonfirmasi bullish reclaim.`
+                );
+                return;
+              }
+              if (detectedSide === 'SHORT' && currentPrice > emaVal) {
+                logger.log(
+                  'INFO',
+                  `📉 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) masih di atas EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}). Belum terkonfirmasi bearish rejection.`
+                );
+                return;
+              }
             }
-            if (detectedSide === 'SHORT' && currentPrice > emaVal) {
-              logger.log(
-                'INFO',
-                `📉 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) masih di atas EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}). Belum terkonfirmasi bearish rejection.`
-              );
-              return;
+
+            // Batas Jarak Maksimal dari EMA (Mencegah Long di Pucuk / Short di Lembah)
+            if (maxEmaDist > 0) {
+              if (detectedSide === 'LONG' && emaDiffPct > maxEmaDist) {
+                logger.log(
+                  'WARN',
+                  `⚠️ [SMART MONEY SKIP] ${symbol} LONG dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah +${emaDiffPct.toFixed(2)}% di atas EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}) melebihi batas toleransi ${maxEmaDist}%. Koin sudah di pucuk (high risk pullback).`
+                );
+                return;
+              }
+              if (detectedSide === 'SHORT' && emaDiffPct < -maxEmaDist) {
+                logger.log(
+                  'WARN',
+                  `⚠️ [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) sudah ${emaDiffPct.toFixed(2)}% di bawah EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}) melebihi batas toleransi -${maxEmaDist}%. Koin sudah di lembah (high risk short squeeze).`
+                );
+                return;
+              }
             }
-            reason += ` | EMA ${emaPeriod} ${emaTf}: $${formatCryptoPrice(emaVal)}`;
+
+            reason += ` | EMA ${emaPeriod} ${emaTf}: $${formatCryptoPrice(emaVal)} (${emaDiffPct >= 0 ? '+' : ''}${emaDiffPct.toFixed(2)}%)`;
           }
         }
 

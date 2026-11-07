@@ -275,6 +275,7 @@ export class WickSniperEngine {
       emaFilterEnabled: false,
       emaTimeframe: '15m',
       emaPeriod: 50,
+      maxEmaDistancePct: 5.0,
       btcTrendFilterEnabled: true,
       btcTrendTimeframe: '1h',
       btcTrendEmaPeriod: 50,

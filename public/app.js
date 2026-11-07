@@ -3937,6 +3937,7 @@ function populateSettingsForm(cfg) {
   if (smEmaCb) smEmaCb.checked = !!smCfg.emaFilterEnabled;
   setVal('cfg-sm-ema-timeframe', smCfg.emaTimeframe || '15m');
   setVal('cfg-sm-ema-period', smCfg.emaPeriod ?? 50);
+  setVal('cfg-sm-max-ema-distance', smCfg.maxEmaDistancePct ?? 5.0);
   const smBtcTrendCb = document.getElementById('cfg-sm-btc-trend-enabled');
   if (smBtcTrendCb) smBtcTrendCb.checked = smCfg.btcTrendFilterEnabled !== false;
   setVal('cfg-sm-btc-trend-tf', smCfg.btcTrendTimeframe || '1h');
@@ -4372,6 +4373,7 @@ function getSettingsFormData() {
       emaFilterEnabled: !!document.getElementById('cfg-sm-ema-filter-enabled')?.checked,
       emaTimeframe: getVal('cfg-sm-ema-timeframe', '15m'),
       emaPeriod: parseInt(getVal('cfg-sm-ema-period', '50'), 10) || 50,
+      maxEmaDistancePct: parseFloat(getVal('cfg-sm-max-ema-distance', '5.0')) || 5.0,
       btcTrendFilterEnabled: !!document.getElementById('cfg-sm-btc-trend-enabled')?.checked,
       btcTrendTimeframe: getVal('cfg-sm-btc-trend-tf', '1h'),
       btcTrendEmaPeriod: parseInt(getVal('cfg-sm-btc-trend-ema', '50'), 10) || 50,
