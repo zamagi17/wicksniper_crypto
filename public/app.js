@@ -953,9 +953,19 @@ function renderStatus(status) {
     const list = status.cooldownCoins || [];
     const now = Date.now();
     const activeCooldowns = list.filter(c => c.until > now);
-    if (activeCooldowns.length > 0) {
+    const macroHtml = [];
+    if (status.macroCooldown?.longUntil && status.macroCooldown.longUntil > now) {
+      const mins = Math.max(1, Math.ceil((status.macroCooldown.longUntil - now) / 60000));
+      macroHtml.push(`<span style="padding: 2px 8px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; font-weight: 700; color: #ff6b6b;" title="Sinyal LONG ditahan pasca Macro Cut-Loss BTC">🚨 Macro LONG Ditahan (${mins}m)</span>`);
+    }
+    if (status.macroCooldown?.shortUntil && status.macroCooldown.shortUntil > now) {
+      const mins = Math.max(1, Math.ceil((status.macroCooldown.shortUntil - now) / 60000));
+      macroHtml.push(`<span style="padding: 2px 8px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; font-weight: 700; color: #ff6b6b;" title="Sinyal SHORT ditahan pasca Macro Cut-Loss BTC">🚨 Macro SHORT Ditahan (${mins}m)</span>`);
+    }
+
+    if (activeCooldowns.length > 0 || macroHtml.length > 0) {
       cooldownStrip.style.display = 'flex';
-      cooldownTags.innerHTML = activeCooldowns.map(c => {
+      const coinTags = activeCooldowns.map(c => {
         const remainingSec = Math.max(0, Math.round((c.until - now) / 1000));
         const hours = Math.floor(remainingSec / 3600);
         const mins = Math.floor((remainingSec % 3600) / 60);
@@ -968,6 +978,7 @@ function renderStatus(status) {
           : `Sisa jeda cooldown: ${mins} menit ${secs} detik`;
         return `<span style="padding: 2px 8px; background: rgba(255, 170, 0, 0.18); border: 1px solid rgba(255, 170, 0, 0.35); border-radius: 4px; font-weight: 700; color: #ffb84d;" title="${titleText}">${c.symbol} (${timeStr})</span>`;
       }).join('');
+      cooldownTags.innerHTML = macroHtml.join('') + coinTags;
     } else {
       cooldownStrip.style.display = 'none';
     }
@@ -4087,6 +4098,7 @@ function populateSettingsForm(cfg) {
     trendShiftLossCheckbox.checked = cfg.exit?.trendShiftCloseOnLoss !== false;
   }
   setVal('cfg-trend-shift-btc-delta', cfg.exit?.trendShiftBtcDeltaPct ?? 0.5);
+  setVal('cfg-trend-shift-cooldown-mins', cfg.exit?.trendShiftCooldownMinutes ?? 45);
 
   // Emergency BEP Defense
   const bepDefCheckbox = document.getElementById('cfg-bep-defense-enabled');
@@ -4468,6 +4480,7 @@ function getSettingsFormData() {
       trendShiftMinProfitPct: parseFloat(getVal('cfg-trend-shift-min-profit', '0.5')) || 0.5,
       trendShiftCloseOnLoss: document.getElementById('cfg-trend-shift-close-on-loss') ? !!document.getElementById('cfg-trend-shift-close-on-loss').checked : true,
       trendShiftBtcDeltaPct: parseFloat(getVal('cfg-trend-shift-btc-delta', '0.5')) || 0.5,
+      trendShiftCooldownMinutes: parseInt(getVal('cfg-trend-shift-cooldown-mins', '45'), 10) || 45,
       trailingSlEnabled: !!document.getElementById('cfg-trailing-sl-enabled')?.checked,
       trailingTpEnabled: !!document.getElementById('cfg-trailing-tp-enabled')?.checked,
       trailingCallbackPct: parseFloat(getVal('cfg-trailing-tp-callback', '0.4')) || 0.4,

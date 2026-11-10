@@ -103,6 +103,7 @@ export interface BotConfig {
     trendShiftMinProfitPct?: number; // Minimal profit pergerakan harga saat trend bergeser (%) (default: 0.5%)
     trendShiftCloseOnLoss?: boolean; // Tutup posisi rugi (Cut Loss Darurat) saat tren BTC bergeser berlawanan (default: true)
     trendShiftBtcDeltaPct?: number; // Toleransi pergeseran/penurunan BTC (%) untuk trigger cut loss darurat (default: 0.5%)
+    trendShiftCooldownMinutes?: number; // Jeda (Cooldown) pasca Macro Cut-Loss sebelum membuka posisi baru pada arah yang sama (menit) (default: 45)
   };
   paperTrading: {
     initialVirtualBalance: number;
@@ -693,6 +694,12 @@ export interface EngineStatus {
   btcTrendStatus?: BtcTrendStatus;
   scheduleStatus?: ScheduleStatus;
   pendingSignals?: PendingSignalWatchlistItem[];
+  macroCooldown?: {
+    longUntil?: number;
+    shortUntil?: number;
+    longRemainingMins?: number;
+    shortRemainingMins?: number;
+  };
 }
 
 export interface LogEntry {

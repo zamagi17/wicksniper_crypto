@@ -168,6 +168,7 @@ export class WickSniperEngine {
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
   private lastBtcTrendStatus: BtcTrendStatus | null = null;
   private pendingSignals: Map<string, PendingSignalWatchlistItem> = new Map();
+  private macroCutLossCooldownUntil: { LONG?: number; SHORT?: number } = {};
 
   public getDefaultTradingScheduleConfig(): TradingScheduleConfig {
     return {
@@ -409,6 +410,7 @@ export class WickSniperEngine {
         trendShiftMinProfitPct: 0.5,
         trendShiftCloseOnLoss: true,
         trendShiftBtcDeltaPct: 0.5,
+        trendShiftCooldownMinutes: 45,
       },
       paperTrading: {
         initialVirtualBalance: 245.0,
@@ -1115,6 +1117,15 @@ export class WickSniperEngine {
         && indicators?.rsi1m !== undefined
         && indicators.rsi1m > maxRsi1m;
       const simulationSide: 'SHORT' | 'LONG' = isMomentumLongCandidate ? 'LONG' : 'SHORT';
+
+      // Proteksi Cooldown Pasca Macro Cut-Loss
+      if (this.isMacroCutLossCoolingDown(simulationSide)) {
+        const remainingMinutes = this.getMacroCutLossRemainingMinutes(simulationSide);
+        const reason = `Macro Cooldown pasca Cut-Loss BTC (${simulationSide}) aktif (${remainingMinutes}m tersisa)`;
+        logger.log('INFO', `⏳ [MACRO COOLDOWN SKIP] Lonjakan pada ${symbol} (${simulationSide}) diabaikan: ${reason}.`, symbol);
+        this.recordSkippedSpike(alert, reason, simulationSide);
+        return;
+      }
 
       // Jika BTC filter melarang SHORT (misal tren BULLISH / Flash Surge), jangan proses atau log skip SHORT
       if (btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
@@ -1985,6 +1996,18 @@ export class WickSniperEngine {
       item.currentPrice = livePrice;
       const isLong = item.side === 'LONG';
 
+      // 0. Cek Cooldown Pasca Macro Cut-Loss
+      if (this.isMacroCutLossCoolingDown(item.side)) {
+        this.pendingSignals.delete(symbol);
+        logger.log(
+          'INFO',
+          `🛑 [WATCHLIST MACRO CANCEL] ${symbol} (${item.side}): Dibatalkan karena terjadi Macro Cut-Loss BTC pada arah ${item.side}.`,
+          symbol
+        );
+        this.broadcastStatus();
+        continue;
+      }
+
       // 1. Cek Kedaluwarsa (Signal TTL)
       if (now >= item.expiresAt) {
         this.pendingSignals.delete(symbol);
@@ -2324,6 +2347,19 @@ export class WickSniperEngine {
                   `🚨 [REGIME SHIFT CUT-LOSS] ${pos.symbol} (${pos.side}): Trend Macro BTC berbalik ${entryTrend} ➜ ${currentTrend} & ${btcDeltaDetail} (jarak EMA >= ${btcDeltaThreshold}%)! Menutup posisi darurat @ $${formatCryptoPrice(currentPrice)} (PnL: ${priceProfitPct >= 0 ? '+' : ''}${priceProfitPct.toFixed(2)}%) demi memotong risiko kerugian lebih dalam.`,
                   pos.symbol
                 );
+
+                // Aktifkan Jeda / Cooldown Pasca Macro Cut-Loss untuk arah posisi ini
+                const cooldownMins = this.config.exit?.trendShiftCooldownMinutes ?? 45;
+                if (cooldownMins > 0) {
+                  this.macroCutLossCooldownUntil[pos.side] = Date.now() + cooldownMins * 60 * 1000;
+                  for (const [sym, pendingItem] of this.pendingSignals.entries()) {
+                    if (pendingItem.side === pos.side) {
+                      this.pendingSignals.delete(sym);
+                      logger.log('INFO', `🛑 [WATCHLIST MACRO PURGE] ${sym} (${pos.side}) dihapus dari watchlist antrean sinyal pasca Macro Cut-Loss BTC.`, sym);
+                    }
+                  }
+                }
+
                 this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
                 continue;
               }
@@ -5915,6 +5951,37 @@ export class WickSniperEngine {
         reason: this.isWithinTradingSchedule().reason,
       },
       pendingSignals: Array.from(this.pendingSignals.values()),
+      macroCooldown: this.getMacroCutLossCooldownStatus(),
+    };
+  }
+
+  public isMacroCutLossCoolingDown(side: 'LONG' | 'SHORT'): boolean {
+    const until = this.macroCutLossCooldownUntil[side];
+    if (!until) return false;
+    if (Date.now() >= until) {
+      delete this.macroCutLossCooldownUntil[side];
+      return false;
+    }
+    return true;
+  }
+
+  public getMacroCutLossRemainingMinutes(side: 'LONG' | 'SHORT'): number {
+    const until = this.macroCutLossCooldownUntil[side];
+    if (!until || Date.now() >= until) return 0;
+    return Math.ceil((until - Date.now()) / 60000);
+  }
+
+  public getMacroCutLossCooldownStatus(): {
+    longUntil?: number;
+    shortUntil?: number;
+    longRemainingMins?: number;
+    shortRemainingMins?: number;
+  } {
+    const longRemaining = this.getMacroCutLossRemainingMinutes('LONG');
+    const shortRemaining = this.getMacroCutLossRemainingMinutes('SHORT');
+    return {
+      ...(longRemaining > 0 ? { longUntil: this.macroCutLossCooldownUntil.LONG, longRemainingMins: longRemaining } : {}),
+      ...(shortRemaining > 0 ? { shortUntil: this.macroCutLossCooldownUntil.SHORT, shortRemainingMins: shortRemaining } : {})
     };
   }
 
@@ -6827,6 +6894,17 @@ export class WickSniperEngine {
     if (this.config.smartMoney?.btcTrendFilterEnabled !== false && btcTrend) {
       if (signal.side === 'LONG' && !btcTrend.canLong) return;
       if (signal.side === 'SHORT' && !btcTrend.canShort) return;
+    }
+
+    // Proteksi Cooldown Pasca Macro Cut-Loss
+    if (this.isMacroCutLossCoolingDown(signal.side)) {
+      const remainingMinutes = this.getMacroCutLossRemainingMinutes(signal.side);
+      logger.log(
+        'INFO',
+        `⏳ [MACRO COOLDOWN SKIP] Sinyal Smart Money ${symbol} (${signal.side}) diabaikan: Masih dalam masa jeda pasca Macro Cut-Loss BTC (${remainingMinutes} menit tersisa).`,
+        symbol
+      );
+      return;
     }
 
     // Proteksi Jadwal Operasional (Prime Time Saja)
