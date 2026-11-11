@@ -683,9 +683,10 @@ export class SmartMoneyScanner {
           }
         }
 
-        // Filter Konfirmasi Tren EMA & Batas Jarak Maksimal (Anti-Pucuk & Anti-Lembah Ekstrim)
+        // Filter Konfirmasi Tren EMA & Batas Jarak Minimal/Maksimal (Anti-Whipsaw & Anti-Pucuk/Lembah Ekstrim)
         const maxEmaDist = this.config.maxEmaDistancePct ?? 5.0;
-        if (this.config.emaFilterEnabled || maxEmaDist > 0) {
+        const minEmaDist = this.config.minEmaDistancePct ?? 1.0;
+        if (this.config.emaFilterEnabled || maxEmaDist > 0 || minEmaDist > 0) {
           const emaTf = this.config.emaTimeframe || '15m';
           const emaPeriod = this.config.emaPeriod || 50;
           const emaVal = await binanceFutures.getSymbolEma(symbol, emaTf, emaPeriod);
@@ -704,6 +705,24 @@ export class SmartMoneyScanner {
                 logger.log(
                   'INFO',
                   `📉 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Harga ($${formatCryptoPrice(currentPrice)}) masih di atas EMA ${emaPeriod} ${emaTf} ($${formatCryptoPrice(emaVal)}). Belum terkonfirmasi bearish rejection.`
+                );
+                return;
+              }
+            }
+
+            // Batas Jarak Minimal dari EMA (Menghindari false breakout / whipsaw yang masih terlalu dekat dengan EMA)
+            if (minEmaDist > 0) {
+              if (detectedSide === 'LONG' && emaDiffPct < minEmaDist) {
+                logger.log(
+                  'INFO',
+                  `📈 [SMART MONEY SKIP] ${symbol} LONG dilewati: Jarak harga ke EMA ${emaPeriod} ${emaTf} hanya +${emaDiffPct.toFixed(2)}% (< min ${minEmaDist}%). Masih terlalu dekat garis EMA / rawan whipsaw false breakout.`
+                );
+                return;
+              }
+              if (detectedSide === 'SHORT' && -emaDiffPct < minEmaDist) {
+                logger.log(
+                  'INFO',
+                  `📉 [SMART MONEY SKIP] ${symbol} SHORT dilewati: Jarak harga ke EMA ${emaPeriod} ${emaTf} hanya ${emaDiffPct.toFixed(2)}% (jarak < min ${minEmaDist}%). Masih terlalu dekat garis EMA / rawan whipsaw false breakdown.`
                 );
                 return;
               }

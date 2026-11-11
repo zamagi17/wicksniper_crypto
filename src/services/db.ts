@@ -97,6 +97,17 @@ export class DatabaseService {
           ),
           updated_at = CURRENT_TIMESTAMP
           WHERE id = 1 AND (config->'scanner'->>'minVolRatio') IS NULL;
+
+          -- Migrasi aman: tambahkan default minEmaDistancePct ke smartMoney jika belum ada
+          UPDATE wicksniper_config
+          SET config = jsonb_set(
+            config,
+            '{smartMoney,minEmaDistancePct}',
+            '1.0'::jsonb,
+            true
+          ),
+          updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1 AND (config->'smartMoney'->>'minEmaDistancePct') IS NULL;
         `);
 
         // 2. Tabel State Posisi & Saldo

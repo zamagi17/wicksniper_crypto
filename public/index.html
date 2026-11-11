@@ -1045,12 +1045,16 @@
                   <label style="font-size: 11px; margin-bottom: 2px;">Periode EMA</label>
                   <input type="number" id="cfg-sm-ema-period" min="10" max="200" step="1" class="form-control" placeholder="50" style="padding: 4px 8px;">
                 </div>
-                <div style="flex: 1; min-width: 140px;">
+                <div style="flex: 1; min-width: 130px;">
+                  <label style="font-size: 11px; margin-bottom: 2px;">Jarak Minimal dari EMA (%)</label>
+                  <input type="number" id="cfg-sm-min-ema-distance" min="0" max="20" step="0.1" class="form-control" placeholder="1.0" style="padding: 4px 8px;">
+                </div>
+                <div style="flex: 1; min-width: 130px;">
                   <label style="font-size: 11px; margin-bottom: 2px;">Jarak Maksimal dari EMA (%)</label>
                   <input type="number" id="cfg-sm-max-ema-distance" min="0" max="50" step="0.5" class="form-control" placeholder="5.0" style="padding: 4px 8px;">
                 </div>
                 <small class="form-hint" style="width: 100%; color: #94a3b8; font-size: 11px; margin-top: 2px;">
-                  Anti-Pucuk & Anti-Lembah: Menolak LONG jika harga sudah &gt; X% di atas EMA (sudah overextended di pucuk), dan menolak SHORT jika &gt; X% di bawah EMA (sudah overextended di lembah) (Default: 5.0%). Isi 0 jika tidak ingin membatasi jarak.
+                  Zona Tren EMA Valid: Menolak entri jika jarak harga masih &lt; Jarak Minimal (menghindari whipsaw/false breakout di dekat EMA, default: 1.0%), atau jika jarak harga sudah &gt; Jarak Maksimal (anti-pucuk untuk Long / anti-lembah untuk Short, default: 5.0%). Isi 0 jika tidak ingin membatasi.
                 </small>
               </div>
             </div>
