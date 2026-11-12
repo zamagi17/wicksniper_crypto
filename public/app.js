@@ -4138,6 +4138,27 @@ function populateSettingsForm(cfg) {
   setVal('cfg-layer-spacing', cfg.grid?.layerSpacingPct || 1.2);
   setVal('cfg-max-coins', typeof unifiedMaxOnLoad !== 'undefined' ? unifiedMaxOnLoad : (cfg.grid?.maxConcurrentCoins || 2));
   setVal('cfg-martingale', cfg.grid?.martingaleMultiplier || 1.1);
+  setVal('cfg-grid-sizing-type', cfg.grid?.sizingType || 'GEOMETRIC');
+  setVal('cfg-grid-arithmetic-step', cfg.grid?.arithmeticStepPct ?? 25);
+  setVal('cfg-grid-max-margin-cap', cfg.grid?.maxMarginPerLayerCap ?? 55);
+  const deployAllCheckbox = document.getElementById('cfg-grid-deploy-all-layers');
+  if (deployAllCheckbox) {
+    deployAllCheckbox.checked = !!cfg.grid?.deployAllLayersAtOnce;
+  }
+  if (window.toggleGridSizingInputs) window.toggleGridSizingInputs();
+
+  const exhCheckbox = document.getElementById('cfg-exhaustion-enabled');
+  if (exhCheckbox) {
+    exhCheckbox.checked = !!cfg.scanner?.exhaustionModeEnabled;
+    if (window.toggleExhaustionSettings) window.toggleExhaustionSettings();
+  }
+  setVal('cfg-exhaustion-min-change', cfg.scanner?.exhaustionMin24hChangePct ?? 30);
+  setVal('cfg-exhaustion-min-vol', cfg.scanner?.exhaustionMin24hVolumeUsdt ?? 30000000);
+  setVal('cfg-exhaustion-timeframe', cfg.scanner?.exhaustionTimeframe || '2m');
+  setVal('cfg-exhaustion-ma-period', cfg.scanner?.exhaustionMaPeriod ?? 7);
+  setVal('cfg-exhaustion-min-dev', cfg.scanner?.exhaustionMinDeviationPct ?? 6.0);
+  setVal('cfg-exhaustion-min-range', cfg.scanner?.exhaustionMinCandleRangePct ?? 5.0);
+  setVal('cfg-exhaustion-vol-mult', cfg.scanner?.exhaustionMinVolMultiplier ?? 2.0);
   setVal('cfg-cooldown', cfg.scanner?.cooldownMinutes || 20);
   setVal('cfg-data-source', cfg.scanner?.dataSource || 'WEBSOCKET');
   setVal('cfg-polling-interval', String(cfg.scanner?.pollingIntervalMs || 1000));
@@ -4252,6 +4273,31 @@ window.toggleLongSettingsGroup = function() {
   const isEnabled = document.getElementById('cfg-long-enabled')?.checked;
   const group = document.getElementById('cfg-long-params-group');
   if (group) group.style.display = isEnabled ? 'flex' : 'none';
+};
+
+window.toggleExhaustionSettings = function() {
+  const isEnabled = document.getElementById('cfg-exhaustion-enabled')?.checked;
+  const group = document.getElementById('cfg-exhaustion-params-group');
+  if (group) {
+    group.style.opacity = isEnabled ? '1' : '0.45';
+    group.style.pointerEvents = isEnabled ? 'auto' : 'none';
+  }
+};
+
+window.toggleGridSizingInputs = function() {
+  const type = document.getElementById('cfg-grid-sizing-type')?.value || 'GEOMETRIC';
+  const arithBox = document.getElementById('cfg-arithmetic-step-box');
+  const capBox = document.getElementById('cfg-max-margin-cap-box');
+  const martGroup = document.getElementById('cfg-martingale-group');
+  if (type === 'ARITHMETIC') {
+    if (arithBox) arithBox.style.display = 'block';
+    if (capBox) capBox.style.display = 'block';
+    if (martGroup) martGroup.style.opacity = '0.5';
+  } else {
+    if (arithBox) arithBox.style.display = 'none';
+    if (capBox) capBox.style.display = 'none';
+    if (martGroup) martGroup.style.opacity = '1';
+  }
 };
 
 // Preset Early Exit Momentum
@@ -4436,6 +4482,14 @@ function getSettingsFormData() {
       minVolRatioCooldownMinutes: parseInt(getVal('cfg-min-vol-ratio-cooldown', '5'), 10) || 5,
       maxVolRatio: parseFloat(getVal('cfg-max-vol-ratio', '20.0')) || 0,
       maxVolRatioCooldownMinutes: parseInt(getVal('cfg-max-vol-ratio-cooldown', '10'), 10) || 10,
+      exhaustionModeEnabled: !!document.getElementById('cfg-exhaustion-enabled')?.checked,
+      exhaustionMin24hChangePct: parseFloat(getVal('cfg-exhaustion-min-change', '30')) || 30,
+      exhaustionMin24hVolumeUsdt: parseFloat(getVal('cfg-exhaustion-min-vol', '30000000')) || 30000000,
+      exhaustionTimeframe: getVal('cfg-exhaustion-timeframe', '2m'),
+      exhaustionMaPeriod: parseInt(getVal('cfg-exhaustion-ma-period', '7'), 10) || 7,
+      exhaustionMinDeviationPct: parseFloat(getVal('cfg-exhaustion-min-dev', '6.0')) || 6.0,
+      exhaustionMinCandleRangePct: parseFloat(getVal('cfg-exhaustion-min-range', '5.0')) || 5.0,
+      exhaustionMinVolMultiplier: parseFloat(getVal('cfg-exhaustion-vol-mult', '2.0')) || 2.0,
       cooldownMinutes: parseInt(getVal('cfg-cooldown', '20')) || 20,
       whitelistEnabled: !!document.getElementById('cfg-whitelist-enabled')?.checked,
       whitelistSymbols: (getVal('cfg-whitelist-symbols', '') || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
@@ -4498,6 +4552,10 @@ function getSettingsFormData() {
       layerSpacingPct: parseFloat(getVal('cfg-layer-spacing', '1.2')) || 1.2,
       maxConcurrentCoins: unifiedMaxCoins,
       martingaleMultiplier: parseFloat(getVal('cfg-martingale', '1.1')) || 1.1,
+      sizingType: getVal('cfg-grid-sizing-type', 'GEOMETRIC'),
+      arithmeticStepPct: parseFloat(getVal('cfg-grid-arithmetic-step', '25')) || 25,
+      maxMarginPerLayerCap: parseFloat(getVal('cfg-grid-max-margin-cap', '55')) || 55,
+      deployAllLayersAtOnce: !!document.getElementById('cfg-grid-deploy-all-layers')?.checked,
     },
     apiKey: (getVal('cfg-api-key', '') || '').trim(),
     apiSecret: (getVal('cfg-api-secret', '') || '').trim(),

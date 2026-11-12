@@ -2163,6 +2163,159 @@ export class BinanceFuturesClient {
   public isUserStreamActive(): boolean {
     return this.isUserWsConnected;
   }
+
+  private maExhaustionCache: Map<string, { timestamp: number; data: MaExhaustionMetrics }> = new Map();
+
+  /**
+   * Mengambil metrik deviasi MA dan volume untuk strategi Top Gainer Exhaustion Sniper (Leader Mode).
+   * Menghitung deviasi High di atas MA(7) dan lonjakan volume pada timeframe (misal 2m).
+   */
+  public async getMaExhaustionMetrics(
+    symbol: string,
+    timeframe: '1m' | '2m' | '3m' | '5m' = '2m',
+    maPeriod: number = 7,
+    minDevPct: number = 6.0,
+    minRangePct: number = 5.0,
+    minVolMult: number = 2.0
+  ): Promise<MaExhaustionMetrics | null> {
+    const cacheKey = `${symbol}_${timeframe}_${maPeriod}`;
+    const cached = this.maExhaustionCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 1500) {
+      return cached.data;
+    }
+
+    try {
+      const client = await this.getHttpClient();
+      let candles: { openTime: number; open: number; high: number; low: number; close: number; volume: number }[] = [];
+
+      if (timeframe === '2m') {
+        // Binance API tidak mendukung 2m langsung (error -1120).
+        // Agregasi dari klines 1m secara deterministik dengan bucket 2 menit (120_000 ms).
+        const limit = Math.max(30, (maPeriod + 8) * 2);
+        const res = await client.get('/fapi/v1/klines', {
+          params: { symbol, interval: '1m', limit },
+          timeout: 3000,
+        });
+
+        if (!res || !Array.isArray(res.data) || res.data.length < 4) {
+          return null;
+        }
+
+        const bucketMap = new Map<number, { openTime: number; open: number; high: number; low: number; close: number; volume: number }>();
+        for (const k of res.data) {
+          const openTime = parseInt(k[0]);
+          const open = parseFloat(k[1]);
+          const high = parseFloat(k[2]);
+          const low = parseFloat(k[3]);
+          const close = parseFloat(k[4]);
+          const volume = parseFloat(k[5]);
+          const bucketTime = Math.floor(openTime / 120_000) * 120_000;
+
+          const existing = bucketMap.get(bucketTime);
+          if (!existing) {
+            bucketMap.set(bucketTime, { openTime: bucketTime, open, high, low, close, volume });
+          } else {
+            existing.high = Math.max(existing.high, high);
+            existing.low = Math.min(existing.low, low);
+            existing.close = close;
+            existing.volume += volume;
+          }
+        }
+        candles = Array.from(bucketMap.values()).sort((a, b) => a.openTime - b.openTime);
+      } else {
+        const limit = Math.max(20, maPeriod + 8);
+        const res = await client.get('/fapi/v1/klines', {
+          params: { symbol, interval: timeframe, limit },
+          timeout: 3000,
+        });
+
+        if (!res || !Array.isArray(res.data) || res.data.length < 4) {
+          return null;
+        }
+
+        candles = res.data.map((k: any) => ({
+          openTime: parseInt(k[0]),
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        }));
+      }
+
+      if (candles.length < maPeriod + 1) {
+        return null;
+      }
+
+      const currentCandle = candles[candles.length - 1];
+      const pastCandles = candles.slice(0, candles.length - 1);
+      const lookbackCandles = pastCandles.slice(-maPeriod);
+
+      if (lookbackCandles.length < maPeriod) {
+        return null;
+      }
+
+      const sumClose = lookbackCandles.reduce((acc, c) => acc + c.close, 0);
+      const maVal = sumClose / lookbackCandles.length;
+
+      const sumVol = lookbackCandles.reduce((acc, c) => acc + c.volume, 0);
+      const maVolume = sumVol / lookbackCandles.length;
+
+      const currentPrice = currentCandle.close;
+      const candleHigh = currentCandle.high;
+      const candleLow = currentCandle.low;
+      const candleOpen = currentCandle.open;
+      const candleVolume = currentCandle.volume;
+
+      const deviationPct = maVal > 0 ? ((candleHigh - maVal) / maVal) * 100 : 0;
+      const candleRangePct = candleLow > 0 ? ((candleHigh - candleLow) / candleLow) * 100 : 0;
+      const volRatio = maVolume > 0 ? candleVolume / maVolume : 1.0;
+
+      const isExhausted = deviationPct >= minDevPct && candleRangePct >= minRangePct && volRatio >= minVolMult;
+
+      const data: MaExhaustionMetrics = {
+        symbol,
+        timeframe,
+        maPeriod,
+        currentPrice,
+        candleHigh,
+        candleLow,
+        candleOpen,
+        candleClose: currentPrice,
+        candleVolume,
+        maVal,
+        maVolume,
+        deviationPct,
+        candleRangePct,
+        volRatio,
+        isExhausted,
+      };
+
+      this.maExhaustionCache.set(cacheKey, { timestamp: now, data });
+      return data;
+    } catch {
+      return null;
+    }
+  }
+}
+
+export interface MaExhaustionMetrics {
+  symbol: string;
+  timeframe: string;
+  maPeriod: number;
+  currentPrice: number;
+  candleHigh: number;
+  candleLow: number;
+  candleOpen: number;
+  candleClose: number;
+  candleVolume: number;
+  maVal: number;
+  maVolume: number;
+  deviationPct: number;
+  candleRangePct: number;
+  volRatio: number;
+  isExhausted: boolean;
 }
 
 export const binanceFutures = new BinanceFuturesClient();

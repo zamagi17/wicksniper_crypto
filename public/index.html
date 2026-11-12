@@ -1247,6 +1247,62 @@
             </p>
           </div>
 
+          <!-- TOP GAINER EXHAUSTION SNIPER (LEADER MODE) -->
+          <div class="form-row" style="background: linear-gradient(135deg, rgba(234, 179, 8, 0.08), rgba(249, 115, 22, 0.08)); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+            <div style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; color: #fbbf24; font-size: 14px;">
+                <input type="checkbox" id="cfg-exhaustion-enabled" onchange="toggleExhaustionSettings()" style="width: 18px; height: 18px; accent-color: #fbbf24;">
+                🎯 Top Gainer Exhaustion Sniper <span class="badge-tag" style="background: rgba(234, 179, 8, 0.2); color: #fbbf24; border: 1px solid #fbbf24;">🏆 Mode Leader Binance</span>
+              </label>
+              <span style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(234, 179, 8, 0.15); color: #fbbf24; font-weight: 700;">REPLIKASI 100% WINRATE 90D</span>
+            </div>
+            <p style="grid-column: span 2; font-size: 11.5px; color: #cbd5e1; margin: 0 0 10px 0; line-height: 1.4;">
+              Menangkap pucuk kelelahan (blow-off wick) koin Top Gainer saat deviasi harga melonjak drastis di atas garis MA disertai ledakan volume klimaks, lalu menebar jaring SHORT serentak untuk mengambil profit cepat dari pullback.
+            </p>
+            <div id="cfg-exhaustion-params-group" style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Min Kenaikan 24 Jam (%)</label>
+                <input type="number" id="cfg-exhaustion-min-change" min="10" max="200" step="5" class="form-control" placeholder="30">
+                <small class="form-hint">Hanya saring Top Gainer (Default: 30%).</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 160px;">
+                <label>Min Volume 24 Jam (USDT)</label>
+                <input type="number" id="cfg-exhaustion-min-vol" min="1000000" step="5000000" class="form-control" placeholder="30000000">
+                <small class="form-hint">Turnover likuiditas koin (Default: 30.000.000 USDT).</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 110px;">
+                <label>Timeframe Candle</label>
+                <select id="cfg-exhaustion-timeframe" class="form-control">
+                  <option value="1m">1 Menit (1m)</option>
+                  <option value="2m" selected>2 Menit (2m - Gaya Leader)</option>
+                  <option value="3m">3 Menit (3m)</option>
+                  <option value="5m">5 Menit (5m)</option>
+                </select>
+                <small class="form-hint">Timeframe chart MA.</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 90px;">
+                <label>Periode MA</label>
+                <input type="number" id="cfg-exhaustion-ma-period" min="3" max="50" step="1" class="form-control" placeholder="7">
+                <small class="form-hint">Gaya leader: 7.</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 130px;">
+                <label>Min Deviasi di Atas MA (%)</label>
+                <input type="number" id="cfg-exhaustion-min-dev" min="1.0" max="30.0" step="0.5" class="form-control" placeholder="6.0">
+                <small class="form-hint">Jarak High vs MA (Default: 6.0%).</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 130px;">
+                <label>Min Rentang Candle (%)</label>
+                <input type="number" id="cfg-exhaustion-min-range" min="1.0" max="25.0" step="0.5" class="form-control" placeholder="5.0">
+                <small class="form-hint">(High - Low) / Low (Default: 5.0%).</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 130px;">
+                <label>Min Ledakan Vol (x MA Vol)</label>
+                <input type="number" id="cfg-exhaustion-vol-mult" min="1.0" max="10.0" step="0.2" class="form-control" placeholder="2.0">
+                <small class="form-hint">Volume vs MA(Vol) (Default: 2.0x).</small>
+              </div>
+            </div>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label>Minimal Spike Lonjakan (%) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
@@ -1610,13 +1666,40 @@
           </div>
 
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" id="cfg-martingale-group">
               <label>Pengali Martingale (x) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
               <input type="number" id="cfg-martingale" min="1.0" max="2.5" step="0.05" class="form-control" placeholder="1.1">
             </div>
             <div class="form-group">
               <label>Cooldown Antar Trade (Menit) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span></label>
               <input type="number" id="cfg-cooldown" min="1" max="180" step="1" class="form-control" placeholder="20">
+            </div>
+          </div>
+
+          <div class="form-row" style="background: rgba(14, 165, 233, 0.04); border: 1px dashed rgba(14, 165, 233, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+            <div class="form-group" style="flex: 1; min-width: 170px;">
+              <label>Tipe Sizing Grid <span class="badge-tag badge-wick-only">⚡ Grid Sizing</span></label>
+              <select id="cfg-grid-sizing-type" class="form-control" onchange="toggleGridSizingInputs()">
+                <option value="GEOMETRIC">Geometris (Martingale Multiplier)</option>
+                <option value="ARITHMETIC">Aritmatika Bertahap (+X% Per Layer - Gaya Leader)</option>
+              </select>
+              <small class="form-hint">Aritmatika: Lot naik linear +25% per layer & plafon max.</small>
+            </div>
+            <div id="cfg-arithmetic-step-box" class="form-group" style="flex: 1; min-width: 130px; display: none;">
+              <label>Kenaikan Aritmatika Per Layer (%)</label>
+              <input type="number" id="cfg-grid-arithmetic-step" min="5" max="100" step="5" class="form-control" placeholder="25">
+              <small class="form-hint">Gaya leader: +25% per layer.</small>
+            </div>
+            <div id="cfg-max-margin-cap-box" class="form-group" style="flex: 1; min-width: 130px; display: none;">
+              <label>Plafon Margin Per Layer (USDT)</label>
+              <input type="number" id="cfg-grid-max-margin-cap" min="5" max="500" step="5" class="form-control" placeholder="55">
+              <small class="form-hint">Maks modal 1 layer (Gaya leader: 55 USDT).</small>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 240px; align-self: center; display: flex; align-items: center; gap: 8px;">
+              <label style="margin: 0; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="cfg-grid-deploy-all-layers" style="width: 17px; height: 17px; accent-color: #0ea5e9;">
+                <span style="font-weight: 600; font-size: 12px;">⚡ Pasang Seluruh Jaring Sekaligus ke Orderbook (Leader Mode)</span>
+              </label>
             </div>
           </div>
 

@@ -28,6 +28,7 @@ export class SpikeScanner {
   private lastDataAt: number = 0;
   private blacklistMap: Map<string, BlacklistEntry> = new Map();
   private blacklistSaveTimer: NodeJS.Timeout | null = null;
+  private exhaustionCheckThrottle: Map<string, number> = new Map();
 
   constructor(config: BotConfig['scanner']) {
     this.config = config;
@@ -325,13 +326,33 @@ export class SpikeScanner {
       if (currentPrice < this.config.minPriceUsdt || currentPrice > this.config.maxPriceUsdt) continue;
 
       this.lastPrices.set(symbol, currentPrice);
+      const quoteVol24h = parseFloat(t.q || '0');
+      const change24hPct = parseFloat(t.P || '0');
       this.tickerStats.set(symbol, {
         price: currentPrice,
-        vol24hUsdt: parseFloat(t.q || '0'),
-        change24hPct: parseFloat(t.P || '0'),
+        vol24hUsdt: quoteVol24h,
+        change24hPct,
         high24h: parseFloat(t.h || '0'),
         low24h: parseFloat(t.l || '0'),
       });
+
+      // Top Gainer Exhaustion Sniper (Leader Mode):
+      // Deteksi deviasi pucuk di atas MA(7) & volume spike pada koin Top Gainer
+      const minExhChange = this.config.exhaustionMin24hChangePct ?? 30;
+      const minExhVol = this.config.exhaustionMin24hVolumeUsdt ?? 30_000_000;
+      if (
+        this.config.exhaustionModeEnabled &&
+        change24hPct >= minExhChange &&
+        quoteVol24h >= minExhVol &&
+        !this.isCoolingDown(symbol) &&
+        !this.isBlacklisted(symbol)
+      ) {
+        const lastCheck = this.exhaustionCheckThrottle.get(symbol) || 0;
+        if (now - lastCheck >= 1500) {
+          this.exhaustionCheckThrottle.set(symbol, now);
+          this.checkExhaustion(symbol, currentPrice, now).catch(() => {});
+        }
+      }
 
       // Simpan riwayat tick
       let history = this.priceHistory.get(symbol);
@@ -421,5 +442,62 @@ export class SpikeScanner {
 
   public onSpike(callback: (alert: SpikeAlert) => void) {
     this.alertListeners.push(callback);
+  }
+
+  /**
+   * Evaluasi metrik MA & Volume Exhaustion untuk koin Top Gainer (Leader Mode)
+   */
+  private async checkExhaustion(symbol: string, currentPrice: number, now: number) {
+    try {
+      const tf = this.config.exhaustionTimeframe || '2m';
+      const maPeriod = this.config.exhaustionMaPeriod || 7;
+      const minDev = this.config.exhaustionMinDeviationPct ?? 6.0;
+      const minRange = this.config.exhaustionMinCandleRangePct ?? 5.0;
+      const minVol = this.config.exhaustionMinVolMultiplier ?? 2.0;
+
+      const metrics = await binanceFutures.getMaExhaustionMetrics(
+        symbol,
+        tf,
+        maPeriod,
+        minDev,
+        minRange,
+        minVol
+      );
+
+      if (!metrics || !metrics.isExhausted) return;
+
+      if (this.isCoolingDown(symbol)) return;
+      const recentAlert = this.recentSpikes.find((a) => a.symbol === symbol && Date.now() - a.timestamp < 15000);
+      if (recentAlert) return;
+
+      const alertTime = Date.now();
+      const alert: SpikeAlert = {
+        id: `EXH_${symbol}_${alertTime}`,
+        symbol,
+        startPrice: metrics.maVal,
+        currentPrice: metrics.currentPrice,
+        surgePct: Math.round(metrics.deviationPct * 100) / 100,
+        lookbackSeconds: tf === '1m' ? 60 : tf === '3m' ? 180 : tf === '5m' ? 300 : 120,
+        timestamp: alertTime,
+        status: 'PENDING',
+        isExhaustion: true,
+        exhaustionDetail: `${tf} MA(${maPeriod}) dev: +${metrics.deviationPct.toFixed(2)}%, range: ${metrics.candleRangePct.toFixed(2)}%, vol: ${metrics.volRatio.toFixed(1)}x`,
+      };
+
+      this.recentSpikes.unshift(alert);
+      if (this.recentSpikes.length > 50) this.recentSpikes.pop();
+
+      logger.log(
+        'SUCCESS',
+        `🎯 [EXHAUSTION CANDIDATE] ${symbol}: Terdeteksi pembalikan pucuk Top Gainer (${alert.exhaustionDetail}) @ $${currentPrice}!`,
+        symbol
+      );
+
+      for (const listener of this.alertListeners) {
+        listener(alert);
+      }
+    } catch {
+      // Non-blocking fail-open
+    }
   }
 }

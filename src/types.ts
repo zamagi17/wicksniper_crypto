@@ -45,6 +45,15 @@ export interface BotConfig {
     emaTrendSlowPeriod?: number;
     tradeQualityScoringEnabled?: boolean;
     tradeQualityThreshold?: number;
+    // Leader Mode: MA Exhaustion Reversal on Top Gainers
+    exhaustionModeEnabled?: boolean;       // Mode Exhaustion Reversal (Gaya Leader Binance)
+    exhaustionMin24hChangePct?: number;   // Minimal kenaikan 24 jam koin (Top Gainer, default: 30%)
+    exhaustionMin24hVolumeUsdt?: number;  // Minimal turnover 24 jam koin (USDT, default: 30_000_000)
+    exhaustionTimeframe?: '1m' | '2m' | '3m' | '5m'; // Timeframe candle (default: '2m')
+    exhaustionMaPeriod?: number;          // Periode MA (default: 7)
+    exhaustionMinDeviationPct?: number;   // Minimal deviasi High di atas MA (%) (default: 6.0%)
+    exhaustionMinCandleRangePct?: number; // Minimal rentang candle (High-Low)/Low (%) (default: 5.0%)
+    exhaustionMinVolMultiplier?: number;  // Minimal rasio volume candle vs MA Volume (default: 2.0x)
   };
   grid: {
     maxConcurrentCoins: number;
@@ -53,6 +62,10 @@ export interface BotConfig {
     marginPerLayerUsdt: number;
     martingaleMultiplier: number;
     maxTotalMarginPerCoin: number;
+    sizingType?: 'GEOMETRIC' | 'ARITHMETIC'; // Tipe pertambahan lot: GEOMETRIC (x multiplier) vs ARITHMETIC (+X% per layer)
+    arithmeticStepPct?: number;              // Kenaikan lot bertahap per layer (%, default: 25%)
+    maxMarginPerLayerCap?: number;           // Plafon maksimal margin per layer (USDT, default: 55)
+    deployAllLayersAtOnce?: boolean;         // Pasang seluruh limit order grid sekaligus ke orderbook (default: false)
   };
   exit: {
     takeProfitPct: number;
@@ -465,6 +478,8 @@ export interface SpikeAlert {
   skipReason?: string;
   paramsSnapshot?: Record<string, any>;
   simResult?: SpikeSimResult;
+  isExhaustion?: boolean;
+  exhaustionDetail?: string;
 }
 
 export interface MarketSnapshot {

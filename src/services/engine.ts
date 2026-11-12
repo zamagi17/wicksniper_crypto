@@ -354,6 +354,14 @@ export class WickSniperEngine {
         emaTrendSlowPeriod: 21,
         tradeQualityScoringEnabled: false,
         tradeQualityThreshold: 60,
+        exhaustionModeEnabled: false,
+        exhaustionMin24hChangePct: 30,
+        exhaustionMin24hVolumeUsdt: 30000000,
+        exhaustionTimeframe: '2m',
+        exhaustionMaPeriod: 7,
+        exhaustionMinDeviationPct: 6.0,
+        exhaustionMinCandleRangePct: 5.0,
+        exhaustionMinVolMultiplier: 2.0,
       },
       grid: {
         maxConcurrentCoins: 2,
@@ -362,6 +370,10 @@ export class WickSniperEngine {
         marginPerLayerUsdt: 3.0,
         martingaleMultiplier: 1.1,
         maxTotalMarginPerCoin: 50.0,
+        sizingType: 'GEOMETRIC',
+        arithmeticStepPct: 25,
+        maxMarginPerLayerCap: 55,
+        deployAllLayersAtOnce: false,
       },
       exit: {
         takeProfitPct: 1.0,
@@ -900,7 +912,7 @@ export class WickSniperEngine {
     if (this.config.triggerStrategy === 'SMART_MONEY') {
       return; // Mode Smart Money murni aktif; jangan tembak lonjakan wick
     }
-    if (this.config.triggerStrategy === 'HYBRID') {
+    if (!alert.isExhaustion && this.config.triggerStrategy === 'HYBRID') {
       const sm = await binanceFutures.getSmartMoneyMetrics(alert.symbol, this.config.smartMoney?.period || '5m');
       if (sm && sm.whaleShortRatio < (this.config.smartMoney?.thresholdShortRatio || 0.55)) {
         logger.log('INFO', `🛡️ [HYBRID SKIP] ${alert.symbol}: Lonjakan dibatalkan karena Smart Money tidak Short (${(sm.whaleShortRatio * 100).toFixed(1)}%).`, alert.symbol);
@@ -1027,7 +1039,7 @@ export class WickSniperEngine {
       }
 
       // Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) secepat kilat (Non-blocking fail-open)
-      if (this.config.scanner?.skipBottomRejectionEnabled) {
+      if (!alert.isExhaustion && this.config.scanner?.skipBottomRejectionEnabled) {
         try {
           const client = await binanceFutures.getHttpClient();
           const klineRes = await client.get('/fapi/v1/klines', {
@@ -1106,7 +1118,8 @@ export class WickSniperEngine {
       const longMinSurge = longCfg?.minSurgePct ?? (this.config.scanner.spikeMinPercent || 3.0);
       const btcTrend = this.getBtcTrendStatus();
       const btcAllowsLong = !btcTrend || btcTrend.canLong;
-      const isMomentumLongCandidate = !!longCfg?.enabled
+      const isMomentumLongCandidate = !alert.isExhaustion
+        && !!longCfg?.enabled
         && btcAllowsLong
         && alert.surgePct >= longMinSurge
         && indicators?.volRatio !== undefined
@@ -1128,15 +1141,15 @@ export class WickSniperEngine {
         return;
       }
 
-      // Jika BTC filter melarang SHORT (misal tren BULLISH / Flash Surge), jangan proses atau log skip SHORT
-      if (btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
+      // Jika BTC filter melarang SHORT (misal tren BULLISH / Flash Surge), jangan proses atau log skip SHORT (kecuali Exhaustion Sniper pada Top Gainer)
+      if (!alert.isExhaustion && btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
         const cooldownMins = this.config.scanner.cooldownMinutes || 10;
         this.scanner.setCooldown(symbol, cooldownMins);
         this.recordSkippedSpike(alert, `BTC sedang ${btcTrend.trend} (Short dilarang oleh BTC Macro Guard)`, 'SHORT');
         return;
       }
 
-      if (this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0 && !isMomentumLongCandidate) {
+      if (!alert.isExhaustion && this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0 && !isMomentumLongCandidate) {
         const emaTrend = await this.evaluateEmaTrend(symbol, alert.currentPrice);
         if (!emaTrend.allowed) {
           const reason = `EMA Trend filter aktif: ${emaTrend.reason}`;
@@ -1148,7 +1161,7 @@ export class WickSniperEngine {
         }
       }
 
-      if (this.config.scanner.tradeQualityScoringEnabled) {
+      if (!alert.isExhaustion && this.config.scanner.tradeQualityScoringEnabled) {
         const quality = await this.calculateTradeQualityScore(symbol, alert, indicators);
         if (!quality.pass) {
           const reason = `Trade Quality Score ${quality.score}/100 di bawah threshold ${this.config.scanner.tradeQualityThreshold ?? 60}`;
@@ -1160,8 +1173,8 @@ export class WickSniperEngine {
         }
       }
 
-      // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita) untuk SHORT
-      if (!isMomentumLongCandidate && this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
+      // Filter Maksimal Rasio Volume (Anti-Monster Breakout Whale / Berita) untuk SHORT (kecuali Exhaustion Sniper)
+      if (!alert.isExhaustion && !isMomentumLongCandidate && this.config.scanner?.maxVolRatio && this.config.scanner.maxVolRatio > 0) {
         if (indicators && typeof indicators.volRatio === 'number' && indicators.volRatio > this.config.scanner.maxVolRatio) {
           const reason = `Volume 1m melonjak ${indicators.volRatio}x (melebihi batas aman maks ${this.config.scanner.maxVolRatio}x)`;
           const volCooldownMins = this.config.scanner.maxVolRatioCooldownMinutes ?? this.config.scanner.cooldownMinutes ?? 10;
@@ -1607,7 +1620,18 @@ export class WickSniperEngine {
 
     // Layer 1 hingga N: Diletakkan berjarak layerSpacingPct di atas harga pasar
     for (let i = 1; i < gridCfg.totalLayers; i++) {
-      currentMargin *= gridCfg.martingaleMultiplier;
+      if (gridCfg.sizingType === 'ARITHMETIC') {
+        const stepPct = gridCfg.arithmeticStepPct ?? 25;
+        const targetMargin = gridCfg.marginPerLayerUsdt * (1 + (i * stepPct) / 100);
+        currentMargin = gridCfg.maxMarginPerLayerCap && gridCfg.maxMarginPerLayerCap > 0
+          ? Math.min(gridCfg.maxMarginPerLayerCap, targetMargin)
+          : targetMargin;
+      } else {
+        currentMargin *= gridCfg.martingaleMultiplier;
+        if (gridCfg.maxMarginPerLayerCap && gridCfg.maxMarginPerLayerCap > 0) {
+          currentMargin = Math.min(gridCfg.maxMarginPerLayerCap, currentMargin);
+        }
+      }
 
       const layerPrice = currentPrice * (1 + (i * gridCfg.layerSpacingPct) / 100);
       let layerPlanned = (currentMargin * leverage) / layerPrice;
@@ -1799,7 +1823,18 @@ export class WickSniperEngine {
         const validLayers = [layers[0]];
 
         for (let i = 1; i < layers.length; i++) {
-          runningMargin *= gridCfg.martingaleMultiplier;
+          if (gridCfg.sizingType === 'ARITHMETIC') {
+            const stepPct = gridCfg.arithmeticStepPct ?? 25;
+            const targetMargin = gridCfg.marginPerLayerUsdt * (1 + (i * stepPct) / 100);
+            runningMargin = gridCfg.maxMarginPerLayerCap && gridCfg.maxMarginPerLayerCap > 0
+              ? Math.min(gridCfg.maxMarginPerLayerCap, targetMargin)
+              : targetMargin;
+          } else {
+            runningMargin *= gridCfg.martingaleMultiplier;
+            if (gridCfg.maxMarginPerLayerCap && gridCfg.maxMarginPerLayerCap > 0) {
+              runningMargin = Math.min(gridCfg.maxMarginPerLayerCap, runningMargin);
+            }
+          }
           const layerPrice = realEntryPrice * (1 + (i * gridCfg.layerSpacingPct) / 100);
           let layerPlanned = (runningMargin * leverage) / layerPrice;
           if (layerPlanned * layerPrice < prec.minNotional) {
@@ -1843,10 +1878,9 @@ export class WickSniperEngine {
         );
       }
 
-      // SMART GRID QUEUE: Hanya pasang maksimal 2 layer teratas di Binance (QUEUE_DEPTH = 2).
-      // Sisa layer (3, 4, ...) disimpan di antrean memori bot dan baru dipasang jika layer sebelumnya terisi.
-      // Ini mencegah bencana TAKEUSDT di mana layer 3, 4, 5 terisi setelah Take Profit tereksekusi.
-      const QUEUE_DEPTH = 2;
+      // SMART GRID QUEUE: Hanya pasang maksimal 2 layer teratas di Binance (QUEUE_DEPTH = 2),
+      // kecuali mode pasang semua layer sekaligus aktif (Leader Mode).
+      const QUEUE_DEPTH = gridCfg.deployAllLayersAtOnce ? layers.length : 2;
       const initialActiveLayers = layers.slice(1, 1 + QUEUE_DEPTH);
       const queuedLayers = layers.slice(1 + QUEUE_DEPTH);
 
@@ -3521,7 +3555,7 @@ export class WickSniperEngine {
     if (this.config.tradingMode !== 'LIVE' || !pos.layers) return;
     if (pos.status === 'CLOSING' || pos.status === 'CLOSED') return;
 
-    const QUEUE_DEPTH = 2;
+    const QUEUE_DEPTH = this.config.grid.deployAllLayersAtOnce ? 999 : 2;
     // Hitung berapa layer SELL yang saat ini berstatus PENDING dan aktif memiliki orderId di Binance
     const activeBinanceLayers = pos.layers.filter(
       (l) => l.status === 'PENDING' && l.orderId && l.layerIndex > 0
@@ -4108,6 +4142,10 @@ export class WickSniperEngine {
       martingaleMultiplier: this.config.grid?.martingaleMultiplier,
       maxTotalMarginPerCoin: this.config.grid?.maxTotalMarginPerCoin,
       maxConcurrentCoins: this.config.grid?.maxConcurrentCoins,
+      sizingType: this.config.grid?.sizingType,
+      arithmeticStepPct: this.config.grid?.arithmeticStepPct,
+      maxMarginPerLayerCap: this.config.grid?.maxMarginPerLayerCap,
+      deployAllLayersAtOnce: this.config.grid?.deployAllLayersAtOnce,
 
       // Exit & Protection
       takeProfitPct: this.config.exit?.takeProfitPct,
@@ -4199,6 +4237,14 @@ export class WickSniperEngine {
       tradeQualityThreshold: this.config.scanner?.tradeQualityThreshold,
       whitelistEnabled: this.config.scanner?.whitelistEnabled,
       whitelistSymbols: this.config.scanner?.whitelistSymbols,
+      exhaustionModeEnabled: this.config.scanner?.exhaustionModeEnabled,
+      exhaustionMin24hChangePct: this.config.scanner?.exhaustionMin24hChangePct,
+      exhaustionMin24hVolumeUsdt: this.config.scanner?.exhaustionMin24hVolumeUsdt,
+      exhaustionTimeframe: this.config.scanner?.exhaustionTimeframe,
+      exhaustionMaPeriod: this.config.scanner?.exhaustionMaPeriod,
+      exhaustionMinDeviationPct: this.config.scanner?.exhaustionMinDeviationPct,
+      exhaustionMinCandleRangePct: this.config.scanner?.exhaustionMinCandleRangePct,
+      exhaustionMinVolMultiplier: this.config.scanner?.exhaustionMinVolMultiplier,
 
       // Account & Risk
       tradingMode: this.config.tradingMode,
