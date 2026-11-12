@@ -1663,6 +1663,7 @@ export class WickSniperEngine {
       id: `${symbol}_${Date.now()}`,
       symbol,
       side: 'SHORT',
+      strategyType: 'WICK_SNIPER',
       leverage,
       totalQty: layer0Qty,
       avgEntryPrice: currentPrice,
