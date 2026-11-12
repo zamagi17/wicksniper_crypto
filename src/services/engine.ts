@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig } from '../types';
+import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PlannedSimLayer, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -883,6 +883,52 @@ export class WickSniperEngine {
     const entryPrice = alert.currentPrice || 0;
 
     if (entryPrice > 0) {
+      let plannedLayers: PlannedSimLayer[] | undefined = undefined;
+      let initialMargin = 5.0;
+      const lev = this.config.leverage || 3;
+
+      if (!isLong) {
+        const gridCfg = this.config.grid;
+        const totalLayers = Math.max(1, gridCfg?.totalLayers || 7);
+        const spacingPct = gridCfg?.layerSpacingPct || 1.3;
+        const baseMargin = gridCfg?.marginPerLayerUsdt || 5.0;
+        const isArithmetic = gridCfg?.sizingType === 'ARITHMETIC';
+        const stepPct = gridCfg?.arithmeticStepPct ?? 25;
+        const maxLayerCap = gridCfg?.maxMarginPerLayerCap || 55;
+        const maxTotalCoin = gridCfg?.maxTotalMarginPerCoin || 55;
+
+        plannedLayers = [];
+        let accumulatedMargin = 0;
+
+        for (let i = 0; i < totalLayers; i++) {
+          let layerMargin = baseMargin;
+          if (i > 0) {
+            if (isArithmetic) {
+              const target = baseMargin * (1 + (i * stepPct) / 100);
+              layerMargin = maxLayerCap > 0 ? Math.min(maxLayerCap, target) : target;
+            } else {
+              const prev = plannedLayers[i - 1].marginUsdt;
+              layerMargin = prev * (gridCfg?.martingaleMultiplier || 1.2);
+              if (maxLayerCap > 0) layerMargin = Math.min(maxLayerCap, layerMargin);
+            }
+          }
+          if (accumulatedMargin + layerMargin > maxTotalCoin) {
+            break;
+          }
+          const layerPrice = parseFloat((entryPrice * (1 + (i * spacingPct) / 100)).toFixed(8));
+          const layerQty = parseFloat(((layerMargin * lev) / layerPrice).toFixed(6));
+          plannedLayers.push({
+            layerIndex: i,
+            price: layerPrice,
+            marginUsdt: parseFloat(layerMargin.toFixed(2)),
+            qty: layerQty,
+            filled: i === 0,
+          });
+          accumulatedMargin += layerMargin;
+        }
+        initialMargin = plannedLayers.length > 0 ? plannedLayers[0].marginUsdt : baseMargin;
+      }
+
       alert.simResult = {
         hypotheticalEntryPrice: entryPrice,
         targetTpPrice: parseFloat((entryPrice * (isLong ? 1 + tpPct / 100 : 1 - tpPct / 100)).toFixed(8)),
@@ -897,6 +943,11 @@ export class WickSniperEngine {
         durationMinutes: 0,
         isComplete: false,
         updatedAt: Date.now(),
+        layersFilled: 1,
+        totalLayers: plannedLayers ? plannedLayers.length : 1,
+        avgEntryPrice: entryPrice,
+        simulatedMarginUsed: initialMargin,
+        plannedLayers,
       };
       this.activeSimSpikes.set(alert.id, alert);
     }
@@ -6618,20 +6669,87 @@ export class WickSniperEngine {
         sim.lowestDiffPct = parseFloat((((sim.lowestPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
       }
 
-      // Evaluasi SHORT: Target TP tercapai jika harga TURUN <= targetTpPrice
-      if (livePrice <= sim.targetTpPrice) {
+      const isLong = sim.side === 'LONG';
+      const lev = this.config.leverage || 3;
+      const tpPct = isLong
+        ? this.config.momentumLong?.takeProfitPct ?? 6
+        : this.config.exit?.takeProfitPct ?? 1.6;
+      const slPct = isLong
+        ? this.config.momentumLong?.stopLossPct ?? 2.5
+        : this.config.exit?.hardStopLossPct ?? 3.5;
+
+      // Update grid layers fill secara dinamis jika harga naik ke layer-layer berikutnya (SHORT)
+      if (!isLong && sim.plannedLayers && sim.plannedLayers.length > 0) {
+        let layersChanged = false;
+        const currentFilled = sim.layersFilled || 1;
+        for (let i = currentFilled; i < sim.plannedLayers.length; i++) {
+          const l = sim.plannedLayers[i];
+          if (livePrice >= l.price) {
+            l.filled = true;
+            sim.layersFilled = i + 1;
+            layersChanged = true;
+          } else {
+            break;
+          }
+        }
+
+        if (layersChanged || !sim.avgEntryPrice) {
+          let totalQty = 0;
+          let totalCost = 0;
+          let totalMargin = 0;
+          const count = sim.layersFilled || 1;
+          for (let i = 0; i < count; i++) {
+            const l = sim.plannedLayers[i];
+            totalQty += l.qty;
+            totalCost += l.price * l.qty;
+            totalMargin += l.marginUsdt;
+          }
+          if (totalQty > 0) {
+            sim.avgEntryPrice = parseFloat((totalCost / totalQty).toFixed(8));
+            sim.simulatedMarginUsed = parseFloat(totalMargin.toFixed(2));
+
+            // BEP Defense jika terisi >= bepMaxLayersTrigger (default 5)
+            const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
+            const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
+            if (isBep) {
+              const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
+              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
+            } else {
+              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - tpPct / 100)).toFixed(8));
+            }
+            sim.hardSlPrice = parseFloat((sim.avgEntryPrice * (1 + slPct / 100)).toFixed(8));
+          }
+        }
+      }
+
+      const effectiveEntry = sim.avgEntryPrice || sim.hypotheticalEntryPrice;
+
+      // Evaluasi Take Profit
+      const hitTp = isLong ? livePrice >= sim.targetTpPrice : livePrice <= sim.targetTpPrice;
+      if (hitTp) {
         sim.outcome = 'MISSED_TP';
-        sim.simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - sim.targetTpPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        const gainPct = isLong
+          ? ((sim.targetTpPrice - effectiveEntry) / effectiveEntry) * 100
+          : ((effectiveEntry - sim.targetTpPrice) / effectiveEntry) * 100;
+        sim.simulatedPnlPct = parseFloat((gainPct * lev).toFixed(2));
+        sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (sim.simulatedPnlPct / 100)).toFixed(2));
         sim.isComplete = true;
         this.activeSimSpikes.delete(id);
         db.updateSpikeSimResult(id, sim).catch(() => {});
         continue;
       }
 
-      // Evaluasi SHORT: Hard SL tersentuh jika harga NAIK >= hardSlPrice
-      if (livePrice >= sim.hardSlPrice) {
+      // Evaluasi Hard Stop Loss:
+      // Pada SHORT ber-jaring: SL HANYA memicu jika seluruh layer jaring telah terisi penuh
+      const allLayersFilled = !sim.plannedLayers || (sim.layersFilled || 1) >= sim.plannedLayers.length;
+      const hitSl = isLong ? livePrice <= sim.hardSlPrice : (allLayersFilled && livePrice >= sim.hardSlPrice);
+      if (hitSl) {
         sim.outcome = 'SAVED_SL';
-        sim.simulatedPnlPct = -parseFloat((((sim.hardSlPrice - sim.hypotheticalEntryPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        const lossPct = isLong
+          ? ((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100
+          : -((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100;
+        sim.simulatedPnlPct = parseFloat((lossPct * lev).toFixed(2));
+        sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || (isLong ? 5 : 61.25)) * (sim.simulatedPnlPct / 100)).toFixed(2));
         sim.isComplete = true;
         this.activeSimSpikes.delete(id);
         db.updateSpikeSimResult(id, sim).catch(() => {});
@@ -6641,7 +6759,11 @@ export class WickSniperEngine {
       // Evaluasi Timeout jika durasi pengamatan melebihi batas waktu
       if (elapsedMs >= maxHoldMs) {
         sim.outcome = 'TIMEOUT';
-        sim.simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - livePrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        const diffPct = isLong
+          ? ((livePrice - effectiveEntry) / effectiveEntry) * 100
+          : ((effectiveEntry - livePrice) / effectiveEntry) * 100;
+        sim.simulatedPnlPct = parseFloat((diffPct * lev).toFixed(2));
+        sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (sim.simulatedPnlPct / 100)).toFixed(2));
         sim.isComplete = true;
         this.activeSimSpikes.delete(id);
         db.updateSpikeSimResult(id, sim).catch(() => {});
@@ -6649,7 +6771,11 @@ export class WickSniperEngine {
       }
 
       // Update PnL berjalan secara berkala
-      sim.simulatedPnlPct = parseFloat((((sim.hypotheticalEntryPrice - livePrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+      const currentDiffPct = isLong
+        ? ((livePrice - effectiveEntry) / effectiveEntry) * 100
+        : ((effectiveEntry - livePrice) / effectiveEntry) * 100;
+      sim.simulatedPnlPct = parseFloat((currentDiffPct * lev).toFixed(2));
+      sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (sim.simulatedPnlPct / 100)).toFixed(2));
       if (Math.floor(elapsedMs / 1000) % 10 === 0) {
         db.updateSpikeSimResult(id, sim).catch(() => {});
       }
@@ -6703,6 +6829,15 @@ export class WickSniperEngine {
       let simulatedPnlPct = 0;
       let hitMinute = res.data.length;
 
+      const isLong = sim.side === 'LONG';
+      const lev = this.config.leverage || 3;
+      const tpPct = isLong
+        ? this.config.momentumLong?.takeProfitPct ?? 6
+        : this.config.exit?.takeProfitPct ?? 1.6;
+      const slPct = isLong
+        ? this.config.momentumLong?.stopLossPct ?? 2.5
+        : this.config.exit?.hardStopLossPct ?? 3.5;
+
       for (let i = 0; i < res.data.length; i++) {
         const c = res.data[i];
         const h = parseFloat(c[2]);
@@ -6710,27 +6845,74 @@ export class WickSniperEngine {
         if (!isNaN(h) && h > highest) highest = h;
         if (!isNaN(l) && l > 0 && l < lowest) lowest = l;
 
-        const isLong = sim.side === 'LONG';
-        const hitSl = isLong
-          ? !isNaN(l) && l <= sim.hardSlPrice
-          : !isNaN(h) && h >= sim.hardSlPrice;
-        const hitTp = isLong
-          ? !isNaN(h) && h >= sim.targetTpPrice
-          : !isNaN(l) && l <= sim.targetTpPrice;
+        // Dynamic grid fill check pada candle ini (SHORT)
+        if (!isLong && sim.plannedLayers && sim.plannedLayers.length > 0) {
+          const currentFilled = sim.layersFilled || 1;
+          for (let k = currentFilled; k < sim.plannedLayers.length; k++) {
+            const lay = sim.plannedLayers[k];
+            if (!isNaN(h) && h >= lay.price) {
+              lay.filled = true;
+              sim.layersFilled = k + 1;
+            } else {
+              break;
+            }
+          }
 
-        if (hitSl && !hitTp) {
-          outcome = 'SAVED_SL';
-          simulatedPnlPct = parseFloat((((isLong ? sim.hardSlPrice - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - sim.hardSlPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          let totalQty = 0;
+          let totalCost = 0;
+          let totalMargin = 0;
+          const count = sim.layersFilled || 1;
+          for (let k = 0; k < count; k++) {
+            const lay = sim.plannedLayers[k];
+            totalQty += lay.qty;
+            totalCost += lay.price * lay.qty;
+            totalMargin += lay.marginUsdt;
+          }
+          if (totalQty > 0) {
+            sim.avgEntryPrice = parseFloat((totalCost / totalQty).toFixed(8));
+            sim.simulatedMarginUsed = parseFloat(totalMargin.toFixed(2));
+            const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
+            const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
+            if (isBep) {
+              const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
+              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
+            } else {
+              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - tpPct / 100)).toFixed(8));
+            }
+            sim.hardSlPrice = parseFloat((sim.avgEntryPrice * (1 + slPct / 100)).toFixed(8));
+          }
+        }
+
+        const effectiveEntry = sim.avgEntryPrice || sim.hypotheticalEntryPrice;
+        const allLayersFilled = !sim.plannedLayers || (sim.layersFilled || 1) >= sim.plannedLayers.length;
+        const hitSl = isLong ? (!isNaN(l) && l <= sim.hardSlPrice) : (allLayersFilled && !isNaN(h) && h >= sim.hardSlPrice);
+        const hitTp = isLong ? (!isNaN(h) && h >= sim.targetTpPrice) : (!isNaN(l) && l <= sim.targetTpPrice);
+
+        if (hitTp && !hitSl) {
+          outcome = 'MISSED_TP';
+          const gainPct = isLong
+            ? ((sim.targetTpPrice - effectiveEntry) / effectiveEntry) * 100
+            : ((effectiveEntry - sim.targetTpPrice) / effectiveEntry) * 100;
+          simulatedPnlPct = parseFloat((gainPct * lev).toFixed(2));
+          sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (simulatedPnlPct / 100)).toFixed(2));
           hitMinute = i + 1;
           break;
-        } else if (hitTp && !hitSl) {
-          outcome = 'MISSED_TP';
-          simulatedPnlPct = parseFloat((((isLong ? sim.targetTpPrice - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - sim.targetTpPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        } else if (hitSl && !hitTp) {
+          outcome = 'SAVED_SL';
+          const lossPct = isLong
+            ? ((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100
+            : -((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100;
+          simulatedPnlPct = parseFloat((lossPct * lev).toFixed(2));
+          sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || (isLong ? 5 : 61.25)) * (simulatedPnlPct / 100)).toFixed(2));
           hitMinute = i + 1;
           break;
         } else if (hitSl && hitTp) {
           outcome = 'SAVED_SL';
-          simulatedPnlPct = parseFloat((((isLong ? sim.hardSlPrice - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - sim.hardSlPrice) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+          const lossPct = isLong
+            ? ((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100
+            : -((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100;
+          simulatedPnlPct = parseFloat((lossPct * lev).toFixed(2));
+          sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || (isLong ? 5 : 61.25)) * (simulatedPnlPct / 100)).toFixed(2));
           hitMinute = i + 1;
           break;
         }

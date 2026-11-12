@@ -1924,29 +1924,30 @@ function renderSpikesTable(spikes) {
         const pnl = Number(sim.simulatedPnlPct || 0);
         const pnlSign = pnl >= 0 ? '+' : '';
         const pnlStr = `${pnlSign}${pnl.toFixed(2)}%`;
+        const layersInfo = sim.totalLayers && sim.totalLayers > 1 ? ` (${sim.layersFilled || 1}/${sim.totalLayers}L)` : '';
 
         if (sim.outcome === 'SAVED_SL') {
           simBadge = `
-            <button type="button" class="badge-sim-outcome saved" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Filter berhasil menyelamatkan modal dari Stop Loss!">
-              🛡️ Selamat SL (${pnlStr})
+            <button type="button" class="badge-sim-outcome saved" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Filter berhasil menyelamatkan modal dari Stop Loss setelah jaring terisi!">
+              🛡️ Selamat SL${layersInfo} (${pnlStr})
             </button>
           `;
         } else if (sim.outcome === 'MISSED_TP') {
           simBadge = `
             <button type="button" class="badge-sim-outcome missed" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Koin berbalik arah dan menyentuh Target TP.">
-              💸 Terlewat TP (${pnlStr})
+              💸 Terlewat TP${layersInfo} (${pnlStr})
             </button>
           `;
         } else if (sim.outcome === 'TIMEOUT') {
           simBadge = `
-            <button type="button" class="badge-sim-outcome timeout" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan 30m selesai tanpa kena TP/SL.">
-              ⏱️ Timeout (${pnlStr})
+            <button type="button" class="badge-sim-outcome timeout" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan selesai tanpa kena TP/SL.">
+              ⏱️ Timeout${layersInfo} (${pnlStr})
             </button>
           `;
         } else {
           simBadge = `
             <button type="button" class="badge-sim-outcome tracking" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan real-time sedang berjalan.">
-              ⏳ Pemantauan (${sim.durationMinutes || 0}m | ${pnlStr})
+              ⏳ Pantau${layersInfo} (${sim.durationMinutes || 0}m | ${pnlStr})
             </button>
           `;
         }
@@ -2159,6 +2160,12 @@ function openSpikeSimModal(spikeId) {
   const pnl = Number(sim.simulatedPnlPct || 0);
   const pnlSign = pnl >= 0 ? '+' : '';
   const pnlStr = `${pnlSign}${pnl.toFixed(2)}%`;
+  const layersFilled = sim.layersFilled || 1;
+  const totalLayers = sim.totalLayers || 1;
+  const avgPrice = Number(sim.avgEntryPrice || sim.hypotheticalEntryPrice || 0);
+  const simMargin = Number(sim.simulatedMarginUsed || 5).toFixed(2);
+  const realPnlVal = Number(sim.simulatedRealizedPnl || 0);
+  const realPnlStr = `${realPnlVal >= 0 ? '+' : ''}$${realPnlVal.toFixed(2)} USDT`;
 
   let outcomeClass = 'tracking';
   let outcomeTitle = '⏳ Simulasi Pemantauan Sedang Berjalan';
@@ -2167,27 +2174,27 @@ function openSpikeSimModal(spikeId) {
 
   if (sim.outcome === 'SAVED_SL') {
     outcomeClass = 'saved';
-    outcomeTitle = '🛡️ Penyelamatan Modal Sukses (Selamat dari SL)';
+    outcomeTitle = `🛡️ Penyelamatan Modal Sukses (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'saved';
     bannerText = `<b>🛡️ Filter Berhasil Melindungi Modal!</b><br>
-    Setelah lonjakan spike ditolak, harga ${isLong ? 'turun' : 'naik'} hingga menyentuh batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}).
-    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian <b>${pnlStr}</b>.`;
+    Setelah lonjakan ditolak, harga melonjak dan mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> hingga menembus batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}).<br>
+    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian riil <b>${realPnlStr} (${pnlStr})</b>.`;
   } else if (sim.outcome === 'MISSED_TP') {
     outcomeClass = 'missed';
-    outcomeTitle = '💸 Peluang Profit Terlewat (Kena TP)';
+    outcomeTitle = `💸 Peluang Profit Terlewat (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'missed';
     bannerText = `<b>💸 Peluang Profit Terlewat!</b><br>
-    Setelah lonjakan spike ditolak, harga koin bergerak ${isLong ? 'naik' : 'turun'} dan menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) tanpa tersentuh Stop Loss.
-    Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${pnlStr}</b>. Parameter filter mungkin dapat sedikit dilonggarkan jika koin ini sering lolos.`;
+    Posisi hipotetis menyerap <b>${layersFilled}/${totalLayers} layer jaring</b> dan sukses berbalik arah menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) tanpa terkena Stop Loss.<br>
+    Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${realPnlStr} (${pnlStr})</b>.`;
   } else if (sim.outcome === 'TIMEOUT') {
     outcomeClass = 'timeout';
-    outcomeTitle = '⏱️ Batas Waktu 30 Menit Tercapai';
+    outcomeTitle = `⏱️ Batas Waktu Tercapai (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'timeout';
-    bannerText = `<b>⏱️ Pemantauan 30 Menit Selesai</b><br>
-    Selama 30 menit pasca-lonjakan, harga bergerak konsolidasi tanpa menyentuh TP maupun SL. Estimasi PnL mengambang di menit ke-30 adalah <b>${pnlStr}</b>.`;
+    bannerText = `<b>⏱️ Pemantauan Selesai Tanpa Kena TP/SL</b><br>
+    Selama durasi pengamatan (${sim.durationMinutes || 30} menit), harga bergerak konsolidasi setelah mengisi <b>${layersFilled}/${totalLayers} layer jaring</b>. Estimasi PnL mengambang di akhir pengamatan adalah <b>${realPnlStr} (${pnlStr})</b>.`;
   } else {
-    bannerText = `<b>⏳ Simulasi Sedang Berlangsung</b><br>
-    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} menit</b>). PnL mengambang saat ini: <b>${pnlStr}</b>.`;
+    bannerText = `<b>⏳ Simulasi Jaring Real-Time Sedang Berlangsung</b><br>
+    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} menit</b> | <b>${layersFilled}/${totalLayers} layer terisi</b>). PnL mengambang saat ini: <b>${pnlStr}</b>.`;
   }
 
   if (titleEl) titleEl.innerText = `🔬 Simulasi Koin Ditolak: ${s.symbol}`;
@@ -2224,11 +2231,19 @@ function openSpikeSimModal(spikeId) {
       <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Lonjakan terdeteksi: <b>+${Number(s.surgePct || 0).toFixed(2)}%</b> dalam ${s.lookbackSeconds || 5}s pada ${formatDateTime(s.timestamp, true)}</div>
     </div>
 
-    <div class="td-section-title">📊 Parameter & Level Simulasi Saat Kejadian</div>
+    <div class="td-section-title">📊 Parameter & Model Jaring Simulasi</div>
     <div class="td-post-exit-grid" style="margin-bottom: 16px;">
       <div class="td-pe-stat">
-        <div class="pe-label">Harga Masuk Hipotetis (${sideLabel})</div>
-        <div class="pe-val" style="color: var(--color-cyan);">$${formatCryptoPrice(entry)}</div>
+        <div class="pe-label">Jaring Grid Terisi</div>
+        <div class="pe-val" style="color: var(--color-cyan); font-weight: 700;">${layersFilled} / ${totalLayers} Layer</div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Harga Rata-Rata Entry</div>
+        <div class="pe-val" style="color: var(--color-cyan);">$${formatCryptoPrice(avgPrice)}</div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Modal Margin Terpakai</div>
+        <div class="pe-val" style="color: var(--text-main); font-weight: 600;">$${simMargin} USDT</div>
       </div>
       <div class="td-pe-stat">
         <div class="pe-label">Target Take Profit (${tpParam}%)</div>
@@ -2238,6 +2253,13 @@ function openSpikeSimModal(spikeId) {
         <div class="pe-label">Batas Hard Stop Loss (${slParam}%)</div>
         <div class="pe-val" style="color: var(--color-red);">$${formatCryptoPrice(sl)}</div>
       </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Estimasi PnL Riil</div>
+        <div class="pe-val" style="color: ${pnl >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight: 700;">
+          ${realPnlStr} <small style="font-size: 11px;">(${pnlStr})</small>
+        </div>
+      </div>
+    </div>
       <div class="td-pe-stat">
         <div class="pe-label">Hasil Simulasi PnL</div>
         <div class="pe-val" style="color: ${pnl >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight: 700;">

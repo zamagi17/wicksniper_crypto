@@ -187,3 +187,10 @@ Karena akumulasi modal Layer 0 s/d Layer 5 sudah mencapai **$48.72 USDT**. Jika 
 
 ### Q4: Apakah akun saya bisa terkena Likuidasi?
 **Secara matematis tidak.** Dengan modal $500, posisi per koin hanya $55 pada Leverage 3x Cross Margin. Koin harus terbang naik lebih dari **+300%** tanpa henti untuk melikuidasi akun. Ditambah lagi, Hard SL di 3.5% akan memotong posisi jauh sebelum risiko margin terjadi (maksimal rugi hanya ~$2 USDT).
+
+### Q5: Bagaimana Radar "Penyelamatan Modal" bekerja?
+Radar Simulasi Bayangan (*Shadow Trading*) memantau seluruh koin yang ditolak filter menggunakan **Simulasi Jaring Multi-Layer Dinamis**:
+* Jika harga koin naik menembus layer demi layer, bot bayangan menyerap lonjakan tersebut dan menghitung ulang harga rata-rata (*Average Entry Price*).
+* Koin hanya dikategorikan **"Selamat dari Stop Loss (Saved SL)"** jika kenaikan harga menembus **seluruh 7 layer jaring** dan melewati Hard Stop Loss akhir.
+* Jika koin berbalik arah di layer mana pun (misal Layer 1, 2, atau 3) dan menyentuh TP, maka dicatat sebagai **"Peluang Terlewat (Missed TP)"** lengkap dengan estimasi profit riilnya.
+

@@ -450,6 +450,14 @@ export interface TickerSnapshot {
   time: number;
 }
 
+export interface PlannedSimLayer {
+  layerIndex: number;
+  price: number;
+  marginUsdt: number;
+  qty: number;
+  filled: boolean;
+}
+
 export interface SpikeSimResult {
   hypotheticalEntryPrice: number;
   targetTpPrice: number;
@@ -464,6 +472,12 @@ export interface SpikeSimResult {
   durationMinutes: number;
   isComplete: boolean;
   updatedAt: number;
+  layersFilled?: number;
+  totalLayers?: number;
+  avgEntryPrice?: number;
+  simulatedMarginUsed?: number;
+  simulatedRealizedPnl?: number;
+  plannedLayers?: PlannedSimLayer[];
 }
 
 export interface SpikeAlert {
