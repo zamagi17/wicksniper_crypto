@@ -2347,9 +2347,33 @@ function renderClosedTradesTable(trades) {
 
       const rowSide = (t.side || t.paramsSnapshot?.side || 'SHORT').toUpperCase();
       const rowBtc = t.btcTrendStatus || t.paramsSnapshot?.btcTrendStatus;
-      const btcBadge = rowBtc
-        ? `<span class="badge-tag" style="font-size: 9px; padding: 1px 4px; margin-left: 3px; font-weight: 600; background: ${rowBtc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)'}; color: ${rowBtc.trend === 'BULLISH' ? '#30d158' : '#ff453a'}; border: 1px solid ${rowBtc.trend === 'BULLISH' ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)'};" title="BTC saat Entry: $${Number(rowBtc.btcPrice || 0).toFixed(0)} (${rowBtc.trend})">BTC ${rowBtc.trend === 'BULLISH' ? '▲' : '▼'}</span>`
-        : '';
+      let btcBadge = '';
+      if (rowBtc && rowBtc.trend) {
+        const isBtcBull = rowBtc.trend === 'BULLISH';
+        const isBtcBear = rowBtc.trend === 'BEARISH';
+        const btcColor = isBtcBull ? '#30d158' : isBtcBear ? '#ff453a' : '#ffd60a';
+        const btcBg = isBtcBull ? 'rgba(48, 209, 88, 0.15)' : isBtcBear ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 214, 10, 0.15)';
+        const btcBorder = isBtcBull ? 'rgba(48, 209, 88, 0.35)' : isBtcBear ? 'rgba(255, 69, 58, 0.35)' : 'rgba(255, 214, 10, 0.35)';
+        const btcArrow = isBtcBull ? '▲' : isBtcBear ? '▼' : '◆';
+        const btcLabel = isBtcBull ? 'Bullish' : isBtcBear ? 'Bearish' : 'Sideways';
+        const btcPrice = Number(rowBtc.btcPrice || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        const btcEma = Number(rowBtc.ema || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        const btcTf = rowBtc.timeframe || '1h';
+        const btcPeriod = rowBtc.period || 50;
+        const btcDiff = rowBtc.diffPct !== undefined ? ` (${rowBtc.diffPct >= 0 ? '+' : ''}${Number(rowBtc.diffPct).toFixed(2)}%)` : '';
+        const tooltip = `Kondisi Macro BTC saat Entry: ${btcLabel} (${btcArrow}) | Harga: $${btcPrice} vs EMA${btcPeriod}: $${btcEma} (TF ${btcTf})${btcDiff}`;
+        btcBadge = `<span class="badge-tag" style="font-size: 9.5px; padding: 1px 6px; margin-left: 3px; font-weight: 600; background: ${btcBg}; color: ${btcColor}; border: 1px solid ${btcBorder}; border-radius: 4px;" title="${escapeHtml(tooltip)}">BTC ${btcArrow} ${btcLabel} (1h)</span>`;
+      } else if (t.paramsSnapshot?.btcCondition) {
+        const cond = t.paramsSnapshot.btcCondition;
+        const isBtcBull = cond.includes('BULLISH');
+        const isBtcBear = cond.includes('BEARISH');
+        const btcColor = isBtcBull ? '#30d158' : isBtcBear ? '#ff453a' : '#ffd60a';
+        const btcBg = isBtcBull ? 'rgba(48, 209, 88, 0.15)' : isBtcBear ? 'rgba(255, 69, 58, 0.15)' : 'rgba(255, 214, 10, 0.15)';
+        const btcBorder = isBtcBull ? 'rgba(48, 209, 88, 0.35)' : isBtcBear ? 'rgba(255, 69, 58, 0.35)' : 'rgba(255, 214, 10, 0.35)';
+        const btcLabel = isBtcBull ? 'Bullish' : isBtcBear ? 'Bearish' : 'Sideways';
+        const btcArrow = isBtcBull ? '▲' : isBtcBear ? '▼' : '◆';
+        btcBadge = `<span class="badge-tag" style="font-size: 9.5px; padding: 1px 6px; margin-left: 3px; font-weight: 600; background: ${btcBg}; color: ${btcColor}; border: 1px solid ${btcBorder}; border-radius: 4px;" title="${escapeHtml(cond)}">BTC ${btcArrow} ${btcLabel} (1h)</span>`;
+      }
 
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
@@ -2864,6 +2888,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Leverage', snap.leverage, curr.leverage, 'x')}
       ${renderCompareRow('Tipe Margin', snap.marginType, curr.marginType)}
       ${renderCompareRow('Sumber Data Market', snap.dataSource, currScanner.dataSource)}
+      ${renderCompareRow('Kondisi Tren BTC (1h / EMA50)', snap.btcCondition || (snap.btcTrendStatus ? `${snap.btcTrendStatus.trend} ($${Math.round(snap.btcTrendStatus.btcPrice || 0)} vs EMA50 $${Math.round(snap.btcTrendStatus.ema || 0)} | TF 1h)` : undefined), undefined, '')}
       ${renderCompareRow('Rem Rugi Harian (Circuit Breaker)', snap.maxDailyLossUsdt, currRisk.maxDailyLossUsdt, ' USDT', formatZeroDisabled(' USDT'))}
       ${renderCompareRow('Batas Saldo Pengaman (Floor)', snap.minSafetyBalanceUsdt, currRisk.minSafetyBalanceUsdt, ' USDT', formatZeroDisabled(' USDT'))}
 
@@ -2983,6 +3008,32 @@ function openTradeDetailModal(tradeId, tradeIndex) {
             <div class="td-kpi-label">Puncak Cuan (MFE)</div>
             <div class="td-kpi-val text-green">+${Number(t.peakPnlPct).toFixed(1)}%</div>
           </div>` : ''}
+          ${(() => {
+            const btc = t.btcTrendStatus || snap?.btcTrendStatus;
+            if (!btc && !snap?.btcCondition) return '';
+            const trend = btc?.trend || (snap?.btcCondition?.includes('BULLISH') ? 'BULLISH' : snap?.btcCondition?.includes('BEARISH') ? 'BEARISH' : 'SIDEWAYS');
+            const isBtcBull = trend === 'BULLISH';
+            const isBtcBear = trend === 'BEARISH';
+            const btcColor = isBtcBull ? 'var(--color-green, #30d158)' : isBtcBear ? 'var(--color-red, #ff453a)' : 'var(--color-gold, #ffd60a)';
+            const btcPrice = btc?.btcPrice ? `$${Math.round(btc.btcPrice).toLocaleString('en-US')}` : '';
+            const btcEma = btc?.ema ? `$${Math.round(btc.ema).toLocaleString('en-US')}` : '';
+            const btcTf = btc?.timeframe || '1h';
+            const btcPeriod = btc?.period || 50;
+            const diffPct = btc?.diffPct !== undefined ? ` (${btc.diffPct >= 0 ? '+' : ''}${Number(btc.diffPct).toFixed(2)}%)` : '';
+            const isAligned = (detailSide === 'SHORT' && isBtcBear) || (detailSide === 'LONG' && isBtcBull);
+            const alignBadge = isAligned ? '✅ Selaras Macro' : (trend === 'SIDEWAYS' ? '⚖️ Sideways' : '⚠️ Counter-Macro');
+
+            return `
+            <div class="td-kpi-card" style="border: 1px solid ${btcColor}40; background: ${btcColor}0d;">
+              <div class="td-kpi-label">🪙 Tren BTC Macro (${btcTf} | EMA${btcPeriod})</div>
+              <div class="td-kpi-val" style="color: ${btcColor}; font-size: 13px; font-weight: 700;">
+                ${trend} ${isBtcBull ? '▲' : isBtcBear ? '▼' : '◆'} <small style="font-size: 10px; font-weight: 600; opacity: 0.9;">${alignBadge}</small>
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+                ${btcPrice && btcEma ? `BTC <b>${btcPrice}</b> vs EMA${btcPeriod} <b>${btcEma}</b>${diffPct}` : escapeHtml(snap?.btcCondition || '-')}
+              </div>
+            </div>`;
+          })()}
         </div>
 
         <!-- MARKET SNAPSHOT SAAT ENTRY -->

@@ -4306,6 +4306,19 @@ export class WickSniperEngine {
       maxDailyLossUsdt: this.config.risk?.maxDailyLossUsdt,
       minSafetyBalanceUsdt: this.config.risk?.minSafetyBalanceUsdt,
       sessionAtEntry: this.isWithinTradingSchedule().activeSessionName || '24/7',
+      btcTrendStatus: this.getBtcTrendStatus() ? {
+        btcPrice: this.getBtcTrendStatus()?.btcPrice,
+        ema: this.getBtcTrendStatus()?.ema,
+        trend: this.getBtcTrendStatus()?.trend,
+        priorTrend: this.getBtcTrendStatus()?.priorTrend,
+        changePct: this.getBtcTrendStatus()?.changePct,
+        diffPct: this.getBtcTrendStatus()?.diffPct,
+        timeframe: this.getBtcTrendStatus()?.timeframe || '1h',
+        period: this.getBtcTrendStatus()?.period || 50,
+      } : undefined,
+      btcCondition: this.getBtcTrendStatus()
+        ? `${this.getBtcTrendStatus()?.trend} (BTC $${Math.round(this.getBtcTrendStatus()?.btcPrice || 0).toLocaleString('en-US')} vs EMA50 $${Math.round(this.getBtcTrendStatus()?.ema || 0).toLocaleString('en-US')} | TF 1h${this.getBtcTrendStatus()?.diffPct !== undefined ? ` ${this.getBtcTrendStatus()?.diffPct! >= 0 ? '+' : ''}${this.getBtcTrendStatus()?.diffPct!.toFixed(2)}%` : ''})`
+        : 'TIDAK DIKETAHUI',
     };
   }
 
@@ -4839,6 +4852,10 @@ export class WickSniperEngine {
           targetTpPrice: pos.targetTpPrice,
           targetTp2Price: pos.targetTp2Price,
           hardSlPrice: pos.hardSlPrice,
+          btcTrendStatus: pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus() || undefined,
+          btcCondition: (pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())
+            ? `${(pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.trend} (BTC $${Math.round((pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.btcPrice || 0).toLocaleString('en-US')} vs EMA50 $${Math.round((pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.ema || 0).toLocaleString('en-US')} | TF 1h)`
+            : 'TIDAK DIKETAHUI',
         },
         marketSnapshot: pos.marketSnapshot,
         peakPnlPct: pos.peakPnlPct,
@@ -4846,7 +4863,7 @@ export class WickSniperEngine {
         targetTp2Price: pos.targetTp2Price,
         hardSlPrice: pos.hardSlPrice,
         partialTpDone: pos.partialTpDone || false,
-        btcTrendStatus: pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus,
+        btcTrendStatus: pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus() || undefined,
         fundingRatePct: pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct,
         rsi15m: pos.rsi15m ?? pos.paramsSnapshot?.rsi15m,
       };
