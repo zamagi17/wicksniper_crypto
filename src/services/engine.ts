@@ -1289,7 +1289,7 @@ export class WickSniperEngine {
 
       // Filter Konfirmasi Ekor Atas / Pullback Mikro (Mencegah Monster Pump Runaway)
       let confirmedEntryPrice = alert.currentPrice;
-      if (this.config.scanner?.upperWickPullbackEnabled) {
+      if (!alert.isExhaustion && this.config.scanner?.upperWickPullbackEnabled) {
         const minPullbackPct = this.config.scanner.upperWickPullbackMinPct ?? 0.3;
         const maxWaitSec = this.config.scanner.upperWickPullbackMaxWaitSeconds ?? 5;
         const waitStartTime = Date.now();
