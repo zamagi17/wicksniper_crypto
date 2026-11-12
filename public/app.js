@@ -1850,6 +1850,11 @@ function updateRadarSimSummaryUI(stats) {
   if (missedEl) missedEl.innerText = `${missed} Koin`;
   if (rateEl) rateEl.innerText = `${rate}%`;
   if (activeEl) activeEl.innerText = `${active} Koin`;
+  const subEl = document.getElementById('sim-active-sub');
+  if (subEl) {
+    const maxHold = currentBotConfig?.exit?.maxHoldMinutes || 45;
+    subEl.innerText = `Pemantauan Maks ${maxHold} Menit`;
+  }
 }
 
 function updateRadarPaginationUI() {
@@ -2167,6 +2172,7 @@ function openSpikeSimModal(spikeId) {
   const realPnlVal = Number(sim.simulatedRealizedPnl || 0);
   const realPnlStr = `${realPnlVal >= 0 ? '+' : ''}$${realPnlVal.toFixed(2)} USDT`;
 
+  const maxHoldMins = sim.maxHoldMinutes || params.maxHoldMinutes || currentBotConfig?.exit?.maxHoldMinutes || 45;
   let outcomeClass = 'tracking';
   let outcomeTitle = '⏳ Simulasi Pemantauan Sedang Berjalan';
   let bannerClass = 'tracking';
@@ -2176,25 +2182,27 @@ function openSpikeSimModal(spikeId) {
     outcomeClass = 'saved';
     outcomeTitle = `🛡️ Penyelamatan Modal Sukses (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'saved';
-    bannerText = `<b>🛡️ Filter Berhasil Melindungi Modal!</b><br>
-    Setelah lonjakan ditolak, harga melonjak dan mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> hingga menembus batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}).<br>
-    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian riil <b>${realPnlStr} (${pnlStr})</b>.`;
+    bannerText = `<b>🛡️ Filter Berhasil Melindungi Modal! (Tembus SL di Menit ke-${sim.durationMinutes || 1})</b><br>
+    Setelah lonjakan ditolak, harga melonjak dan mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> hingga menembus batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}) dalam <b>${sim.durationMinutes || 1} menit</b>.<br>
+    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian riil <b>${realPnlStr} (${pnlStr})</b>.<br>
+    <small style="color: var(--text-muted); font-size: 11px;">ℹ️ Batas toleransi hold trading riil adalah <b>${maxHoldMins} menit</b>.</small>`;
   } else if (sim.outcome === 'MISSED_TP') {
     outcomeClass = 'missed';
     outcomeTitle = `💸 Peluang Profit Terlewat (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'missed';
-    bannerText = `<b>💸 Peluang Profit Terlewat!</b><br>
-    Posisi hipotetis menyerap <b>${layersFilled}/${totalLayers} layer jaring</b> dan sukses berbalik arah menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) tanpa terkena Stop Loss.<br>
-    Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${realPnlStr} (${pnlStr})</b>.`;
+    bannerText = `<b>💸 Peluang Profit Terlewat! (Kena TP Cepat di Menit ke-${sim.durationMinutes || 1})</b><br>
+    Posisi hipotetis menyerap <b>${layersFilled}/${totalLayers} layer jaring</b> dan langsung berbalik arah menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) dalam waktu <b>${sim.durationMinutes || 1} menit</b>.<br>
+    Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${realPnlStr} (${pnlStr})</b>.<br>
+    <small style="color: var(--text-muted); font-size: 11px;">ℹ️ Sama seperti trading riil, saat target TP tercapai, posisi otomatis ditutup sukses seketika (tidak perlu ditahan hingga batas maksimal <b>${maxHoldMins} menit</b>).</small>`;
   } else if (sim.outcome === 'TIMEOUT') {
     outcomeClass = 'timeout';
     outcomeTitle = `⏱️ Batas Waktu Tercapai (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'timeout';
-    bannerText = `<b>⏱️ Pemantauan Selesai Tanpa Kena TP/SL</b><br>
-    Selama durasi pengamatan (${sim.durationMinutes || 30} menit), harga bergerak konsolidasi setelah mengisi <b>${layersFilled}/${totalLayers} layer jaring</b>. Estimasi PnL mengambang di akhir pengamatan adalah <b>${realPnlStr} (${pnlStr})</b>.`;
+    bannerText = `<b>⏱️ Pemantauan Selesai (${maxHoldMins} Menit Penuh) Tanpa Kena TP/SL</b><br>
+    Selama durasi pengamatan maksimal (<b>${maxHoldMins} menit</b>), harga bergerak konsolidasi setelah mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> tanpa menyentuh TP maupun SL. Estimasi PnL mengambang di akhir pengamatan adalah <b>${realPnlStr} (${pnlStr})</b>.`;
   } else {
     bannerText = `<b>⏳ Simulasi Jaring Real-Time Sedang Berlangsung</b><br>
-    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} menit</b> | <b>${layersFilled}/${totalLayers} layer terisi</b>). PnL mengambang saat ini: <b>${pnlStr}</b>.`;
+    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} / ${maxHoldMins} menit</b> | <b>${layersFilled}/${totalLayers} layer terisi</b>). PnL mengambang saat ini: <b>${pnlStr}</b>.`;
   }
 
   if (titleEl) titleEl.innerText = `🔬 Simulasi Koin Ditolak: ${s.symbol}`;
@@ -2285,9 +2293,16 @@ function openSpikeSimModal(spikeId) {
         </div>
       </div>
       <div class="td-pe-stat">
-        <div class="pe-label">Durasi Pengamatan</div>
+        <div class="pe-label">Waktu Selesai (Ke Target)</div>
         <div class="pe-val" style="font-size: 13px; color: var(--color-cyan);">
           ${sim.durationMinutes || 0} Menit
+          <small class="pe-diff" style="color: var(--text-muted);">(Maks ${maxHoldMins}m)</small>
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Batas Waktu Pengamatan</div>
+        <div class="pe-val" style="font-size: 13px; color: var(--text-main);">
+          ${maxHoldMins} Menit <small style="font-size: 10px; color: var(--text-muted);">(Max Hold)</small>
         </div>
       </div>
       <div class="td-pe-stat">

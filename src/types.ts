@@ -470,6 +470,7 @@ export interface SpikeSimResult {
   outcome: 'SAVED_SL' | 'MISSED_TP' | 'TIMEOUT' | 'TRACKING';
   simulatedPnlPct: number;
   durationMinutes: number;
+  maxHoldMinutes?: number;
   isComplete: boolean;
   updatedAt: number;
   layersFilled?: number;

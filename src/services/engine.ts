@@ -941,6 +941,7 @@ export class WickSniperEngine {
         outcome: 'TRACKING',
         simulatedPnlPct: 0,
         durationMinutes: 0,
+        maxHoldMinutes: this.config.exit?.maxHoldMinutes || 45,
         isComplete: false,
         updatedAt: Date.now(),
         layersFilled: 1,
@@ -6651,7 +6652,8 @@ export class WickSniperEngine {
   private updateActiveSimSpikes(): void {
     if (this.activeSimSpikes.size === 0) return;
     const now = Date.now();
-    const maxHoldMs = (this.config.exit?.maxHoldMinutes || 30) * 60_000;
+    const maxHoldMinutes = this.config.exit?.maxHoldMinutes || 45;
+    const maxHoldMs = maxHoldMinutes * 60_000;
 
     for (const [id, alert] of this.activeSimSpikes.entries()) {
       if (!alert.simResult || alert.simResult.isComplete) {
@@ -6800,12 +6802,13 @@ export class WickSniperEngine {
   }
 
   /**
-   * Memeriksa simulasi spike yang belum selesai setelah 30 menit (misal bot baru restart)
+   * Memeriksa simulasi spike yang belum selesai setelah batas maxHoldMinutes (misal bot baru restart)
    */
   public async checkPendingSpikeSimulations(): Promise<void> {
     const now = Date.now();
+    const maxHoldMinutes = this.config.exit?.maxHoldMinutes || 45;
     const spikesToCheck = this.scanner.getRecentSpikes().filter(
-      (s) => s.status === 'SKIPPED' && s.simResult && !s.simResult.isComplete && now - s.timestamp >= 30 * 60_000
+      (s) => s.status === 'SKIPPED' && s.simResult && !s.simResult.isComplete && now - s.timestamp >= maxHoldMinutes * 60_000
     );
 
     if (spikesToCheck.length === 0) return;
@@ -6825,13 +6828,14 @@ export class WickSniperEngine {
     if (sim.hypotheticalEntryPrice <= 0) return sim;
 
     try {
+      const maxHoldMinutes = sim.maxHoldMinutes || this.config.exit?.maxHoldMinutes || 45;
       const client = await binanceFutures.getHttpClient();
       const res = await client.get('/fapi/v1/klines', {
         params: {
           symbol: spike.symbol,
           interval: '1m',
           startTime: spike.timestamp,
-          limit: 30,
+          limit: Math.min(100, Math.max(30, maxHoldMinutes)),
         },
         timeout: 3500,
       });
@@ -6937,7 +6941,7 @@ export class WickSniperEngine {
 
       const now = Date.now();
       const minutesSinceSpike = (now - spike.timestamp) / 60_000;
-      const isComplete = outcome !== 'TRACKING' || (minutesSinceSpike >= 30 && res.data.length >= 29);
+      const isComplete = outcome !== 'TRACKING' || (minutesSinceSpike >= maxHoldMinutes && res.data.length >= (maxHoldMinutes - 1));
 
       if (outcome === 'TRACKING' && isComplete) {
         outcome = 'TIMEOUT';
@@ -6952,6 +6956,7 @@ export class WickSniperEngine {
       sim.outcome = outcome;
       sim.simulatedPnlPct = simulatedPnlPct;
       sim.durationMinutes = hitMinute;
+      sim.maxHoldMinutes = maxHoldMinutes;
       sim.isComplete = isComplete;
       sim.updatedAt = now;
 
