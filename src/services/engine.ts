@@ -529,7 +529,7 @@ export class WickSniperEngine {
     if (this.config.smartMoney) {
       this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
       if (this.isRunning) {
-        if (this.config.triggerStrategy === 'SMART_MONEY' || this.config.triggerStrategy === 'HYBRID' || this.config.smartMoney.enabled) {
+        if (this.config.triggerStrategy === 'SMART_MONEY' || this.config.triggerStrategy === 'HYBRID') {
           this.smartMoneyScanner.start();
         } else {
           this.smartMoneyScanner.stop();
@@ -689,7 +689,7 @@ export class WickSniperEngine {
     if (strat !== 'SMART_MONEY') {
       this.scanner.start();
     }
-    if (strat === 'SMART_MONEY' || strat === 'HYBRID' || this.config.smartMoney?.enabled) {
+    if (strat === 'SMART_MONEY' || strat === 'HYBRID') {
       this.smartMoneyScanner.start();
     }
 
