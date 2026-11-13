@@ -139,6 +139,10 @@ Bot tidak mengandalkan satu pengaman saja, melainkan memiliki 5 lapis benteng ot
 | **Kenaikan Aritmatika Per Layer (%)** | `25` | Persentase penambahan modal per level layer (+25% per tangga). |
 | **Plafon Margin Per Layer (USDT)** | `55` | Batas modal maksimal yang boleh dialokasikan pada satu baris layer tunggal. |
 | **Pasang Seluruh Jaring Sekaligus** | `Centang (Aktif)` | Menebar seluruh limit order ke orderbook Binance secara instan (Gaya Leader). |
+| **Minimal Rasio Volume 1m (`minVolRatio`)** | `0.8 - 1.0` | Menyaring *thin-book drift* (koin volume tipis/kering) agar bot tidak short pada pergerakan palsu. |
+| **Maksimal Rasio Volume Breakout (`maxVolRatio`)** | `15.0 - 20.0` | Menghindari roket breakout bervolume masif (seperti AINUSDT 51.8x) yang sangat berbahaya dilawan dengan SHORT. |
+| **Exit Ladder (Cicil Keluar Bertahap)** | `Centang (Aktif)` | Membagi exit posisi menjadi N tangga (default 4 tangga @ 25%). Tangga 1 langsung mengunci cuan, membatalkan sisa DCA pending, dan menggeser SL ke BEP (risk-free). Tangga berikutnya memburu profit ekstra. |
+| **Jumlah Tangga Exit (`ladderSteps`)** | `4` | Jumlah fraksi tangga cicil keluar (2, 3, 4, 5, atau 6 tangga). |
 
 ### B. Tab: Risk & Saldo
 

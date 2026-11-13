@@ -1932,6 +1932,31 @@
               </div>
             </div>
           </div>
+
+          <!-- LADDER EXIT (CICIL KELUAR BERTAHAP) WICK SNIPER -->
+          <div class="form-row" style="background: rgba(48, 209, 88, 0.04); border: 1px dashed rgba(48, 209, 88, 0.35); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+            <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #30d158;">
+                <input type="checkbox" id="cfg-ladder-exit-enabled" onchange="toggleLadderExitInput()" style="width: 16px; height: 16px; accent-color: #30d158;">
+                🪜 Aktifkan Exit Ladder (Cicil Keluar Bertahap / Anti-Kaku) <span class="badge-tag badge-shared">⚡ Dynamic Unwinding</span>
+              </label>
+              <small class="form-hint">Membagi volume posisi menjadi N tangga (default 4 tangga @ 25%). Begitu tangga 1 menyentuh target cuan awal, bot mencairkan 25%, <b>otomatis membatalkan sisa limit jaring pending, dan menggeser SL ke BEP (risk-free)</b>. Tangga berikutnya mencairkan profit lebih dalam, dan tangga terakhir memburu trailing runner!</small>
+            </div>
+
+            <div id="ladder-exit-params-group" style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 160px;">
+                <label>Jumlah Tangga Exit (Steps)</label>
+                <select id="cfg-ladder-steps" class="form-control">
+                  <option value="2">2 Tangga (50% / 50%)</option>
+                  <option value="3">3 Tangga (33% / 33% / 34%)</option>
+                  <option value="4" selected>4 Tangga (25% per tangga - Standar Leader)</option>
+                  <option value="5">5 Tangga (20% per tangga)</option>
+                  <option value="6">6 Tangga (16.6% per tangga)</option>
+                </select>
+                <small class="form-hint">Rekomendasi: 4 tangga untuk kombinasi mengunci cuan cepat dan meraih profit ekstra.</small>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ============================================================== -->

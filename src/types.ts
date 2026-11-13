@@ -92,6 +92,8 @@ export interface BotConfig {
     hardStopCooldownMinutes?: number;
     partialTpEnabled?: boolean;
     partialTpRatio?: number; // default 0.5 (50%)
+    ladderExitEnabled?: boolean; // Cicil keluar bertahap saat retrace profit (Wick Sniper)
+    ladderSteps?: number;        // Jumlah tangga cicil keluar (2, 3, 4, 5, 6 tangga; default 4)
     bepDefenseEnabled?: boolean;
     bepFinalLayerEnabled?: boolean;
     bepMaxLayersTrigger?: number;

@@ -1420,8 +1420,8 @@ function renderActivePositions(positions) {
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
-      if (isSm && pos.ladderStepIndex && pos.ladderStepIndex > 0) {
-        const totalLadderSteps = pos.paramsSnapshot?.ladderSteps ?? currentConfig?.smartMoney?.ladderSteps ?? 4;
+      if (pos.ladderStepIndex && pos.ladderStepIndex > 0) {
+        const totalLadderSteps = pos.paramsSnapshot?.ladderSteps ?? (isSm ? currentConfig?.smartMoney?.ladderSteps : currentConfig?.exit?.ladderSteps) ?? 4;
         const currentStep = pos.ladderStepIndex;
         tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 TANGGA ${currentStep}/${totalLadderSteps} HIT • 🛡️ AUTO BEP AKTIF</span>`;
         tpBannerHtml = `
@@ -4168,6 +4168,14 @@ function populateSettingsForm(cfg) {
   setVal('cfg-partial-tp-ratio', cfg.exit?.partialTpRatio ? Math.round(cfg.exit.partialTpRatio * 100) : 65);
   if (typeof updateTpPortionHint === 'function') updateTpPortionHint();
 
+  // Exit Ladder (Cicil Keluar Bertahap) Wick Sniper
+  const ladderCb = document.getElementById('cfg-ladder-exit-enabled');
+  if (ladderCb) {
+    ladderCb.checked = !!cfg.exit?.ladderExitEnabled;
+    if (typeof toggleLadderExitInput === 'function') toggleLadderExitInput();
+  }
+  setVal('cfg-ladder-steps', cfg.exit?.ladderSteps ?? 4);
+
   // Total Floating Profit Target (Portfolio TP)
   const portTpCheckbox = document.getElementById('cfg-portfolio-tp-enabled');
   if (portTpCheckbox) {
@@ -4617,6 +4625,8 @@ function getSettingsFormData() {
       takeProfit2Pct: parseFloat(getVal('cfg-tp2-pct', '2.4')) || 2.4,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '70')) || 70) / 100,
+      ladderExitEnabled: !!document.getElementById('cfg-ladder-exit-enabled')?.checked,
+      ladderSteps: parseInt(getVal('cfg-ladder-steps', '4'), 10) || 4,
       portfolioTpEnabled: document.getElementById('cfg-portfolio-tp-enabled') ? !!document.getElementById('cfg-portfolio-tp-enabled').checked : true,
       portfolioTpTargetPct: parseFloat(getVal('cfg-portfolio-tp-target', '10.0')) || 10.0,
       portfolioTpMinProfitPct: parseFloat(getVal('cfg-portfolio-tp-min-profit', '0.5')) || 0.5,
@@ -5137,6 +5147,15 @@ function togglePartialTpInput() {
   }
 }
 window.togglePartialTpInput = togglePartialTpInput;
+
+function toggleLadderExitInput() {
+  const checkbox = document.getElementById('cfg-ladder-exit-enabled');
+  const group = document.getElementById('ladder-exit-params-group');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleLadderExitInput = toggleLadderExitInput;
 
 function updateTpPortionHint() {
   const ratioInput = document.getElementById('cfg-partial-tp-ratio');
