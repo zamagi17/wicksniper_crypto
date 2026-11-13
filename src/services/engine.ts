@@ -2554,13 +2554,9 @@ export class WickSniperEngine {
         if (isLadderLong) {
           const totalSteps = isSmLong
             ? Math.max(2, Math.min(6, smCfg.ladderSteps || 4))
-            : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 4));
+            : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 3));
           const currentStep = (pos.ladderStepIndex || 0) + 1;
-          const baseTpPct = isSmLong
-            ? (smCfg.takeProfitPct || 1.4)
-            : (this.config.momentumLong?.takeProfitPct ?? this.config.exit?.takeProfitPct ?? 1.6);
-          const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((currentStep - 1) / (totalSteps - 1)) * 1.0);
-          const stepTargetPrice = pos.avgEntryPrice * (1 + (baseTpPct * stepMult) / 100);
+          const stepTargetPrice = this.getLadderTargetPrice(pos, currentStep, totalSteps);
           pos.targetTpPrice = stepTargetPrice;
 
           const ladderAgeMs = pos.lastLadderStepAt ? (Date.now() - pos.lastLadderStepAt) : slAgeMs;
@@ -2729,13 +2725,9 @@ export class WickSniperEngine {
         if (isLadderShort) {
           const totalSteps = isSmPos
             ? Math.max(2, Math.min(6, smCfg.ladderSteps || 4))
-            : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 4));
+            : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 3));
           const currentStep = (pos.ladderStepIndex || 0) + 1;
-          const baseTpPct = isSmPos
-            ? (smCfg.takeProfitPct || 1.4)
-            : (this.config.exit?.takeProfitPct || 1.6);
-          const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((currentStep - 1) / (totalSteps - 1)) * 1.0);
-          const stepTargetPrice = pos.avgEntryPrice * (1 - (baseTpPct * stepMult) / 100);
+          const stepTargetPrice = this.getLadderTargetPrice(pos, currentStep, totalSteps);
           pos.targetTpPrice = stepTargetPrice;
 
           const ladderAgeMs = pos.lastLadderStepAt ? (Date.now() - pos.lastLadderStepAt) : tradeAgeMs;
@@ -3086,19 +3078,9 @@ export class WickSniperEngine {
     }
 
     if (exitCfg.ladderExitEnabled) {
-      const isLong = pos.side === 'LONG';
-      const totalSteps = Math.max(2, Math.min(6, exitCfg.ladderSteps || 4));
+      const totalSteps = Math.max(2, Math.min(6, exitCfg.ladderSteps || 3));
       const currentStep = Math.min(totalSteps, (pos.ladderStepIndex || 0) + 1);
-      const baseTpPct = exitCfg.takeProfitPct || 1.6;
-      const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((currentStep - 1) / (totalSteps - 1)) * 1.0);
-      const ladderTarget = parseFloat(
-        binanceFutures.formatPrice(
-          pos.symbol,
-          isLong
-            ? pos.avgEntryPrice * (1 + (baseTpPct * stepMult) / 100)
-            : pos.avgEntryPrice * (1 - (baseTpPct * stepMult) / 100)
-        )
-      );
+      const ladderTarget = this.getLadderTargetPrice(pos, currentStep, totalSteps);
       return { targetTpPrice: ladderTarget, targetTp2Price: ladderTarget, isBepActive: false };
     }
 
@@ -3378,6 +3360,57 @@ export class WickSniperEngine {
   }
 
   /**
+   * Menghitung target harga per tangga untuk Exit Ladder (mendukung Model Emas 3-Tier & 4-Tier)
+   */
+  public getLadderTargetPrice(pos: ActivePosition, step: number, totalSteps: number): number {
+    const isLong = pos.side === 'LONG';
+    const isSm = pos.strategyType === 'SMART_MONEY';
+    const exitCfg = this.config.exit;
+    const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
+
+    if (isSm) {
+      const baseTpPct = smCfg.takeProfitPct || 1.4;
+      const stepMult = totalSteps === 1 ? 1.0 : (0.5 + ((step - 1) / (totalSteps - 1)) * 1.0);
+      const targetPct = baseTpPct * stepMult;
+      return parseFloat(
+        binanceFutures.formatPrice(
+          pos.symbol,
+          isLong ? pos.avgEntryPrice * (1 + targetPct / 100) : pos.avgEntryPrice * (1 - targetPct / 100)
+        )
+      );
+    }
+
+    // WICK SNIPER ASYMMETRIC LADDER (Model Emas 3-Tier & 4-Tier)
+    const tp1Pct = exitCfg?.takeProfitPct ?? 1.3;
+    const tp2Pct = exitCfg?.takeProfit2Pct ?? 2.4;
+    const tp3Pct = exitCfg?.takeProfit3Pct ?? 4.5;
+
+    let targetPct: number;
+    if (totalSteps === 3) {
+      // 3 Tangga Emas: TP1 (1.3%) -> TP2 (2.4%) -> TP3 (4.5% / Runner)
+      if (step === 1) targetPct = tp1Pct;
+      else if (step === 2) targetPct = tp2Pct;
+      else targetPct = tp3Pct;
+    } else if (totalSteps === 4) {
+      // 4 Tangga: TP1 (1.2%) -> TP2 (2.0%) -> TP3 (3.1%) -> TP4 (4.5% / Runner)
+      if (step === 1) targetPct = tp1Pct * 0.92;
+      else if (step === 2) targetPct = tp1Pct + (tp2Pct - tp1Pct) * 0.6;
+      else if (step === 3) targetPct = tp2Pct * 1.3;
+      else targetPct = tp3Pct;
+    } else {
+      const stepMult = totalSteps === 1 ? 1.0 : (0.7 + ((step - 1) / (totalSteps - 1)) * 1.3);
+      targetPct = tp1Pct * stepMult;
+    }
+
+    return parseFloat(
+      binanceFutures.formatPrice(
+        pos.symbol,
+        isLong ? pos.avgEntryPrice * (1 + targetPct / 100) : pos.avgEntryPrice * (1 - targetPct / 100)
+      )
+    );
+  }
+
+  /**
    * Eksekusi Ladder Unwinding (Cicil Keluar Bertahap) untuk Smart Money Micro-Grid DCA
    * Membagi volume posisi menjadi N tangga (default 4 tangga @ 25%), merealisasikan cuan bertahap,
    * mengunci BEP risk-free pada tangga pertama, dan membatalkan sisa pending layer DCA.
@@ -3413,7 +3446,19 @@ export class WickSniperEngine {
       sliceQty = pos.totalQty;
       remainingQty = 0;
     } else {
-      const idealSlice = pos.ladderInitialQty / totalSteps;
+      const isSm = pos.strategyType === 'SMART_MONEY';
+      let idealSlice: number;
+      if (!isSm && totalSteps === 3) {
+        // Model Emas 3-Tier: Tangga 1 = 50%, Tangga 2 = 30%, Tangga 3 = 20% (sisa 100%)
+        const ratio = stepIndex === 1 ? 0.50 : 0.30;
+        idealSlice = pos.ladderInitialQty * ratio;
+      } else if (!isSm && totalSteps === 4) {
+        // Model 4-Tier: Tangga 1 = 40%, Tangga 2 = 25%, Tangga 3 = 20%, Tangga 4 = 15% (sisa 100%)
+        const ratio = stepIndex === 1 ? 0.40 : stepIndex === 2 ? 0.25 : 0.20;
+        idealSlice = pos.ladderInitialQty * ratio;
+      } else {
+        idealSlice = pos.ladderInitialQty / totalSteps;
+      }
       const formattedSlice = parseFloat(binanceFutures.formatQty(pos.symbol, idealSlice));
       sliceQty = Math.min(pos.totalQty, formattedSlice);
       remainingQty = parseFloat(binanceFutures.formatQty(pos.symbol, Math.max(0, pos.totalQty - sliceQty)));
@@ -4245,6 +4290,7 @@ export class WickSniperEngine {
       // Exit & Protection
       takeProfitPct: this.config.exit?.takeProfitPct,
       takeProfit2Pct: this.config.exit?.takeProfit2Pct,
+      takeProfit3Pct: this.config.exit?.takeProfit3Pct,
       trailingTpEnabled: this.config.exit?.trailingTpEnabled,
       trailingCallbackPct: this.config.exit?.trailingCallbackPct,
       hardStopLossPct: this.config.exit?.hardStopLossPct,

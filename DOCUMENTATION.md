@@ -141,8 +141,9 @@ Bot tidak mengandalkan satu pengaman saja, melainkan memiliki 5 lapis benteng ot
 | **Pasang Seluruh Jaring Sekaligus** | `Centang (Aktif)` | Menebar seluruh limit order ke orderbook Binance secara instan (Gaya Leader). |
 | **Minimal Rasio Volume 1m (`minVolRatio`)** | `0.8 - 1.0` | Menyaring *thin-book drift* (koin volume tipis/kering) agar bot tidak short pada pergerakan palsu. |
 | **Maksimal Rasio Volume Breakout (`maxVolRatio`)** | `15.0 - 20.0` | Menghindari roket breakout bervolume masif (seperti AINUSDT 51.8x) yang sangat berbahaya dilawan dengan SHORT. |
-| **Exit Ladder (Cicil Keluar Bertahap)** | `Centang (Aktif)` | Membagi exit posisi menjadi N tangga (default 4 tangga @ 25%). Tangga 1 langsung mengunci cuan, membatalkan sisa DCA pending, dan menggeser SL ke BEP (risk-free). Tangga berikutnya memburu profit ekstra. |
-| **Jumlah Tangga Exit (`ladderSteps`)** | `4` | Jumlah fraksi tangga cicil keluar (2, 3, 4, 5, atau 6 tangga). |
+| **Exit Ladder (Cicil Keluar Bertahap)** | `Centang (Aktif)` | Membagi exit posisi menjadi beberapa tangga asimetris cerdas. Tangga 1 langsung mengunci cuan awal, membatalkan sisa limit jaring pending, dan menggeser SL ke BEP (risk-free). Tangga berikutnya memburu profit ekstra. |
+| **Model Tangga Exit (`ladderSteps`)** | `3 Tangga (Emas)` | **3 Tangga (Rekomendasi Terbaik):** 50% @ 1.3% (Kunci BEP) ➜ 30% @ 2.4% (Core Scalp) ➜ 20% @ 4.5% (Trailing Dump Runner).<br>**4 Tangga (Luas):** 40% @ 1.2% (Kunci BEP) ➜ 25% @ 2.0% ➜ 20% @ 3.1% ➜ 15% @ 4.5% (Trailing Dump Runner). |
+| **Target TP Tangga 3 / Runner (`takeProfit3Pct`)** | `4.5` | Target persentase penurunan harga untuk menangkap koreksi dump dalam pasca-pompa koin. |
 
 ### B. Tab: Risk & Saldo
 

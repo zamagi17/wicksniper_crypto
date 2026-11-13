@@ -70,6 +70,7 @@ export interface BotConfig {
   exit: {
     takeProfitPct: number;
     takeProfit2Pct?: number;
+    takeProfit3Pct?: number;
     trailingTpEnabled: boolean;
     trailingCallbackPct: number;
     hardStopLossPct: number;

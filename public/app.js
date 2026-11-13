@@ -4174,7 +4174,9 @@ function populateSettingsForm(cfg) {
     ladderCb.checked = !!cfg.exit?.ladderExitEnabled;
     if (typeof toggleLadderExitInput === 'function') toggleLadderExitInput();
   }
-  setVal('cfg-ladder-steps', cfg.exit?.ladderSteps ?? 4);
+  setVal('cfg-ladder-steps', cfg.exit?.ladderSteps ?? 3);
+  setVal('cfg-tp3-pct', cfg.exit?.takeProfit3Pct ?? 4.5);
+  if (typeof updateLadderStepsDescription === 'function') updateLadderStepsDescription();
 
   // Total Floating Profit Target (Portfolio TP)
   const portTpCheckbox = document.getElementById('cfg-portfolio-tp-enabled');
@@ -4623,10 +4625,11 @@ function getSettingsFormData() {
       bepBufferPct: parseFloat(getVal('cfg-bep-buffer-pct', '0.08')) || 0.08,
       bepCooldownMinutes: parseInt(getVal('cfg-bep-cooldown', '15'), 10) || 15,
       takeProfit2Pct: parseFloat(getVal('cfg-tp2-pct', '2.4')) || 2.4,
+      takeProfit3Pct: parseFloat(getVal('cfg-tp3-pct', '4.5')) || 4.5,
       partialTpEnabled: !!document.getElementById('cfg-partial-tp-enabled')?.checked,
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '70')) || 70) / 100,
       ladderExitEnabled: !!document.getElementById('cfg-ladder-exit-enabled')?.checked,
-      ladderSteps: parseInt(getVal('cfg-ladder-steps', '4'), 10) || 4,
+      ladderSteps: parseInt(getVal('cfg-ladder-steps', '3'), 10) || 3,
       portfolioTpEnabled: document.getElementById('cfg-portfolio-tp-enabled') ? !!document.getElementById('cfg-portfolio-tp-enabled').checked : true,
       portfolioTpTargetPct: parseFloat(getVal('cfg-portfolio-tp-target', '10.0')) || 10.0,
       portfolioTpMinProfitPct: parseFloat(getVal('cfg-portfolio-tp-min-profit', '0.5')) || 0.5,
@@ -5156,6 +5159,20 @@ function toggleLadderExitInput() {
   }
 }
 window.toggleLadderExitInput = toggleLadderExitInput;
+
+function updateLadderStepsDescription() {
+  const stepsVal = document.getElementById('cfg-ladder-steps')?.value;
+  const hint = document.getElementById('ladder-steps-hint');
+  if (!hint) return;
+  if (stepsVal === '3') {
+    hint.textContent = 'Rekomendasi Terbaik: 3 Tangga Emas (50% @ 1.3% kunci BEP, 30% @ 2.4% core scalp, 20% @ 4.5% buru dump besar).';
+  } else if (stepsVal === '4') {
+    hint.textContent = '4 Tangga Luas: 40% @ 1.2% kunci BEP, 25% @ 2.0%, 20% @ 3.1%, 15% @ 4.5% buru dump besar.';
+  } else {
+    hint.textContent = '2 Tangga Simpel: 50% @ 1.3% kunci BEP, 50% @ 2.4% target akhir.';
+  }
+}
+window.updateLadderStepsDescription = updateLadderStepsDescription;
 
 function updateTpPortionHint() {
   const ratioInput = document.getElementById('cfg-partial-tp-ratio');
