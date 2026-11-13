@@ -1349,6 +1349,38 @@
             </div>
           </div>
 
+          <!-- RASIO VOLUME 1M LONJAKAN (MIN & MAX VOL RATIO) -->
+          <div class="form-row" style="background: rgba(168, 85, 247, 0.05); border: 1px dashed rgba(168, 85, 247, 0.35); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+            <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #c084fc; font-size: 13.5px;">
+                📊 Filter Rasio Volume 1m Lonjakan (minVolRatio & maxVolRatio) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
+              </label>
+              <small class="form-hint" style="color: #94a3b8;">Menyaring lonjakan semu koin sepi (thin-book drift) dan melindungi modal dari roket breakout volume paus masif.</small>
+            </div>
+            <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 170px;">
+                <label style="font-weight: 600; color: #e2e8f0;">Minimal Rasio Volume 1m (minVolRatio)</label>
+                <input type="number" id="cfg-min-vol-ratio" min="0" max="10" step="0.1" class="form-control" placeholder="0.8">
+                <small class="form-hint">Saran: <b>0.8 – 1.0x</b>. Tolak koin volume tipis (0.3x/0.7x). Isi 0 untuk nonaktif.</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Cooldown Volume Tipis (Menit)</label>
+                <input type="number" id="cfg-min-vol-ratio-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="5">
+                <small class="form-hint">Jeda blacklist koin sepi</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 170px;">
+                <label style="font-weight: 600; color: #e2e8f0;">Maksimal Rasio Volume 1m (maxVolRatio)</label>
+                <input type="number" id="cfg-max-vol-ratio" min="0" max="100" step="1" class="form-control" placeholder="15.0">
+                <small class="form-hint">Saran: <b>15.0 – 20.0x</b>. Cegah SHORT saat roket volume gila (51.8x). Isi 0 untuk nonaktif.</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Cooldown Breakout (Menit)</label>
+                <input type="number" id="cfg-max-vol-ratio-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
+                <small class="form-hint">Jeda koin monster pump</small>
+              </div>
+            </div>
+          </div>
+
           <!-- EMA TREND & QUALITY SCORING -->
           <div class="form-row" style="background: rgba(117, 108, 255, 0.04); border: 1px dashed rgba(117, 108, 255, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
             <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
@@ -1545,11 +1577,11 @@
             </div>
           </div>
 
-          <!-- RSI 1M MINIMUM & VOLUME RATIOS -->
+          <!-- RSI 1M MINIMUM -->
           <div class="form-row" style="background: rgba(168, 85, 247, 0.04); border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
             <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
               <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #c084fc;">
-                📊 Filter RSI 1m Minimum & Rasio Volume 1m (Min / Maks) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
+                📊 Filter RSI 1m Minimum <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
               </label>
             </div>
             <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
@@ -1560,22 +1592,6 @@
               <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label>Cooldown RSI Rendah (Menit)</label>
                 <input type="number" id="cfg-min-rsi-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
-              </div>
-              <div class="form-group" style="flex: 1; min-width: 160px;">
-                <label>Minimal Rasio Volume 1m (x)</label>
-                <input type="number" id="cfg-min-vol-ratio" min="0" max="10" step="0.1" class="form-control" placeholder="1.0">
-              </div>
-              <div class="form-group" style="flex: 1; min-width: 140px;">
-                <label>Cooldown Volume Tipis (Menit)</label>
-                <input type="number" id="cfg-min-vol-ratio-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="5">
-              </div>
-              <div class="form-group" style="flex: 1; min-width: 160px;">
-                <label>Maksimal Rasio Volume Breakout (x)</label>
-                <input type="number" id="cfg-max-vol-ratio" min="0" max="100" step="1" class="form-control" placeholder="20.0">
-              </div>
-              <div class="form-group" style="flex: 1; min-width: 140px;">
-                <label>Cooldown Volume Breakout (Menit)</label>
-                <input type="number" id="cfg-max-vol-ratio-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
               </div>
             </div>
           </div>
