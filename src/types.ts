@@ -364,6 +364,7 @@ export interface SmartMoneySignal {
   rsi15m?: number;
   fundingRatePct?: number;
   vol24hUsdt?: number;
+  priceChange24hPct?: number;
   timestamp: number;
   status: 'PENDING' | 'EXECUTING' | 'SKIPPED' | 'COOLING_DOWN';
   reason?: string;
@@ -498,6 +499,7 @@ export interface SpikeAlert {
   simResult?: SpikeSimResult;
   isExhaustion?: boolean;
   exhaustionDetail?: string;
+  priceChange24hPct?: number;
 }
 
 export interface MarketSnapshot {
@@ -599,6 +601,7 @@ export interface ActivePosition {
   rsi15m?: number;
   entryTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   entryBtcPrice?: number;
+  priceChange24hPct?: number; // Perubahan harga 24 jam saat entry (%)
 }
 
 export interface SmartMoneyFlowStatus {
@@ -694,6 +697,7 @@ export interface ClosedTrade {
   };
   fundingRatePct?: number;
   rsi15m?: number;
+  priceChange24hPct?: number; // Perubahan harga 24 jam saat entry (%)
 }
 
 export interface EngineStatus {

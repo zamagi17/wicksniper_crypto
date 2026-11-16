@@ -218,12 +218,17 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       ? `\n🛡️ <b>Adaptasi Vol Rendah:</b> 24h Vol $${((pos.paramsSnapshot.vol24hUsdt || 0) / 1e6).toFixed(1)}M < $${((pos.paramsSnapshot.lowVolumeThresholdUsdt || 20000000) / 1e6).toFixed(0)}M (Margin ÷${pos.paramsSnapshot.lowVolumeMarginDivisor || 2}, SL ${pos.paramsSnapshot.lowVolumeSlMultiplier || pos.paramsSnapshot.lowVolumeSlTpMultiplier || 2}x, TP ${pos.paramsSnapshot.lowVolumeTpMultiplier || 1}x)`
       : '';
 
+    const chg24Val = pos.priceChange24hPct ?? pos.marketSnapshot?.priceChange24hPct ?? pos.paramsSnapshot?.priceChange24hPct;
+    const chg24Line = (chg24Val !== undefined && chg24Val !== null)
+      ? `\n📈 <b>Perubahan 24 Jam (Entry):</b> <b>${Number(chg24Val) >= 0 ? '+' : ''}${Number(chg24Val).toFixed(2)}%</b>`
+      : '';
+
     const msg =
 `🚀 <b>[ORDER BARU DITERBITKAN]</b> 🎯
 
 🪙 <b>Koin:</b> <code>${pos.symbol}</code>
 📊 <b>Aksi:</b> <b>${pos.side || 'SHORT'} ${pos.leverage}x</b>
-${triggerLine}
+${triggerLine}${chg24Line}
 💵 <b>Entry Rata-rata:</b> <code>$${formatCryptoPrice(pos.avgEntryPrice)}</code>
 ${layersLine}
 ${marginLine}${lowVolLine}
@@ -297,10 +302,15 @@ ${slLine}
           : `\n🐋 <b>Strategi:</b> <b>Whale Flow Tracker</b>`)
       : '';
 
+    const tradeChg24 = trade.priceChange24hPct ?? trade.paramsSnapshot?.priceChange24hPct ?? trade.marketSnapshot?.priceChange24hPct;
+    const tradeChg24Line = (tradeChg24 !== undefined && tradeChg24 !== null)
+      ? `\n📈 <b>Perubahan 24h saat Entry:</b> <b>${Number(tradeChg24) >= 0 ? '+' : ''}${Number(tradeChg24).toFixed(2)}%</b>`
+      : '';
+
     const msg =
 `${emoji} <b>[${title}]</b> ${emoji}
 
-🪙 <b>Koin:</b> <code>${trade.symbol}</code> <b>${trade.side || 'SHORT'}</b>${stratLine}
+🪙 <b>Koin:</b> <code>${trade.symbol}</code> <b>${trade.side || 'SHORT'}</b>${stratLine}${tradeChg24Line}
 🏁 <b>Alasan Exit:</b> ${reasonLabel}
 💵 <b>Harga:</b> <code>$${formatCryptoPrice(trade.entryPrice)}</code> ➜ <code>$${formatCryptoPrice(trade.exitPrice)}</code>
 ⏱️ <b>Durasi Trade:</b> ${durationStr}

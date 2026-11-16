@@ -153,6 +153,7 @@ export class DatabaseService {
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS lowest_price NUMERIC;
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS mfe_pct NUMERIC;
           ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS mae_pct NUMERIC;
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS price_change_24h_pct NUMERIC;
         `);
 
         // 4. Tabel Riwayat Spike Lonjakan Harga
@@ -287,14 +288,15 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_trades (
-           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled, post_exit_30m, highest_price, lowest_price, mfe_pct, mae_pct
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled, post_exit_30m, highest_price, lowest_price, mfe_pct, mae_pct, price_change_24h_pct
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
          ON CONFLICT (id) DO UPDATE SET 
            post_exit_30m = COALESCE(EXCLUDED.post_exit_30m, wicksniper_trades.post_exit_30m),
            highest_price = COALESCE(EXCLUDED.highest_price, wicksniper_trades.highest_price),
            lowest_price = COALESCE(EXCLUDED.lowest_price, wicksniper_trades.lowest_price),
            mfe_pct = COALESCE(EXCLUDED.mfe_pct, wicksniper_trades.mfe_pct),
-           mae_pct = COALESCE(EXCLUDED.mae_pct, wicksniper_trades.mae_pct);`,
+           mae_pct = COALESCE(EXCLUDED.mae_pct, wicksniper_trades.mae_pct),
+           price_change_24h_pct = COALESCE(EXCLUDED.price_change_24h_pct, wicksniper_trades.price_change_24h_pct);`,
         [
           t.id,
           t.symbol,
@@ -320,6 +322,7 @@ export class DatabaseService {
           t.lowestPrice !== undefined ? t.lowestPrice : (t.paramsSnapshot?.lowestPrice !== undefined ? parseFloat(t.paramsSnapshot.lowestPrice) : null),
           t.mfePct !== undefined ? t.mfePct : (t.paramsSnapshot?.mfePct !== undefined ? parseFloat(t.paramsSnapshot.mfePct) : null),
           t.maePct !== undefined ? t.maePct : (t.paramsSnapshot?.maePct !== undefined ? parseFloat(t.paramsSnapshot.maePct) : null),
+          t.priceChange24hPct !== undefined && t.priceChange24hPct !== null ? t.priceChange24hPct : (t.paramsSnapshot?.priceChange24hPct !== undefined ? Number(t.paramsSnapshot.priceChange24hPct) : (t.marketSnapshot?.priceChange24hPct ?? null)),
         ]
       );
     } catch (e: any) {
@@ -344,7 +347,8 @@ export class DatabaseService {
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
                 post_exit_30m AS "postExit30m",
                 highest_price AS "highestPrice", lowest_price AS "lowestPrice",
-                mfe_pct AS "mfePct", mae_pct AS "maePct"
+                mfe_pct AS "mfePct", mae_pct AS "maePct",
+                price_change_24h_pct AS "priceChange24hPct"
          FROM wicksniper_trades
          ${whereMode}
          ORDER BY timestamp DESC
@@ -381,6 +385,10 @@ export class DatabaseService {
           lowestPrice: r.lowestPrice !== null && r.lowestPrice !== undefined ? parseFloat(r.lowestPrice) : (parsedSnap?.lowestPrice !== undefined ? parseFloat(parsedSnap.lowestPrice) : undefined),
           mfePct: r.mfePct !== null && r.mfePct !== undefined ? parseFloat(r.mfePct) : (parsedSnap?.mfePct !== undefined ? parseFloat(parsedSnap.mfePct) : undefined),
           maePct: r.maePct !== null && r.maePct !== undefined ? parseFloat(r.maePct) : (parsedSnap?.maePct !== undefined ? parseFloat(parsedSnap.maePct) : undefined),
+          entryReason: parsedSnap?.entryReason || parsedSnap?.signalReason || undefined,
+          btcTrendStatus: parsedSnap?.btcTrendStatus || undefined,
+          fundingRatePct: parsedSnap?.fundingRatePct !== undefined ? parseFloat(parsedSnap.fundingRatePct) : undefined,
+          priceChange24hPct: r.priceChange24hPct !== null && r.priceChange24hPct !== undefined ? parseFloat(r.priceChange24hPct) : (parsedSnap?.priceChange24hPct !== undefined ? Number(parsedSnap.priceChange24hPct) : (parsedSnap?.marketSnapshot?.priceChange24hPct !== undefined ? Number(parsedSnap.marketSnapshot.priceChange24hPct) : undefined)),
           paramsSnapshot: parsedSnap,
           marketSnapshot: parsedSnap?.marketSnapshot || null,
           layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
@@ -419,7 +427,8 @@ export class DatabaseService {
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
                 post_exit_30m AS "postExit30m",
                 highest_price AS "highestPrice", lowest_price AS "lowestPrice",
-                mfe_pct AS "mfePct", mae_pct AS "maePct"
+                mfe_pct AS "mfePct", mae_pct AS "maePct",
+                price_change_24h_pct AS "priceChange24hPct"
          FROM wicksniper_trades
          WHERE id = $1 LIMIT 1;`,
         [tradeId]
@@ -458,6 +467,7 @@ export class DatabaseService {
         entryReason: parsedSnap?.entryReason || parsedSnap?.signalReason || undefined,
         btcTrendStatus: parsedSnap?.btcTrendStatus || undefined,
         fundingRatePct: parsedSnap?.fundingRatePct !== undefined ? parseFloat(parsedSnap.fundingRatePct) : undefined,
+        priceChange24hPct: r.priceChange24hPct !== null && r.priceChange24hPct !== undefined ? parseFloat(r.priceChange24hPct) : (parsedSnap?.priceChange24hPct !== undefined ? Number(parsedSnap.priceChange24hPct) : (parsedSnap?.marketSnapshot?.priceChange24hPct !== undefined ? Number(parsedSnap.marketSnapshot.priceChange24hPct) : undefined)),
         paramsSnapshot: parsedSnap,
         marketSnapshot: parsedSnap?.marketSnapshot || null,
         layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
@@ -677,7 +687,8 @@ export class DatabaseService {
                 fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
                 post_exit_30m AS "postExit30m",
                 highest_price AS "highestPrice", lowest_price AS "lowestPrice",
-                mfe_pct AS "mfePct", mae_pct AS "maePct"
+                mfe_pct AS "mfePct", mae_pct AS "maePct",
+                price_change_24h_pct AS "priceChange24hPct"
          FROM wicksniper_trades
          ${whereClause}
          ORDER BY timestamp DESC
@@ -718,6 +729,7 @@ export class DatabaseService {
           entryReason: parsedSnap?.entryReason || parsedSnap?.signalReason || undefined,
           btcTrendStatus: parsedSnap?.btcTrendStatus || undefined,
           fundingRatePct: parsedSnap?.fundingRatePct !== undefined ? parseFloat(parsedSnap.fundingRatePct) : undefined,
+          priceChange24hPct: r.priceChange24hPct !== null && r.priceChange24hPct !== undefined ? parseFloat(r.priceChange24hPct) : (parsedSnap?.priceChange24hPct !== undefined ? Number(parsedSnap.priceChange24hPct) : (parsedSnap?.marketSnapshot?.priceChange24hPct !== undefined ? Number(parsedSnap.marketSnapshot.priceChange24hPct) : undefined)),
           paramsSnapshot: parsedSnap,
           marketSnapshot: parsedSnap?.marketSnapshot || null,
           layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,

@@ -1515,6 +1515,16 @@ function renderActivePositions(positions) {
         fundingTag = `<span class="badge-tag" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: ${frColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Funding Rate saat Entry: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(4)}%">⚡ FR: ${fr >= 0 ? '+' : ''}${Number(fr).toFixed(3)}%</span>`;
       }
 
+      let chg24hTag = '';
+      const chg24 = pos.priceChange24hPct ?? pos.marketSnapshot?.priceChange24hPct ?? pos.paramsSnapshot?.priceChange24hPct;
+      if (chg24 !== undefined && chg24 !== null) {
+        const isUp = Number(chg24) >= 0;
+        const chgColor = isUp ? '#30d158' : '#ff453a';
+        const chgBg = isUp ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 69, 58, 0.12)';
+        const chgBorder = isUp ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
+        chg24hTag = `<span class="badge-tag" style="background: ${chgBg}; border: 1px solid ${chgBorder}; color: ${chgColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;" title="Perubahan Harga 24 Jam saat Entry: ${isUp ? '+' : ''}${Number(chg24).toFixed(2)}%">📈 24h: ${isUp ? '+' : ''}${Number(chg24).toFixed(2)}%</span>`;
+      }
+
       const posDriver = pos.paramsSnapshot?.signalDriver || currentConfig?.smartMoney?.signalDriver || 'SMART_TRADER';
       const isSmartTraderDriven = posDriver === 'SMART_TRADER';
       const isWhaleDriven = posDriver === 'WHALE';
@@ -1616,6 +1626,7 @@ function renderActivePositions(positions) {
               ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
               ${tpStatusBadge}
               ${isSmartTraderDriven ? smartTraderTag + smFlowBadgeHtml + modalPausTag + whaleHealthTag : smFlowBadgeHtml + modalPausTag + whaleHealthTag + smartTraderTag}
+              ${chg24hTag}
               ${btcTag}
               ${fundingTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
@@ -2361,6 +2372,17 @@ function renderClosedTradesTable(trades) {
       const safeTradeId = t.id ? String(t.id).replace(/'/g, "\\'") : '';
 
       const rowSide = (t.side || t.paramsSnapshot?.side || 'SHORT').toUpperCase();
+      const chg24Val = t.priceChange24hPct ?? t.marketSnapshot?.priceChange24hPct ?? t.paramsSnapshot?.priceChange24hPct;
+      let chg24hBadge = '';
+      if (chg24Val !== undefined && chg24Val !== null) {
+        const isUp = Number(chg24Val) >= 0;
+        const chgColor = isUp ? '#30d158' : '#ff453a';
+        const chgBg = isUp ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)';
+        const chgBorder = isUp ? 'rgba(48, 209, 88, 0.35)' : 'rgba(255, 69, 58, 0.35)';
+        const chgSign = isUp ? '+' : '';
+        chg24hBadge = `<span class="badge-tag" style="font-size: 9.5px; padding: 1px 6px; margin-left: 3px; font-weight: 600; background: ${chgBg}; color: ${chgColor}; border: 1px solid ${chgBorder}; border-radius: 4px;" title="Perubahan Harga 24 Jam saat Entry: ${chgSign}${Number(chg24Val).toFixed(2)}%">24h ${chgSign}${Number(chg24Val).toFixed(1)}%</span>`;
+      }
+
       const rowBtc = t.btcTrendStatus || t.paramsSnapshot?.btcTrendStatus;
       let btcBadge = '';
       if (rowBtc && rowBtc.trend) {
@@ -2393,7 +2415,7 @@ function renderClosedTradesTable(trades) {
       return `
         <tr class="clickable-trade-row" onclick="openTradeDetailModal('${safeTradeId}', ${idx})" title="Klik untuk melihat rincian trade & perbandingan parameter" style="cursor: pointer;">
           <td>${formatDateTime(t.timestamp || t.closedAt, true)}</td>
-          <td><b>${t.symbol}</b> <span class="badge-side ${rowSide === 'LONG' ? 'long' : 'short'}">${rowSide}</span> ${stratBadge} ${btcBadge} ${layerBadge}</td>
+          <td><b>${t.symbol}</b> <span class="badge-side ${rowSide === 'LONG' ? 'long' : 'short'}">${rowSide}</span> ${stratBadge} ${chg24hBadge} ${btcBadge} ${layerBadge}</td>
           <td><span class="text-cyan font-mono"><b>$${Number(t.marginUsed || 0).toFixed(2)}</b></span></td>
           <td>
             <div>$${formatCryptoPrice(t.entryPrice)} ➜ $${formatCryptoPrice(t.exitPrice)}</div>
@@ -2904,6 +2926,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Tipe Margin', snap.marginType, curr.marginType)}
       ${renderCompareRow('Sumber Data Market', snap.dataSource, currScanner.dataSource)}
       ${renderCompareRow('Kondisi Tren BTC (1h / EMA50)', snap.btcCondition || (snap.btcTrendStatus ? `${snap.btcTrendStatus.trend} ($${Math.round(snap.btcTrendStatus.btcPrice || 0)} vs EMA50 $${Math.round(snap.btcTrendStatus.ema || 0)} | TF 1h)` : undefined), undefined, '')}
+      ${renderCompareRow('Perubahan Harga 24 Jam saat Entry', (t.priceChange24hPct ?? snap.priceChange24hPct ?? t.marketSnapshot?.priceChange24hPct ?? snap.marketSnapshot?.priceChange24hPct) !== undefined ? `${Number(t.priceChange24hPct ?? snap.priceChange24hPct ?? t.marketSnapshot?.priceChange24hPct ?? snap.marketSnapshot?.priceChange24hPct) >= 0 ? '+' : ''}${Number(t.priceChange24hPct ?? snap.priceChange24hPct ?? t.marketSnapshot?.priceChange24hPct ?? snap.marketSnapshot?.priceChange24hPct).toFixed(2)}%` : undefined, undefined, '')}
       ${renderCompareRow('Rem Rugi Harian (Circuit Breaker)', snap.maxDailyLossUsdt, currRisk.maxDailyLossUsdt, ' USDT', formatZeroDisabled(' USDT'))}
       ${renderCompareRow('Batas Saldo Pengaman (Floor)', snap.minSafetyBalanceUsdt, currRisk.minSafetyBalanceUsdt, ' USDT', formatZeroDisabled(' USDT'))}
 
@@ -3046,6 +3069,23 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               </div>
               <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
                 ${btcPrice && btcEma ? `BTC <b>${btcPrice}</b> vs EMA${btcPeriod} <b>${btcEma}</b>${diffPct}` : escapeHtml(snap?.btcCondition || '-')}
+              </div>
+            </div>`;
+          })()}
+          ${(() => {
+            const chg24 = t.priceChange24hPct ?? snap?.priceChange24hPct ?? t.marketSnapshot?.priceChange24hPct ?? snap?.marketSnapshot?.priceChange24hPct;
+            if (chg24 === undefined || chg24 === null) return '';
+            const isUp = Number(chg24) >= 0;
+            const chgColor = isUp ? 'var(--color-green, #30d158)' : 'var(--color-red, #ff453a)';
+            const chgSign = isUp ? '+' : '';
+            return `
+            <div class="td-kpi-card" style="border: 1px solid ${chgColor}40; background: ${chgColor}0d;">
+              <div class="td-kpi-label">📈 Perubahan Harga 24 Jam (Entry)</div>
+              <div class="td-kpi-val" style="color: ${chgColor}; font-size: 13px; font-weight: 700;">
+                ${chgSign}${Number(chg24).toFixed(2)}%
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+                Tercatat saat posisi dibuka (24h Price Change)
               </div>
             </div>`;
           })()}

@@ -1489,6 +1489,7 @@ export class WickSniperEngine {
 
     const currentTickerStats = this.scanner.getTickerStats(symbol);
     const initial24hVol = currentTickerStats?.vol24hUsdt;
+    const initial24hChange = currentTickerStats?.change24hPct;
 
     const lowVolEnabled = this.config.exit?.lowVolumeAdaptiveEnabled ?? true;
     const lowVolThreshold = this.config.exit?.lowVolumeThresholdUsdt ?? 20_000_000;
@@ -1551,8 +1552,10 @@ export class WickSniperEngine {
       entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
       entryBtcPrice: this.lastBtcTrendStatus?.btcPrice || binanceFutures.getLastBtcTrendStatus()?.btcPrice || undefined,
       btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
+      priceChange24hPct: initial24hChange,
       paramsSnapshot: {
         strategy: 'MOMENTUM_LONG',
+        priceChange24hPct: initial24hChange,
         surgePct: alert.surgePct,
         volRatio: indicators?.volRatio,
         fundingRatePct: indicators?.fundingRatePct,
@@ -1577,6 +1580,7 @@ export class WickSniperEngine {
         surgePct: alert.surgePct,
         lookbackSeconds: alert.lookbackSeconds,
         vol24hUsdt: initial24hVol,
+        priceChange24hPct: initial24hChange,
         high24h: currentTickerStats?.high24h,
         low24h: currentTickerStats?.low24h,
         capturedAt: Date.now(),
@@ -1627,6 +1631,7 @@ export class WickSniperEngine {
 
     const currentTickerStats = this.scanner.getTickerStats(symbol);
     const initial24hVol = currentTickerStats?.vol24hUsdt;
+    const initial24hChange = currentTickerStats?.change24hPct;
 
     const lowVolEnabled = exitCfg.lowVolumeAdaptiveEnabled ?? true;
     const lowVolThreshold = exitCfg.lowVolumeThresholdUsdt ?? 20_000_000;
@@ -1735,8 +1740,10 @@ export class WickSniperEngine {
       entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
       entryBtcPrice: this.lastBtcTrendStatus?.btcPrice || binanceFutures.getLastBtcTrendStatus()?.btcPrice || undefined,
       btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
+      priceChange24hPct: initial24hChange,
       paramsSnapshot: {
         ...this.captureParamsSnapshot(),
+        priceChange24hPct: initial24hChange,
         isLowVolumeAdjusted: isLowVolume,
         vol24hUsdt: initial24hVol,
         lowVolumeThresholdUsdt: lowVolThreshold,
@@ -1744,6 +1751,15 @@ export class WickSniperEngine {
         lowVolumeSlMultiplier: lowVolSlMult,
         lowVolumeTpMultiplier: lowVolTpMult,
         lowVolumeSlTpMultiplier: lowVolSlMult,
+      },
+      marketSnapshot: {
+        vol24hUsdt: initial24hVol,
+        priceChange24hPct: initial24hChange,
+        high24h: currentTickerStats?.high24h,
+        low24h: currentTickerStats?.low24h,
+        surgePct,
+        lookbackSeconds,
+        capturedAt: Date.now(),
       },
     };
 
@@ -4947,6 +4963,7 @@ export class WickSniperEngine {
           btcCondition: (pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())
             ? `${(pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.trend} (BTC $${Math.round((pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.btcPrice || 0).toLocaleString('en-US')} vs EMA50 $${Math.round((pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.ema || 0).toLocaleString('en-US')} | TF 1h)`
             : 'TIDAK DIKETAHUI',
+          priceChange24hPct: pos.priceChange24hPct ?? pos.marketSnapshot?.priceChange24hPct ?? (pos.paramsSnapshot?.priceChange24hPct !== undefined ? parseFloat(pos.paramsSnapshot.priceChange24hPct) : undefined),
         },
         marketSnapshot: pos.marketSnapshot,
         peakPnlPct: pos.peakPnlPct,
@@ -4957,6 +4974,7 @@ export class WickSniperEngine {
         btcTrendStatus: pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus() || undefined,
         fundingRatePct: pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct,
         rsi15m: pos.rsi15m ?? pos.paramsSnapshot?.rsi15m,
+        priceChange24hPct: pos.priceChange24hPct ?? pos.marketSnapshot?.priceChange24hPct ?? (pos.paramsSnapshot?.priceChange24hPct !== undefined ? parseFloat(pos.paramsSnapshot.priceChange24hPct) : undefined),
       };
 
       this.closedTrades.unshift(trade);
@@ -5391,6 +5409,12 @@ export class WickSniperEngine {
 
       if (pos.paramsSnapshot) {
         pos.paramsSnapshot.marketSnapshot = snapshot;
+        if (tickerStats?.change24hPct !== undefined) {
+          pos.paramsSnapshot.priceChange24hPct = tickerStats.change24hPct;
+        }
+      }
+      if (tickerStats?.change24hPct !== undefined) {
+        pos.priceChange24hPct = tickerStats.change24hPct;
       }
     } catch {}
   }
@@ -5774,9 +5798,18 @@ export class WickSniperEngine {
             entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
             entryBtcPrice: this.lastBtcTrendStatus?.btcPrice || binanceFutures.getLastBtcTrendStatus()?.btcPrice || undefined,
             btcTrendStatus: this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus() || undefined,
+            priceChange24hPct: this.scanner.getTickerStats(livePos.symbol)?.change24hPct,
             paramsSnapshot: {
               ...this.captureParamsSnapshot(),
+              priceChange24hPct: this.scanner.getTickerStats(livePos.symbol)?.change24hPct,
               ...(isSm ? { entryReason: 'Posisi Binance Live Diadopsi Otomatis', signalReason: 'Posisi Binance Live Diadopsi Otomatis' } : {}),
+            },
+            marketSnapshot: {
+              vol24hUsdt: this.scanner.getTickerStats(livePos.symbol)?.vol24hUsdt,
+              priceChange24hPct: this.scanner.getTickerStats(livePos.symbol)?.change24hPct,
+              high24h: this.scanner.getTickerStats(livePos.symbol)?.high24h,
+              low24h: this.scanner.getTickerStats(livePos.symbol)?.low24h,
+              capturedAt: Date.now(),
             },
           };
 
@@ -7411,10 +7444,12 @@ export class WickSniperEngine {
     const numLayers = Math.max(1, Math.min(50, smCfg.entryLayers || 1));
     const isMicroGrid = numLayers > 3;
     // Evaluasi Volume 24 Jam & Adaptasi Koin Volume Rendah (< 20M USDT)
-    const vol24h = this.scanner.getTickerStats(symbol)?.vol24hUsdt
+    const smTickerStats = this.scanner.getTickerStats(symbol);
+    const vol24h = smTickerStats?.vol24hUsdt
       || this.smartMoneyScanner.get24hVolume(symbol)
       || signal.vol24hUsdt
       || 0;
+    const change24h = smTickerStats?.change24hPct ?? this.smartMoneyScanner.get24hChange(symbol) ?? signal.priceChange24hPct;
 
     const lowVolEnabled = smCfg.lowVolumeAdaptiveEnabled ?? true;
     const lowVolThreshold = smCfg.lowVolumeThresholdUsdt ?? 20_000_000;
@@ -7782,8 +7817,10 @@ export class WickSniperEngine {
       btcTrendStatus: signal.btcTrendStatus,
       fundingRatePct: signal.fundingRatePct,
       rsi15m: signal.rsi15m,
+      priceChange24hPct: change24h,
       paramsSnapshot: {
         strategy: 'SMART_MONEY',
+        priceChange24hPct: change24h,
         entryReason: signal.reason,
         side: signal.side,
         entryLayers: numLayers,
@@ -7851,6 +7888,14 @@ export class WickSniperEngine {
         lowVolumeSlMultiplier: lowVolSlMult,
         lowVolumeTpMultiplier: lowVolTpMult,
         lowVolumeSlTpMultiplier: lowVolSlMult,
+      },
+      marketSnapshot: {
+        vol24hUsdt: vol24h,
+        priceChange24hPct: change24h,
+        high24h: smTickerStats?.high24h,
+        low24h: smTickerStats?.low24h,
+        fundingRatePct: signal.fundingRatePct,
+        capturedAt: Date.now(),
       },
     };
 
