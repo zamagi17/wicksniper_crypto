@@ -672,6 +672,21 @@ export interface DailySnapshot {
   createdAt: string;
 }
 
+export interface CoinPerformanceRecord {
+  symbol: string;
+  totalTrades: number;
+  winTrades: number;
+  lossTrades: number;
+  winRate: number;
+  totalPnl: number;
+  totalFee: number;
+  bestTrade: number;
+  worstTrade: number;
+  avgDurationSeconds: number;
+  lastTradeTimestamp: number;
+  recommendation: 'WHITELIST_CANDIDATE' | 'NEUTRAL' | 'BLACKLIST_CANDIDATE';
+}
+
 export interface ClosedTrade {
   id: string;
   symbol: string;
@@ -758,6 +773,7 @@ export interface EngineStatus {
   monitoredCoinsCount?: number;
   ticksPerSecond?: number;
   marketDataAgeMs?: number;
+  binancePingMs?: number;
   leverage?: number;
   marginType?: 'CROSSED' | 'ISOLATED';
   usedWeight1m?: number;

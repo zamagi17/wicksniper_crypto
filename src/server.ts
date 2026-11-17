@@ -544,6 +544,22 @@ app.post('/api/daily-snapshots/trigger', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/ping', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const pingMs = await binanceFutures.measurePing();
+  return res.json({ success: true, pingMs });
+});
+
+app.get('/api/coin-performance', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const records = await engine.getCoinPerformance();
+    return res.json({ success: true, records });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 // WebSocket Realtime Broadcaster
 wss.on('connection', (ws) => {
   // Kirim initial state & safe config

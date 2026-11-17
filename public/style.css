@@ -3750,3 +3750,79 @@ body {
 .strategy-smart-money .seg-tab[data-tab="radar"] {
   display: none !important;
 }
+
+/* ==========================================================================
+   LATENCY PING PILL & PNL CALENDAR & EQUITY CURVE
+   ========================================================================== */
+.status-pill.ping-pill {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.status-pill.ping-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.ping-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #30d158;
+  box-shadow: 0 0 6px #30d158;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.ping-dot.ping-good {
+  background: #30d158;
+  box-shadow: 0 0 6px #30d158;
+}
+.ping-dot.ping-med {
+  background: #ffd60a;
+  box-shadow: 0 0 6px #ffd60a;
+}
+.ping-dot.ping-slow {
+  background: #ff453a;
+  box-shadow: 0 0 6px #ff453a;
+}
+
+.pnl-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+  gap: 8px;
+}
+.pnl-cal-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.pnl-cal-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.pnl-cal-card.win {
+  background: linear-gradient(180deg, rgba(48, 209, 88, 0.15) 0%, rgba(48, 209, 88, 0.03) 100%);
+  border-color: rgba(48, 209, 88, 0.35);
+}
+.pnl-cal-card.loss {
+  background: linear-gradient(180deg, rgba(255, 69, 58, 0.15) 0%, rgba(255, 69, 58, 0.03) 100%);
+  border-color: rgba(255, 69, 58, 0.35);
+}
+.pnl-cal-date {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pnl-cal-pnl {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: monospace;
+  margin: 4px 0 2px 0;
+}
+.pnl-cal-sub {
+  font-size: 9.5px;
+  color: var(--color-text-muted);
+}

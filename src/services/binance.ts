@@ -242,10 +242,33 @@ export class BinanceFuturesClient {
     return this.httpClient!;
   }
 
+  public lastPingMs: number = 0;
+  private lastPingAt: number = 0;
+
+  public async measurePing(): Promise<number> {
+    const now = Date.now();
+    if (this.lastPingAt && now - this.lastPingAt < 5000 && this.lastPingMs > 0) {
+      return this.lastPingMs;
+    }
+    try {
+      const client = await this.getHttpClient();
+      const start = Date.now();
+      await client.get('/fapi/v1/ping');
+      this.lastPingMs = Date.now() - start;
+      this.lastPingAt = Date.now();
+      return this.lastPingMs;
+    } catch {
+      return this.lastPingMs || 0;
+    }
+  }
+
   public async syncTime(): Promise<number> {
     try {
       const client = await this.getHttpClient();
+      const start = Date.now();
       const res = await client.get('/fapi/v1/time');
+      this.lastPingMs = Date.now() - start;
+      this.lastPingAt = Date.now();
       const serverTime = res.data.serverTime;
       this.timeOffset = serverTime - Date.now();
       return this.timeOffset;

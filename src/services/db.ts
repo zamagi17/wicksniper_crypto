@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord, DailySnapshot } from '../types';
+import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord, DailySnapshot, CoinPerformanceRecord } from '../types';
 
 dotenv.config();
 
@@ -632,6 +632,70 @@ export class DatabaseService {
       });
     } catch (e: any) {
       console.error('[Database] Gagal getTradesBetween:', e.message);
+      return [];
+    }
+  }
+
+  public async getCoinPerformance(isPaper?: boolean): Promise<CoinPerformanceRecord[]> {
+    if (!this.isConnected || !this.pool) return [];
+    try {
+      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $1' : '';
+      const params = isPaper !== undefined ? [isPaper] : [];
+      const res = await this.pool.query(
+        `SELECT 
+           symbol,
+           COUNT(*)::int AS total_trades,
+           COALESCE(SUM(CASE WHEN realized_pnl >= 0 THEN 1 ELSE 0 END), 0)::int AS win_trades,
+           COALESCE(SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END), 0)::int AS loss_trades,
+           COALESCE(SUM(realized_pnl), 0)::float AS total_pnl,
+           COALESCE(SUM(fee), 0)::float AS total_fee,
+           COALESCE(MAX(realized_pnl), 0)::float AS best_trade,
+           COALESCE(MIN(realized_pnl), 0)::float AS worst_trade,
+           COALESCE(AVG(duration_seconds), 0)::float AS avg_duration_seconds,
+           MAX(timestamp)::bigint AS last_trade_timestamp
+         FROM wicksniper_trades
+         ${whereMode}
+         GROUP BY symbol
+         ORDER BY total_pnl DESC;`,
+        params
+      );
+
+      return res.rows.map((r: any) => {
+        const totalTrades = parseInt(r.total_trades, 10) || 0;
+        const winTrades = parseInt(r.win_trades, 10) || 0;
+        const lossTrades = parseInt(r.loss_trades, 10) || 0;
+        const winRate = totalTrades > 0 ? Math.round((winTrades / totalTrades) * 1000) / 10 : 0;
+        const totalPnl = Math.round((parseFloat(r.total_pnl) || 0) * 100) / 100;
+        const totalFee = Math.round((parseFloat(r.total_fee) || 0) * 1000) / 1000;
+        const bestTrade = Math.round((parseFloat(r.best_trade) || 0) * 100) / 100;
+        const worstTrade = Math.round((parseFloat(r.worst_trade) || 0) * 100) / 100;
+        const avgDurationSeconds = Math.round(parseFloat(r.avg_duration_seconds) || 0);
+        const lastTradeTimestamp = parseInt(r.last_trade_timestamp, 10) || 0;
+
+        let recommendation: 'WHITELIST_CANDIDATE' | 'NEUTRAL' | 'BLACKLIST_CANDIDATE' = 'NEUTRAL';
+        if (totalTrades >= 2 && winRate >= 75 && totalPnl > 0) {
+          recommendation = 'WHITELIST_CANDIDATE';
+        } else if (totalTrades >= 2 && (winRate <= 40 || totalPnl < -2)) {
+          recommendation = 'BLACKLIST_CANDIDATE';
+        }
+
+        return {
+          symbol: r.symbol,
+          totalTrades,
+          winTrades,
+          lossTrades,
+          winRate,
+          totalPnl,
+          totalFee,
+          bestTrade,
+          worstTrade,
+          avgDurationSeconds,
+          lastTradeTimestamp,
+          recommendation,
+        };
+      });
+    } catch (e: any) {
+      console.error('[Database] Gagal getCoinPerformance:', e.message);
       return [];
     }
   }

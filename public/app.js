@@ -513,6 +513,8 @@ async function fetchInitialData() {
     renderStatus(resStatus);
     renderLogs(resLogs);
     fetchDailySnapshots();
+    fetchCoinPerformance();
+    measurePingNow();
   } catch (err) {
     console.error('Gagal mengambil data awal:', err);
   }
@@ -1013,9 +1015,14 @@ function renderStatus(status) {
     updateTradesPaginationUI();
   }
 
-  // 8. Render Daily Snapshots
+  // 8. Render Daily Snapshots & Equity Chart
   if (status.dailySnapshots && status.dailySnapshots.length > 0) {
     renderDailySnapshotsTable(status.dailySnapshots);
+  }
+
+  // 9. Render Ping Latency
+  if (status.binancePingMs !== undefined && status.binancePingMs > 0) {
+    updatePingUI(status.binancePingMs);
   }
 }
 
@@ -2590,6 +2597,7 @@ async function fetchDailySnapshots() {
 
 function renderDailySnapshotsTable(snapshots) {
   currentDailySnapshots = snapshots || [];
+  renderEquityCurveAndCalendar(currentDailySnapshots);
   const tbody = document.getElementById('daily-snapshots-body');
   const tag = document.getElementById('snapshot-count-tag');
   if (tag) {
@@ -2720,6 +2728,357 @@ async function triggerManualDailySnapshot() {
       btn.disabled = false;
       btn.innerHTML = '⚡ Ambil Snapshot';
     }
+  }
+}
+
+// ============================================================================
+// EQUITY CURVE & PNL CALENDAR (FEATURE 1)
+// ============================================================================
+function renderEquityCurveAndCalendar(snapshots) {
+  if (!snapshots || snapshots.length === 0) {
+    const svgWrap = document.getElementById('equity-svg-wrapper');
+    if (svgWrap) {
+      svgWrap.innerHTML = `
+        <div style="height: 140px; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 12px;">
+          📊 Belum cukup data snapshot harian untuk membuat grafik kurva modal.
+        </div>`;
+    }
+    const calGrid = document.getElementById('pnl-calendar-grid');
+    if (calGrid) {
+      calGrid.innerHTML = `<div class="text-muted" style="font-size: 12px;">Belum ada rekap harian.</div>`;
+    }
+    return;
+  }
+
+  // Sort kronologis (paling lampau ke paling baru)
+  const chronSnapshots = [...snapshots].sort((a, b) => a.date.localeCompare(b.date));
+
+  const latest = chronSnapshots[chronSnapshots.length - 1];
+  const earliest = chronSnapshots[0];
+  const initialBase = earliest.startBalance || earliest.endingBalance || 500;
+  const currentBal = latest.endingBalance || initialBase;
+  const growthUsdt = currentBal - initialBase;
+  const growthPct = initialBase > 0 ? (growthUsdt / initialBase) * 100 : 0;
+
+  const currentBalEl = document.getElementById('equity-current-val');
+  if (currentBalEl) {
+    currentBalEl.textContent = `$${currentBal.toFixed(2)} USDT`;
+  }
+  const growthTag = document.getElementById('equity-total-growth');
+  if (growthTag) {
+    const sign = growthUsdt >= 0 ? '+' : '';
+    growthTag.textContent = `${sign}$${growthUsdt.toFixed(2)} (${sign}${growthPct.toFixed(2)}%)`;
+    growthTag.style.color = growthUsdt >= 0 ? '#30d158' : '#ff453a';
+  }
+
+  // 1. RENDER PURE SVG EQUITY CURVE
+  const svgWrap = document.getElementById('equity-svg-wrapper');
+  if (svgWrap) {
+    const width = 800;
+    const height = 160;
+    const padding = { top: 20, right: 35, bottom: 30, left: 55 };
+
+    const points = chronSnapshots.length === 1 && earliest.startBalance
+      ? [
+          { date: 'Awal', balance: earliest.startBalance, pnl: 0 },
+          { date: earliest.date, balance: earliest.endingBalance, pnl: earliest.dailyPnl },
+        ]
+      : chronSnapshots.map((s) => ({ date: s.date, balance: s.endingBalance, pnl: s.dailyPnl }));
+
+    const minBal = Math.min(...points.map((p) => p.balance));
+    const maxBal = Math.max(...points.map((p) => p.balance));
+    const balDiff = maxBal - minBal;
+    const range = balDiff > 0 ? balDiff : (maxBal * 0.1 || 10);
+    const yMin = Math.floor(minBal - range * 0.1);
+    const yMax = Math.ceil(maxBal + range * 0.1);
+
+    const getX = (idx) => padding.left + (idx / Math.max(1, points.length - 1)) * (width - padding.left - padding.right);
+    const getY = (val) => height - padding.bottom - ((val - yMin) / Math.max(1, yMax - yMin)) * (height - padding.top - padding.bottom);
+
+    let pathD = '';
+    let areaD = '';
+    points.forEach((pt, i) => {
+      const x = getX(i);
+      const y = getY(pt.balance);
+      if (i === 0) {
+        pathD += `M ${x} ${y}`;
+        areaD += `M ${x} ${height - padding.bottom} L ${x} ${y}`;
+      } else {
+        pathD += ` L ${x} ${y}`;
+        areaD += ` L ${x} ${y}`;
+      }
+    });
+    const lastX = getX(points.length - 1);
+    areaD += ` L ${lastX} ${height - padding.bottom} Z`;
+
+    const gridCount = 3;
+    let gridLinesSvg = '';
+    for (let g = 0; g <= gridCount; g++) {
+      const val = yMin + (g / gridCount) * (yMax - yMin);
+      const y = getY(val);
+      gridLinesSvg += `
+        <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="rgba(255, 255, 255, 0.08)" stroke-dasharray="3 3" />
+        <text x="${padding.left - 8}" y="${y + 4}" fill="#8e8e93" font-size="10" font-family="monospace" text-anchor="end">$${val.toFixed(0)}</text>
+      `;
+    }
+
+    let dotsSvg = '';
+    points.forEach((pt, i) => {
+      const x = getX(i);
+      const y = getY(pt.balance);
+      const isUp = pt.pnl >= 0;
+      const dotColor = isUp ? '#30d158' : '#ff453a';
+      dotsSvg += `
+        <circle cx="${x}" cy="${y}" r="4" fill="${dotColor}" stroke="#1c1c1e" stroke-width="2">
+          <title>${pt.date}: $${pt.balance.toFixed(2)} (${isUp ? '+' : ''}$${pt.pnl.toFixed(2)})</title>
+        </circle>
+        <text x="${x}" y="${height - 10}" fill="#8e8e93" font-size="10" text-anchor="middle" font-family="monospace">${pt.date.length > 5 ? pt.date.slice(5) : pt.date}</text>
+      `;
+    });
+
+    svgWrap.innerHTML = `
+      <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: 160px; display: block; overflow: visible;">
+        <defs>
+          <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#30d158" stop-opacity="0.30" />
+            <stop offset="100%" stop-color="#30d158" stop-opacity="0.0" />
+          </linearGradient>
+        </defs>
+        ${gridLinesSvg}
+        <path d="${areaD}" fill="url(#equityGrad)" />
+        <path d="${pathD}" fill="none" stroke="#30d158" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        ${dotsSvg}
+      </svg>
+    `;
+  }
+
+  // 2. RENDER MINI PNL CALENDAR
+  const calGrid = document.getElementById('pnl-calendar-grid');
+  if (calGrid) {
+    const recent = [...snapshots].slice(0, 14);
+    calGrid.innerHTML = recent
+      .map((s) => {
+        const pnl = Number(s.dailyPnl || 0);
+        const isWin = pnl >= 0;
+        const cardClass = isWin ? 'win' : 'loss';
+        const pnlColor = isWin ? 'text-green' : 'text-red';
+        const sign = isWin ? '+' : '';
+        const winRate = Number(s.winRate || 0).toFixed(0);
+
+        const dObj = new Date(`${s.date}T12:00:00+07:00`);
+        const dayName = dObj.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' });
+
+        return `
+          <div class="pnl-cal-card ${cardClass}" title="${s.date} (${s.tradingMode}) | ${s.totalTrades} trade | WR ${winRate}%">
+            <div class="pnl-cal-date">${dayName}, ${s.date.slice(5)}</div>
+            <div class="pnl-cal-pnl ${pnlColor}">${sign}$${pnl.toFixed(2)}</div>
+            <div class="pnl-cal-sub">${s.winCount}W / ${s.lossCount}L (${winRate}%)</div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+}
+
+// ============================================================================
+// COIN PERFORMANCE MATRIX (FEATURE 2)
+// ============================================================================
+let currentCoinPerformance = [];
+
+async function fetchCoinPerformance() {
+  const tbody = document.getElementById('coin-performance-body');
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">Memuat data matriks performa koin...</td></tr>`;
+  }
+  try {
+    const res = await authFetch('/api/coin-performance?_t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.success && Array.isArray(data.records)) {
+      currentCoinPerformance = data.records;
+      renderCoinPerformanceTable(currentCoinPerformance);
+    }
+  } catch (err) {
+    console.warn('[CoinPerformance] Gagal fetch matriks koin:', err);
+  }
+}
+
+function renderCoinPerformanceTable(records) {
+  currentCoinPerformance = records || [];
+  const countTag = document.getElementById('coin-matrix-count');
+  if (countTag) {
+    countTag.textContent = `${currentCoinPerformance.length} Koin`;
+  }
+  const tbody = document.getElementById('coin-performance-body');
+  if (!tbody) return;
+
+  if (!records || records.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">Belum ada riwayat koin selesai ditutup. Matriks akan otomatis terisi saat koin di-TP/SL.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = records
+    .map((r) => {
+      const pnl = Number(r.totalPnl || 0);
+      const isWin = pnl >= 0;
+      const pnlColor = isWin ? 'text-green' : 'text-red';
+      const sign = isWin ? '+' : '';
+
+      const winRate = Number(r.winRate || 0);
+      const wrColor = winRate >= 70 ? '#30d158' : winRate >= 50 ? '#ffd60a' : '#ff453a';
+
+      let recoBadge = `<span class="badge-tag" style="background: rgba(142, 142, 147, 0.15); border: 1px solid rgba(142, 142, 147, 0.3); color: #8e8e93; font-size: 10px; padding: 2px 6px; font-weight: 600; border-radius: 4px;">⚖️ Netral</span>`;
+      if (r.recommendation === 'WHITELIST_CANDIDATE') {
+        recoBadge = `<span class="badge-tag" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; font-size: 10px; padding: 2px 6px; font-weight: 700; border-radius: 4px;" title="Konsisten Profit &amp; Win Rate Tinggi">⭐ Rekomendasi Whitelist</span>`;
+      } else if (r.recommendation === 'BLACKLIST_CANDIDATE') {
+        recoBadge = `<span class="badge-tag" style="background: rgba(255, 69, 58, 0.15); border: 1px solid rgba(255, 69, 58, 0.4); color: #ff453a; font-size: 10px; padding: 2px 6px; font-weight: 700; border-radius: 4px;" title="Sering Memicu Kerugian / SL">⛔ Evaluasi Blacklist</span>`;
+      }
+
+      const avgMins = Math.round((r.avgDurationSeconds || 0) / 60);
+      const durText = avgMins < 60 ? `${avgMins} mnt` : `${(avgMins / 60).toFixed(1)} jam`;
+
+      const bestPnl = Number(r.bestTrade || 0);
+      const worstPnl = Number(r.worstTrade || 0);
+
+      const safeSym = escapeHtml(r.symbol);
+
+      return `
+        <tr>
+          <td>
+            <div style="font-weight: 700; font-family: monospace; font-size: 13px; color: var(--color-text-main);">
+              ${safeSym}
+            </div>
+            <span style="font-size: 10px; color: var(--color-text-muted);">${r.totalTrades} Trade</span>
+          </td>
+          <td>${recoBadge}</td>
+          <td>
+            <div style="font-weight: 700; font-size: 12.5px; color: ${wrColor};">
+              ${winRate.toFixed(1)}%
+            </div>
+            <div style="width: 70px; height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden; margin-top: 3px;">
+              <div style="width: ${winRate}%; height: 100%; background: ${wrColor};"></div>
+            </div>
+            <span style="font-size: 9.5px; color: var(--color-text-muted);">${r.winTrades}W / ${r.lossTrades}L</span>
+          </td>
+          <td>
+            <div class="${pnlColor}" style="font-weight: 700; font-family: monospace; font-size: 13px;">
+              ${sign}$${pnl.toFixed(2)}
+            </div>
+          </td>
+          <td>
+            <div style="font-size: 11px; color: var(--color-text-muted); font-family: monospace;">
+              $${Number(r.totalFee || 0).toFixed(3)}
+            </div>
+          </td>
+          <td>
+            <span class="text-green" style="font-size: 11px; font-weight: 600;">+$${bestPnl.toFixed(2)}</span>
+            <span style="color: var(--color-text-muted); font-size: 10px;"> / </span>
+            <span class="text-red" style="font-size: 11px; font-weight: 600;">$${worstPnl.toFixed(2)}</span>
+          </td>
+          <td>
+            <span style="font-size: 11.5px; color: var(--color-cyan); font-weight: 500;">
+              ${durText}
+            </span>
+          </td>
+          <td>
+            <div style="display: flex; gap: 4px;">
+              <button type="button" class="btn btn-xs" style="padding: 2px 6px; font-size: 10px;" onclick="addSymbolToWhitelist('${safeSym}')" title="Tambahkan ${safeSym} ke Whitelist">
+                + Whitelist
+              </button>
+              <button type="button" class="btn btn-xs btn-outline" style="padding: 2px 6px; font-size: 10px; border-color: rgba(255, 69, 58, 0.4); color: #ff453a;" onclick="addSymbolToBlacklist('${safeSym}')" title="Tambahkan ${safeSym} ke Blacklist">
+                + Blacklist
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+async function addSymbolToWhitelist(symbol) {
+  if (!confirm(`Tambahkan koin ${symbol} ke Whitelist bot?`)) return;
+  try {
+    const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    if (!fresh || !fresh.scanner) return;
+    const wl = fresh.scanner.whitelistSymbols || [];
+    if (!wl.includes(symbol)) {
+      wl.push(symbol);
+    }
+    fresh.scanner.whitelistSymbols = wl;
+    const res = await authFetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fresh),
+    }).then((r) => r.json());
+    if (res && res.success) {
+      currentConfig = res.config;
+      populateSettingsForm(res.config);
+      alert(`✅ Koin ${symbol} berhasil ditambahkan ke Whitelist!`);
+    }
+  } catch (err) {
+    alert('Gagal update whitelist: ' + err.message);
+  }
+}
+
+async function addSymbolToBlacklist(symbol) {
+  if (!confirm(`Tambahkan koin ${symbol} ke Blacklist (Koin Dikecualikan)?`)) return;
+  try {
+    const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
+    if (!fresh || !fresh.scanner) return;
+    const bl = fresh.scanner.excludeSymbols || [];
+    if (!bl.includes(symbol)) {
+      bl.push(symbol);
+    }
+    fresh.scanner.excludeSymbols = bl;
+    const res = await authFetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fresh),
+    }).then((r) => r.json());
+    if (res && res.success) {
+      currentConfig = res.config;
+      populateSettingsForm(res.config);
+      alert(`✅ Koin ${symbol} berhasil ditambahkan ke Blacklist!`);
+    }
+  } catch (err) {
+    alert('Gagal update blacklist: ' + err.message);
+  }
+}
+
+// ============================================================================
+// PING LATENCY MONITOR (FEATURE 5)
+// ============================================================================
+function updatePingUI(pingMs) {
+  const valEl = document.getElementById('ping-val');
+  const dotEl = document.getElementById('ping-dot');
+  if (!valEl || !dotEl) return;
+
+  const ms = Math.round(Number(pingMs) || 0);
+  valEl.textContent = `${ms} ms`;
+
+  dotEl.classList.remove('ping-good', 'ping-med', 'ping-slow');
+  if (ms <= 120) {
+    dotEl.classList.add('ping-good');
+  } else if (ms <= 350) {
+    dotEl.classList.add('ping-med');
+  } else {
+    dotEl.classList.add('ping-slow');
+  }
+}
+
+async function measurePingNow() {
+  const valEl = document.getElementById('ping-val');
+  if (valEl) valEl.textContent = '...';
+  try {
+    const res = await authFetch('/api/ping?_t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.success && data.pingMs !== undefined) {
+      updatePingUI(data.pingMs);
+    }
+  } catch (err) {
+    console.warn('[Ping] Gagal ukur ping:', err);
   }
 }
 

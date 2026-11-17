@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PlannedSimLayer, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig, DailySnapshot } from '../types';
+import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PlannedSimLayer, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig, DailySnapshot, CoinPerformanceRecord } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -778,6 +778,10 @@ export class WickSniperEngine {
         if (tickCount % 5 === 0) {
           await this.syncConfigFromDb();
           await this.syncTradesFromDb();
+        }
+
+        if (tickCount % 15 === 0) {
+          binanceFutures.measurePing().catch(() => {});
         }
 
         // Pemeriksaan snapshot harga 30m pasca-exit & simulasi spike tiap 30 detik
@@ -6181,6 +6185,7 @@ export class WickSniperEngine {
       monitoredCoinsCount: this.scanner.getTotalMonitoredSymbols(),
       ticksPerSecond: this.scanner.getTicksPerSecond(),
       marketDataAgeMs: this.scanner.getDataAgeMs(),
+      binancePingMs: binanceFutures.lastPingMs,
       leverage: this.config.leverage || 5,
       marginType: this.config.marginType || 'CROSSED',
       usedWeight1m: binanceFutures.lastUsedWeight,
@@ -8109,6 +8114,83 @@ export class WickSniperEngine {
   // --- DAILY SNAPSHOT METHODS ---
   public getDailySnapshots(): DailySnapshot[] {
     return this.dailySnapshots;
+  }
+
+  public async getCoinPerformance(): Promise<CoinPerformanceRecord[]> {
+    const isPaper = this.config.tradingMode === 'PAPER';
+    if (db.isConnected) {
+      return db.getCoinPerformance(isPaper);
+    }
+
+    const bySymbol = new Map<string, {
+      total: number;
+      win: number;
+      loss: number;
+      pnl: number;
+      fee: number;
+      best: number;
+      worst: number;
+      durationSum: number;
+      lastTs: number;
+    }>();
+
+    for (const t of this.closedTrades) {
+      if (t.isPaper !== isPaper) continue;
+      const s = t.symbol;
+      let rec = bySymbol.get(s);
+      if (!rec) {
+        rec = {
+          total: 0,
+          win: 0,
+          loss: 0,
+          pnl: 0,
+          fee: 0,
+          best: Number(t.realizedPnl) || 0,
+          worst: Number(t.realizedPnl) || 0,
+          durationSum: 0,
+          lastTs: t.timestamp || 0,
+        };
+        bySymbol.set(s, rec);
+      }
+      rec.total++;
+      const pnl = Number(t.realizedPnl) || 0;
+      rec.pnl += pnl;
+      rec.fee += Number(t.fee) || 0;
+      if (pnl >= 0) rec.win++; else rec.loss++;
+      if (pnl > rec.best) rec.best = pnl;
+      if (pnl < rec.worst) rec.worst = pnl;
+      rec.durationSum += (t.durationSeconds || 0);
+      if (t.timestamp > rec.lastTs) rec.lastTs = t.timestamp;
+    }
+
+    const result: CoinPerformanceRecord[] = [];
+    for (const [symbol, rec] of bySymbol.entries()) {
+      const winRate = rec.total > 0 ? Math.round((rec.win / rec.total) * 1000) / 10 : 0;
+      const totalPnl = Math.round(rec.pnl * 100) / 100;
+      let recommendation: 'WHITELIST_CANDIDATE' | 'NEUTRAL' | 'BLACKLIST_CANDIDATE' = 'NEUTRAL';
+      if (rec.total >= 2 && winRate >= 75 && totalPnl > 0) {
+        recommendation = 'WHITELIST_CANDIDATE';
+      } else if (rec.total >= 2 && (winRate <= 40 || totalPnl < -2)) {
+        recommendation = 'BLACKLIST_CANDIDATE';
+      }
+      result.push({
+        symbol,
+        totalTrades: rec.total,
+        winTrades: rec.win,
+        lossTrades: rec.loss,
+        winRate,
+        totalPnl,
+        totalFee: Math.round(rec.fee * 1000) / 1000,
+        bestTrade: Math.round(rec.best * 100) / 100,
+        worstTrade: Math.round(rec.worst * 100) / 100,
+        avgDurationSeconds: Math.round(rec.durationSum / rec.total),
+        lastTradeTimestamp: rec.lastTs,
+        recommendation,
+      });
+    }
+
+    result.sort((a, b) => b.totalPnl - a.totalPnl);
+    return result;
   }
 
   public async initDailySnapshots(): Promise<void> {

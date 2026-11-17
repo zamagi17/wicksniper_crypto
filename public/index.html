@@ -91,6 +91,11 @@
         <span id="ws-status-text">OFFLINE</span>
       </div>
 
+      <div id="ping-indicator" class="status-pill ping-pill" title="Latensi Jaringan REST & WebSocket Binance (Klik untuk ping manual)" onclick="measurePingNow()">
+        <span class="ping-dot" id="ping-dot"></span>
+        <span id="ping-val">-- ms</span>
+      </div>
+
       <div id="mode-badge" class="badge-mode paper">🧪 PAPER TRADING</div>
       <div id="schedule-badge" class="badge-schedule active" onclick="openSettingsModal()" title="Klik untuk atur Jadwal Operasional">
         <span class="sched-dot active"></span>
@@ -450,6 +455,39 @@
           </div>
         </div>
 
+        <!-- EQUITY CURVE & PNL CALENDAR -->
+        <div class="panel mobile-tab-panel" id="panel-equity-calendar" data-tab-name="trades" style="margin-top: 16px;">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">📈</span>
+              <h2>Kurva Pertumbuhan Modal &amp; Kalender Cuan</h2>
+            </div>
+            <div class="header-actions">
+              <span class="tag-counter" id="equity-total-growth">+0.00%</span>
+            </div>
+          </div>
+
+          <div class="equity-chart-container" style="padding: 16px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; margin: 12px 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 11.5px; color: var(--color-text-muted); font-weight: 600;">📊 TREN PERTUMBUHAN SALDO (EQUITY CURVE)</span>
+              <span id="equity-current-val" style="font-family: monospace; font-size: 13px; font-weight: 700; color: #30d158;">$0.00 USDT</span>
+            </div>
+            <div id="equity-svg-wrapper" style="width: 100%; min-height: 160px; position: relative;">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- MINI PNL CALENDAR CARDS -->
+          <div style="padding: 0 16px 16px 16px;">
+            <div style="font-size: 11.5px; color: var(--color-text-muted); font-weight: 600; margin-bottom: 8px;">
+              🗓️ REKAP CUAN HARIAN (WIB)
+            </div>
+            <div id="pnl-calendar-grid" class="pnl-calendar-grid">
+              <div class="text-muted" style="font-size: 12px;">Memuat kalender cuan harian...</div>
+            </div>
+          </div>
+        </div>
+
         <!-- DAILY PERFORMANCE SNAPSHOTS (00:00 WIB RECAP) -->
         <div class="panel mobile-tab-panel" id="panel-daily-snapshots" data-tab-name="trades" style="margin-top: 16px;">
           <div class="panel-header">
@@ -483,6 +521,44 @@
               <tbody id="daily-snapshots-body">
                 <tr>
                   <td colspan="9" class="text-center text-muted">Memuat data snapshot harian...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- COIN PERFORMANCE MATRIX (LEADERBOARD KOIN) -->
+        <div class="panel mobile-tab-panel" id="panel-coin-performance" data-tab-name="trades" style="margin-top: 16px;">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">🪙</span>
+              <h2>Matriks Performa Koin (Evaluasi Whitelist &amp; Blacklist)</h2>
+            </div>
+            <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+              <span class="tag-counter" id="coin-matrix-count">0 Koin</span>
+              <button type="button" class="btn btn-xs btn-outline" onclick="fetchCoinPerformance()" title="Segarkan performa koin">
+                🔄 Segarkan
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Koin / Simbol</th>
+                  <th>Evaluasi AI</th>
+                  <th>Win Rate</th>
+                  <th>Total PnL (USDT)</th>
+                  <th>Total Fee</th>
+                  <th>Best / Worst Trade</th>
+                  <th>Rata-rata Durasi</th>
+                  <th>Aksi Cepat</th>
+                </tr>
+              </thead>
+              <tbody id="coin-performance-body">
+                <tr>
+                  <td colspan="8" class="text-center text-muted">Memuat data matriks performa koin...</td>
                 </tr>
               </tbody>
             </table>
