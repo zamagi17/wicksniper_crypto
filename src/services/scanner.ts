@@ -398,27 +398,13 @@ export class SpikeScanner {
           continue;
         }
 
-        // Filter Kenaikan 24 Jam (Mencegah Monster Parabolic Pump)
-        if (this.config.max24hChangePct && this.config.max24hChangePct > 0) {
-          const priceChange24h = parseFloat(t.P || '0');
-          if (Math.abs(priceChange24h) > this.config.max24hChangePct) {
-            const cooldownMins = this.config.cooldownMinutes || 10;
-            this.setCooldown(symbol, cooldownMins);
-            logger.log(
-              'WARN',
-              `🛡️ [MAX 24H SKIP] ${symbol} (+${surgePct.toFixed(2)}% dalam ${this.config.spikeLookbackSeconds}s): Dilewati karena perubahan 24 jam (${priceChange24h >= 0 ? '+' : ''}${priceChange24h.toFixed(1)}%) melebihi batas aman (±${this.config.max24hChangePct}%). Menghindari monster pump parabolik (cooldown ${cooldownMins}m).`,
-              symbol
-            );
-            continue;
-          }
-        }
-
         // Cek apakah spike untuk koin ini baru saja dibunyikan dalam 15 detik terakhir
         const recentAlert = this.recentSpikes.find((a) => a.symbol === symbol && now - a.timestamp < 15000);
         if (recentAlert) {
           continue;
         }
 
+        const priceChange24h = parseFloat(t.P || '0');
         const alert: SpikeAlert = {
           id: `${symbol}_${now}`,
           symbol,
@@ -428,6 +414,7 @@ export class SpikeScanner {
           lookbackSeconds: this.config.spikeLookbackSeconds,
           timestamp: now,
           status: 'PENDING',
+          priceChange24hPct: priceChange24h,
         };
 
         this.recentSpikes.unshift(alert);

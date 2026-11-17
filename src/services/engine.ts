@@ -1005,6 +1005,22 @@ export class WickSniperEngine {
       return;
     }
 
+    // Filter Kenaikan 24 Jam (Mencegah Monster Parabolic Pump)
+    const max24hChangePct = this.config.scanner?.max24hChangePct ?? 0;
+    const priceChange24h = alert.priceChange24hPct ?? this.scanner.getTickerStats(symbol)?.change24hPct ?? 0;
+    if (max24hChangePct > 0 && Math.abs(priceChange24h) > max24hChangePct) {
+      const cooldownMins = this.config.scanner?.cooldownMinutes || 10;
+      this.scanner.setCooldown(symbol, cooldownMins);
+      const reason = `Perubahan 24 jam (${priceChange24h >= 0 ? '+' : ''}${priceChange24h.toFixed(1)}%) melebihi batas aman (±${max24hChangePct}%)`;
+      logger.log(
+        'WARN',
+        `🛡️ [MAX 24H SKIP] ${symbol} (+${alert.surgePct.toFixed(2)}% dalam ${alert.lookbackSeconds}s): Dilewati karena ${reason}. Menghindari monster pump parabolik (cooldown ${cooldownMins}m).`,
+        symbol
+      );
+      this.recordSkippedSpike(alert, reason);
+      return;
+    }
+
     // Proteksi Circuit Breaker (Rem Kerugian Harian Maksimal)
     const maxDailyLoss = this.config.risk?.maxDailyLossUsdt ?? 0;
     if (maxDailyLoss > 0) {
