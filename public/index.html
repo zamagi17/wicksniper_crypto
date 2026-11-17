@@ -449,6 +449,45 @@
             </div>
           </div>
         </div>
+
+        <!-- DAILY PERFORMANCE SNAPSHOTS (00:00 WIB RECAP) -->
+        <div class="panel mobile-tab-panel" id="panel-daily-snapshots" data-tab-name="trades" style="margin-top: 16px;">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">📅</span>
+              <h2>Snapshot Kinerja Harian (00:00 WIB)</h2>
+            </div>
+            <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+              <span class="tag-counter" id="snapshot-count-tag">0 Hari</span>
+              <button type="button" class="btn btn-xs btn-outline" id="btn-trigger-snapshot" onclick="triggerManualDailySnapshot()" title="Ambil snapshot kinerja sekarang">
+                ⚡ Ambil Snapshot
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Tanggal (WIB)</th>
+                  <th>Mode</th>
+                  <th>Saldo Akhir</th>
+                  <th>Net PnL Hari Ini</th>
+                  <th>Win Rate</th>
+                  <th>Total Trade</th>
+                  <th>Total Fee</th>
+                  <th>Best / Worst Koin</th>
+                  <th>Akumulasi PnL</th>
+                </tr>
+              </thead>
+              <tbody id="daily-snapshots-body">
+                <tr>
+                  <td colspan="9" class="text-center text-muted">Memuat data snapshot harian...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   </main>

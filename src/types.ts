@@ -639,6 +639,39 @@ export interface PostExitSnapshot {
   updatedAt: number;
 }
 
+export interface DailySnapshot {
+  id: string; // e.g. "2026-11-16_PAPER" or "2026-11-16_LIVE"
+  date: string; // "YYYY-MM-DD" in WIB
+  tradingMode: 'LIVE' | 'PAPER';
+  endingBalance: number;
+  startBalance?: number;
+  dailyPnl: number;
+  dailyPnlPct: number;
+  cumulativePnl: number;
+  totalTrades: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  totalFee?: number;
+  grossPnl?: number;
+  bestTradeSymbol?: string;
+  bestTradePnl?: number;
+  worstTradeSymbol?: string;
+  worstTradePnl?: number;
+  spikesDetected?: number;
+  strategyBreakdown?: {
+    wickSniperTrades?: number;
+    wickSniperPnl?: number;
+    smartMoneyTrades?: number;
+    smartMoneyPnl?: number;
+    momentumLongTrades?: number;
+    momentumLongPnl?: number;
+  };
+  details?: Record<string, any>;
+  timestamp: number;
+  createdAt: string;
+}
+
 export interface ClosedTrade {
   id: string;
   symbol: string;
@@ -720,6 +753,7 @@ export interface EngineStatus {
   activePositions: ActivePosition[];
   recentSpikes: SpikeAlert[];
   recentTrades: ClosedTrade[];
+  dailySnapshots?: DailySnapshot[];
   cooldownCoins: { symbol: string; until: number }[];
   monitoredCoinsCount?: number;
   ticksPerSecond?: number;

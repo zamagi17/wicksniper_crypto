@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ActivePosition, ClosedTrade, GridLayer } from '../types';
+import { ActivePosition, ClosedTrade, GridLayer, DailySnapshot } from '../types';
 import { logger } from './logger';
 
 export interface TelegramConfig {
@@ -516,6 +516,51 @@ ${details}
 📡 <b>Sensor Pasar:</b> Memindai ${status.monitoredCoins} Koin | ${marketStatus}
 
 ⏱️ <i>Laporan Berkala • ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</i>`;
+
+    this.sendMessage(msg).catch(() => {});
+  }
+
+  /**
+   * Laporan Rekap Kinerja Harian (00:00 WIB Rollover)
+   */
+  public async notifyDailySummary(snapshot: DailySnapshot) {
+    if (!this.isConfigured()) return;
+    const isProfit = snapshot.dailyPnl >= 0;
+    const pnlSign = isProfit ? '+' : '';
+    const pnlIcon = isProfit ? '🟢' : '🔴';
+    const modeTag = snapshot.tradingMode === 'LIVE' ? '🟢 LIVE FUTURES' : '🧪 PAPER TRADING';
+    
+    let stratText = '';
+    if (snapshot.strategyBreakdown) {
+      const sb = snapshot.strategyBreakdown;
+      const wsPnl = sb.wickSniperPnl ?? 0;
+      const smPnl = sb.smartMoneyPnl ?? 0;
+      const mlPnl = sb.momentumLongPnl ?? 0;
+      stratText = `\n🎯 <b>Rincian Strategi:</b>\n` +
+        `• Wick Sniper: ${sb.wickSniperTrades ?? 0} trade (${wsPnl >= 0 ? '+' : ''}$${wsPnl.toFixed(2)})\n` +
+        `• Smart Money: ${sb.smartMoneyTrades ?? 0} trade (${smPnl >= 0 ? '+' : ''}$${smPnl.toFixed(2)})\n` +
+        `• Momentum Long: ${sb.momentumLongTrades ?? 0} trade (${mlPnl >= 0 ? '+' : ''}$${mlPnl.toFixed(2)})`;
+    }
+
+    const bestTradeText = snapshot.bestTradeSymbol
+      ? `\n🌟 <b>Best Trade:</b> <code>${snapshot.bestTradeSymbol}</code> (+$${(snapshot.bestTradePnl ?? 0).toFixed(2)})`
+      : '';
+    const worstTradeText = snapshot.worstTradeSymbol
+      ? `\n🥀 <b>Worst Trade:</b> <code>${snapshot.worstTradeSymbol}</code> ($${(snapshot.worstTradePnl ?? 0).toFixed(2)})`
+      : '';
+
+    const msg =
+`📅 <b>[REKAP KINERJA HARIAN (00:00 WIB)]</b> 📅
+
+🗓️ <b>Tanggal:</b> <b>${snapshot.date} (WIB)</b>
+⚙️ <b>Mode:</b> ${modeTag}
+💰 <b>Saldo Akhir:</b> <b>$${snapshot.endingBalance.toFixed(2)} USDT</b>
+${pnlIcon} <b>Net PnL Harian:</b> <b>${pnlSign}$${snapshot.dailyPnl.toFixed(2)} USDT (${pnlSign}${snapshot.dailyPnlPct.toFixed(2)}%)</b>
+💵 <b>Total Fee:</b> $${(snapshot.totalFee ?? 0).toFixed(3)} USDT
+📈 <b>Win Rate:</b> <b>${snapshot.winRate.toFixed(1)}%</b> (${snapshot.winCount}W / ${snapshot.lossCount}L dari ${snapshot.totalTrades} trade)
+💎 <b>Akumulasi PnL:</b> <b>${snapshot.cumulativePnl >= 0 ? '+' : ''}$${snapshot.cumulativePnl.toFixed(2)} USDT</b>${bestTradeText}${worstTradeText}${stratText}
+
+⏱️ <i>Tercatat otomatis pada pergantian hari WIB</i>`;
 
     this.sendMessage(msg).catch(() => {});
   }

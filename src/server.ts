@@ -516,6 +516,34 @@ app.post('/api/blacklist/remove', requireAuth, (req, res) => {
   }
 });
 
+app.get('/api/daily-snapshots', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '30'), 10) || 30));
+  const mode = req.query.mode as string | undefined;
+
+  if (db.isConnected) {
+    const snapshots = await db.getDailySnapshots(limit, mode);
+    return res.json({ success: true, snapshots });
+  }
+
+  let list = engine.getDailySnapshots();
+  if (mode) {
+    list = list.filter((s) => s.tradingMode === mode);
+  }
+  return res.json({ success: true, snapshots: list.slice(0, limit) });
+});
+
+app.post('/api/daily-snapshots/trigger', requireAuth, async (req, res) => {
+  try {
+    const todayWib = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+    const targetDate = (req.body?.date as string) || todayWib;
+    const snapshot = await engine.takeDailySnapshot(targetDate, false);
+    return res.json({ success: true, snapshot, message: `Snapshot untuk tanggal ${targetDate} berhasil diambil.` });
+  } catch (e: any) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 // WebSocket Realtime Broadcaster
 wss.on('connection', (ws) => {
   // Kirim initial state & safe config

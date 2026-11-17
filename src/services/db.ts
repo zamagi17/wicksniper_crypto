@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord } from '../types';
+import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord, DailySnapshot } from '../types';
 
 dotenv.config();
 
@@ -12,6 +12,7 @@ export class DatabaseService {
   private stateWriteTimer: NodeJS.Timeout | null = null;
   private readonly STATE_WRITE_INTERVAL = 5000; // Flush every 5s
   private tuningLogsMemory: TuningHistoryRecord[] = [];
+  private dailySnapshotsMemory: DailySnapshot[] = [];
 
   constructor() {
     this.initPool();
@@ -187,6 +188,37 @@ export class DatabaseService {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
           CREATE INDEX IF NOT EXISTS idx_wicksniper_tuning_logs_created ON wicksniper_tuning_logs (created_at DESC);
+        `);
+
+        // 6. Tabel Snapshot Kinerja Harian (00:00 WIB)
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS wicksniper_daily_snapshots (
+            id VARCHAR(64) PRIMARY KEY,
+            date VARCHAR(16) NOT NULL,
+            trading_mode VARCHAR(16) NOT NULL,
+            ending_balance NUMERIC NOT NULL,
+            start_balance NUMERIC,
+            daily_pnl NUMERIC NOT NULL,
+            daily_pnl_pct NUMERIC NOT NULL,
+            cumulative_pnl NUMERIC NOT NULL,
+            total_trades INT NOT NULL,
+            win_count INT NOT NULL,
+            loss_count INT NOT NULL,
+            win_rate NUMERIC NOT NULL,
+            total_fee NUMERIC DEFAULT 0,
+            gross_pnl NUMERIC DEFAULT 0,
+            best_trade_symbol VARCHAR(32),
+            best_trade_pnl NUMERIC,
+            worst_trade_symbol VARCHAR(32),
+            worst_trade_pnl NUMERIC,
+            spikes_detected INT DEFAULT 0,
+            strategy_breakdown JSONB,
+            details JSONB,
+            timestamp BIGINT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_daily_snapshots_date ON wicksniper_daily_snapshots (date DESC);
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_daily_snapshots_mode ON wicksniper_daily_snapshots (trading_mode);
         `);
 
         this.isConnected = true;
@@ -528,6 +560,79 @@ export class DatabaseService {
     } catch (e: any) {
       console.error('[Database] Gagal hitung trade stats:', e.message);
       return null;
+    }
+  }
+
+  public async getTradeDates(isPaper?: boolean): Promise<string[]> {
+    if (!this.isConnected || !this.pool) return [];
+    try {
+      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $1' : '';
+      const params = isPaper !== undefined ? [isPaper] : [];
+      const res = await this.pool.query(
+        `SELECT DISTINCT to_char(to_timestamp(timestamp / 1000) AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD') AS trade_date
+         FROM wicksniper_trades
+         ${whereMode}
+         ORDER BY trade_date ASC;`,
+        params
+      );
+      return res.rows.map((r: any) => r.trade_date).filter(Boolean);
+    } catch (e: any) {
+      console.error('[Database] Gagal getTradeDates:', e.message);
+      return [];
+    }
+  }
+
+  public async getTradesBetween(startTs: number, endTs: number, isPaper?: boolean): Promise<ClosedTrade[]> {
+    if (!this.isConnected || !this.pool) return [];
+    try {
+      const whereMode = isPaper !== undefined ? 'AND is_paper = $3' : '';
+      const params: any[] = [startTs, endTs];
+      if (isPaper !== undefined) params.push(isPaper);
+      const res = await this.pool.query(
+        `SELECT id, symbol, side, entry_price AS "entryPrice", exit_price AS "exitPrice",
+                qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
+                pnl_pct AS "pnlPct", duration_seconds AS "durationSeconds",
+                exit_reason AS "exitReason", is_paper AS "isPaper",
+                closed_at AS "closedAt", timestamp,
+                params_snapshot AS "paramsSnapshot",
+                layers_detail AS "layersDetail",
+                fee, gross_pnl AS "grossPnl", layers_filled AS "layersFilled",
+                post_exit_30m AS "postExit30m",
+                highest_price AS "highestPrice", lowest_price AS "lowestPrice",
+                mfe_pct AS "mfePct", mae_pct AS "maePct",
+                price_change_24h_pct AS "priceChange24hPct"
+         FROM wicksniper_trades
+         WHERE timestamp >= $1 AND timestamp <= $2 ${whereMode}
+         ORDER BY timestamp ASC;`,
+        params
+      );
+      return res.rows.map((r: any) => {
+        const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
+        return {
+          id: r.id,
+          symbol: r.symbol,
+          side: r.side,
+          entryPrice: parseFloat(r.entryPrice),
+          exitPrice: parseFloat(r.exitPrice),
+          qty: parseFloat(r.qty),
+          marginUsed: parseFloat(r.marginUsed),
+          realizedPnl: parseFloat(r.realizedPnl),
+          grossPnl: r.grossPnl != null ? parseFloat(r.grossPnl) : undefined,
+          fee: r.fee != null ? parseFloat(r.fee) : undefined,
+          pnlPct: parseFloat(r.pnlPct),
+          durationSeconds: parseInt(r.durationSeconds, 10),
+          exitReason: r.exitReason,
+          isPaper: r.isPaper,
+          closedAt: r.closedAt,
+          timestamp: parseInt(r.timestamp, 10),
+          layersFilled: r.layersFilled,
+          paramsSnapshot: parsedSnap,
+          layersDetail: typeof r.layersDetail === 'string' ? JSON.parse(r.layersDetail) : r.layersDetail || null,
+        };
+      });
+    } catch (e: any) {
+      console.error('[Database] Gagal getTradesBetween:', e.message);
+      return [];
     }
   }
 
@@ -949,6 +1054,147 @@ export class DatabaseService {
     } catch (e: any) {
       console.error('[Database] Gagal update tuning status:', e.message);
     }
+  }
+
+  // --- DAILY SNAPSHOT PERSISTENCE ---
+  public async saveDailySnapshot(s: DailySnapshot): Promise<void> {
+    const idx = this.dailySnapshotsMemory.findIndex((m) => m.id === s.id);
+    if (idx >= 0) {
+      this.dailySnapshotsMemory[idx] = s;
+    } else {
+      this.dailySnapshotsMemory.unshift(s);
+      if (this.dailySnapshotsMemory.length > 100) this.dailySnapshotsMemory.pop();
+    }
+
+    if (!this.isConnected || !this.pool) return;
+    try {
+      await this.pool.query(
+        `INSERT INTO wicksniper_daily_snapshots (
+          id, date, trading_mode, ending_balance, start_balance, daily_pnl,
+          daily_pnl_pct, cumulative_pnl, total_trades, win_count, loss_count,
+          win_rate, total_fee, gross_pnl, best_trade_symbol, best_trade_pnl,
+          worst_trade_symbol, worst_trade_pnl, spikes_detected, strategy_breakdown,
+          details, timestamp
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+        ) ON CONFLICT (id) DO UPDATE SET
+          ending_balance = EXCLUDED.ending_balance,
+          start_balance = EXCLUDED.start_balance,
+          daily_pnl = EXCLUDED.daily_pnl,
+          daily_pnl_pct = EXCLUDED.daily_pnl_pct,
+          cumulative_pnl = EXCLUDED.cumulative_pnl,
+          total_trades = EXCLUDED.total_trades,
+          win_count = EXCLUDED.win_count,
+          loss_count = EXCLUDED.loss_count,
+          win_rate = EXCLUDED.win_rate,
+          total_fee = EXCLUDED.total_fee,
+          gross_pnl = EXCLUDED.gross_pnl,
+          best_trade_symbol = EXCLUDED.best_trade_symbol,
+          best_trade_pnl = EXCLUDED.best_trade_pnl,
+          worst_trade_symbol = EXCLUDED.worst_trade_symbol,
+          worst_trade_pnl = EXCLUDED.worst_trade_pnl,
+          spikes_detected = EXCLUDED.spikes_detected,
+          strategy_breakdown = EXCLUDED.strategy_breakdown,
+          details = EXCLUDED.details,
+          timestamp = EXCLUDED.timestamp;`,
+        [
+          s.id,
+          s.date,
+          s.tradingMode,
+          s.endingBalance,
+          s.startBalance ?? null,
+          s.dailyPnl,
+          s.dailyPnlPct,
+          s.cumulativePnl,
+          s.totalTrades,
+          s.winCount,
+          s.lossCount,
+          s.winRate,
+          s.totalFee ?? 0,
+          s.grossPnl ?? 0,
+          s.bestTradeSymbol ?? null,
+          s.bestTradePnl ?? null,
+          s.worstTradeSymbol ?? null,
+          s.worstTradePnl ?? null,
+          s.spikesDetected ?? 0,
+          s.strategyBreakdown ? JSON.stringify(s.strategyBreakdown) : null,
+          s.details ? JSON.stringify(s.details) : null,
+          s.timestamp,
+        ]
+      );
+    } catch (e: any) {
+      console.error('[Database] Gagal simpan daily snapshot ke DB:', e.message);
+    }
+  }
+
+  public async getDailySnapshots(limit: number = 30, tradingMode?: string): Promise<DailySnapshot[]> {
+    if (!this.isConnected || !this.pool) {
+      let filtered = this.dailySnapshotsMemory;
+      if (tradingMode) filtered = filtered.filter((s) => s.tradingMode === tradingMode);
+      return filtered.slice(0, limit);
+    }
+    try {
+      let query = `
+        SELECT id, date, trading_mode AS "tradingMode",
+               ending_balance AS "endingBalance", start_balance AS "startBalance",
+               daily_pnl AS "dailyPnl", daily_pnl_pct AS "dailyPnlPct",
+               cumulative_pnl AS "cumulativePnl", total_trades AS "totalTrades",
+               win_count AS "winCount", loss_count AS "lossCount", win_rate AS "winRate",
+               total_fee AS "totalFee", gross_pnl AS "grossPnl",
+               best_trade_symbol AS "bestTradeSymbol", best_trade_pnl AS "bestTradePnl",
+               worst_trade_symbol AS "worstTradeSymbol", worst_trade_pnl AS "worstTradePnl",
+               spikes_detected AS "spikesDetected", strategy_breakdown AS "strategyBreakdown",
+               details, timestamp, created_at AS "createdAt"
+        FROM wicksniper_daily_snapshots
+      `;
+      const params: any[] = [];
+      if (tradingMode) {
+        query += ` WHERE trading_mode = $1 ORDER BY date DESC LIMIT $2;`;
+        params.push(tradingMode, limit);
+      } else {
+        query += ` ORDER BY date DESC LIMIT $1;`;
+        params.push(limit);
+      }
+      const res = await this.pool.query(query, params);
+      if (res.rows.length === 0) {
+        let filtered = this.dailySnapshotsMemory;
+        if (tradingMode) filtered = filtered.filter((s) => s.tradingMode === tradingMode);
+        return filtered.slice(0, limit);
+      }
+      return res.rows.map((r: any) => ({
+        id: r.id,
+        date: r.date,
+        tradingMode: r.tradingMode,
+        endingBalance: parseFloat(r.endingBalance),
+        startBalance: r.startBalance != null ? parseFloat(r.startBalance) : undefined,
+        dailyPnl: parseFloat(r.dailyPnl),
+        dailyPnlPct: parseFloat(r.dailyPnlPct),
+        cumulativePnl: parseFloat(r.cumulativePnl),
+        totalTrades: parseInt(r.totalTrades, 10),
+        winCount: parseInt(r.winCount, 10),
+        lossCount: parseInt(r.lossCount, 10),
+        winRate: parseFloat(r.winRate),
+        totalFee: r.totalFee != null ? parseFloat(r.totalFee) : 0,
+        grossPnl: r.grossPnl != null ? parseFloat(r.grossPnl) : 0,
+        bestTradeSymbol: r.bestTradeSymbol || undefined,
+        bestTradePnl: r.bestTradePnl != null ? parseFloat(r.bestTradePnl) : undefined,
+        worstTradeSymbol: r.worstTradeSymbol || undefined,
+        worstTradePnl: r.worstTradePnl != null ? parseFloat(r.worstTradePnl) : undefined,
+        spikesDetected: r.spikesDetected != null ? parseInt(r.spikesDetected, 10) : 0,
+        strategyBreakdown: typeof r.strategyBreakdown === 'string' ? JSON.parse(r.strategyBreakdown) : (r.strategyBreakdown || undefined),
+        details: typeof r.details === 'string' ? JSON.parse(r.details) : (r.details || undefined),
+        timestamp: parseInt(r.timestamp, 10),
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+      }));
+    } catch (e: any) {
+      console.error('[Database] Gagal load daily snapshots dari DB:', e.message);
+      return this.dailySnapshotsMemory.slice(0, limit);
+    }
+  }
+
+  public async getDailySnapshotByDate(date: string, tradingMode: string): Promise<DailySnapshot | null> {
+    const list = await this.getDailySnapshots(10, tradingMode);
+    return list.find((s) => s.date === date && s.tradingMode === tradingMode) || null;
   }
 
   public async close(): Promise<void> {

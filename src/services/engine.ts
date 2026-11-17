@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PlannedSimLayer, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig } from '../types';
+import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, GridLayer, MarketSnapshot, PendingSignalWatchlistItem, PlannedSimLayer, PostExitSnapshot, ScheduleStatus, SmartMoneyConfig, SmartMoneyFlowStatus, SmartMoneySignal, SpikeAlert, SpikeSimResult, SymbolAnalysisResult, TradingScheduleConfig, DailySnapshot } from '../types';
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
@@ -137,6 +137,7 @@ export class WickSniperEngine {
   private syncingTpSymbols: Set<string> = new Set();
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
+  private dailySnapshots: DailySnapshot[] = [];
   private cachedDbStats: {
     totalTrades: number;
     totalWins: number;
@@ -676,6 +677,7 @@ export class WickSniperEngine {
         logger.log('INFO', `📡 [DATABASE] ${dbSpikes.length} riwayat spike dimuat (${this.activeSimSpikes.size} simulasi aktif dilanjutkan).`);
       }
       this.totalSpikesCount = await db.getSpikesCount();
+      await this.initDailySnapshots();
     }
 
     logger.log('SUCCESS', `🚀 [WICK SNIPER ENGINE AKTIF] Mode: ${this.config.tradingMode} | Leverage: ${this.config.leverage}x`);
@@ -5920,6 +5922,9 @@ export class WickSniperEngine {
       const oldDate = this.lastResetDateWib;
       this.lastResetDateWib = todayWib;
       this.spikesDetectedToday = 0;
+      this.takeDailySnapshot(oldDate).catch((err) => {
+        logger.log('WARN', `Gagal mengambil snapshot harian ${oldDate}: ${err.message}`);
+      });
       db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
       logger.log('INFO', `🌅 [RESET HARIAN 00:00 WIB] Pergantian hari (${oldDate} ➔ ${todayWib} WIB). Metrik & lonjakan harian telah direset.`);
       this.broadcastStatus();
@@ -6171,6 +6176,7 @@ export class WickSniperEngine {
       activePositions: Array.from(this.activePositions.values()),
       recentSpikes: this.scanner.getRecentSpikes(),
       recentTrades: this.closedTrades.slice(0, 20),
+      dailySnapshots: this.dailySnapshots.slice(0, 15),
       cooldownCoins: this.getMergedCooldowns(),
       monitoredCoinsCount: this.scanner.getTotalMonitoredSymbols(),
       ticksPerSecond: this.scanner.getTicksPerSecond(),
@@ -8098,5 +8104,209 @@ export class WickSniperEngine {
         // Silent fail untuk analisa background
       }
     }
+  }
+
+  // --- DAILY SNAPSHOT METHODS ---
+  public getDailySnapshots(): DailySnapshot[] {
+    return this.dailySnapshots;
+  }
+
+  public async initDailySnapshots(): Promise<void> {
+    try {
+      const mode = this.config.tradingMode === 'PAPER' ? 'PAPER' : 'LIVE';
+      if (db.isConnected) {
+        const list = await db.getDailySnapshots(30, mode);
+        this.dailySnapshots = list;
+        await this.backfillPastDailySnapshots();
+      }
+    } catch (e: any) {
+      logger.log('WARN', `Gagal inisialisasi daily snapshots: ${e.message}`);
+    }
+  }
+
+  public async backfillPastDailySnapshots(): Promise<void> {
+    if (!db.isConnected) return;
+    try {
+      const isPaper = this.config.tradingMode === 'PAPER';
+      const dates = await db.getTradeDates(isPaper);
+      const todayWib = this.getTodayWibDate();
+      const existingDates = new Set(this.dailySnapshots.map((s) => s.date));
+
+      for (const d of dates) {
+        // Jangan timpa snapshot hari ini saat backfill historis
+        if (d !== todayWib && !existingDates.has(d)) {
+          logger.log('INFO', `⏳ [BACKFILL SNAPSHOT] Menghitung snapshot historis untuk tanggal ${d} WIB...`);
+          await this.takeDailySnapshot(d, true);
+        }
+      }
+    } catch (e: any) {
+      logger.log('WARN', `Gagal backfill snapshot historis: ${e.message}`);
+    }
+  }
+
+  public async takeDailySnapshot(targetDateStr: string, manual: boolean = false): Promise<DailySnapshot> {
+    const isPaper = this.config.tradingMode === 'PAPER';
+    const tradingMode: 'LIVE' | 'PAPER' = isPaper ? 'PAPER' : 'LIVE';
+    const id = `${targetDateStr}_${tradingMode}`;
+
+    const startTs = new Date(`${targetDateStr}T00:00:00+07:00`).getTime();
+    const endTs = new Date(`${targetDateStr}T23:59:59.999+07:00`).getTime();
+
+    let dayTrades: ClosedTrade[] = [];
+    if (db.isConnected) {
+      dayTrades = await db.getTradesBetween(startTs, endTs, isPaper);
+    } else {
+      dayTrades = this.closedTrades.filter(
+        (t) => t.isPaper === isPaper && t.timestamp >= startTs && t.timestamp <= endTs
+      );
+    }
+
+    const totalTrades = dayTrades.length;
+    let winCount = 0;
+    let lossCount = 0;
+    let dailyPnl = 0;
+    let totalFee = 0;
+    let grossPnl = 0;
+    let bestTradeSymbol: string | undefined;
+    let bestTradePnl: number | undefined;
+    let worstTradeSymbol: string | undefined;
+    let worstTradePnl: number | undefined;
+
+    let wsTrades = 0;
+    let wsPnl = 0;
+    let smTrades = 0;
+    let smPnl = 0;
+    let mlTrades = 0;
+    let mlPnl = 0;
+
+    for (const t of dayTrades) {
+      const pnl = Number(t.realizedPnl) || 0;
+      dailyPnl += pnl;
+      totalFee += Number(t.fee) || 0;
+      grossPnl += t.grossPnl != null ? Number(t.grossPnl) : pnl;
+
+      if (pnl >= 0) {
+        winCount++;
+      } else {
+        lossCount++;
+      }
+
+      if (bestTradePnl === undefined || pnl > bestTradePnl) {
+        bestTradePnl = pnl;
+        bestTradeSymbol = t.symbol;
+      }
+      if (worstTradePnl === undefined || pnl < worstTradePnl) {
+        worstTradePnl = pnl;
+        worstTradeSymbol = t.symbol;
+      }
+
+      const strat =
+        t.strategyType ||
+        (t.paramsSnapshot as any)?.strategy ||
+        (t.side === 'LONG' ? 'MOMENTUM_LONG' : 'WICK_SNIPER');
+      if (strat === 'SMART_MONEY') {
+        smTrades++;
+        smPnl += pnl;
+      } else if (strat === 'MOMENTUM_LONG') {
+        mlTrades++;
+        mlPnl += pnl;
+      } else {
+        wsTrades++;
+        wsPnl += pnl;
+      }
+    }
+
+    dailyPnl = Math.round(dailyPnl * 100) / 100;
+    totalFee = Math.round(totalFee * 1000) / 1000;
+    grossPnl = Math.round(grossPnl * 100) / 100;
+    const winRate = totalTrades > 0 ? Math.round((winCount / totalTrades) * 1000) / 10 : 0;
+
+    const currentBalance = isPaper ? this.virtualBalance : this.realBalance;
+    const todayWib = this.getTodayWibDate();
+    let endingBalance = currentBalance;
+
+    let cumulativePnl = 0;
+    if (db.isConnected) {
+      const pastTrades = await db.getTradesBetween(0, endTs, isPaper);
+      cumulativePnl = pastTrades.reduce((acc, t) => acc + (Number(t.realizedPnl) || 0), 0);
+      if (targetDateStr !== todayWib) {
+        const baseBalance = isPaper
+          ? (this.config.paperTrading?.initialVirtualBalance || 500)
+          : currentBalance;
+        endingBalance = Math.round((baseBalance + cumulativePnl) * 100) / 100;
+      }
+    } else {
+      const pastTrades = this.closedTrades.filter((t) => t.isPaper === isPaper && t.timestamp <= endTs);
+      cumulativePnl = pastTrades.reduce((acc, t) => acc + (Number(t.realizedPnl) || 0), 0);
+      if (targetDateStr !== todayWib) {
+        const baseBalance = isPaper
+          ? (this.config.paperTrading?.initialVirtualBalance || 500)
+          : currentBalance;
+        endingBalance = Math.round((baseBalance + cumulativePnl) * 100) / 100;
+      }
+    }
+    cumulativePnl = Math.round(cumulativePnl * 100) / 100;
+    endingBalance = Math.round(endingBalance * 100) / 100;
+
+    const startBalance = Math.max(1, endingBalance - dailyPnl);
+    const dailyPnlPct = Math.round((dailyPnl / startBalance) * 10000) / 100;
+
+    const snapshot: DailySnapshot = {
+      id,
+      date: targetDateStr,
+      tradingMode,
+      endingBalance,
+      startBalance: Math.round(startBalance * 100) / 100,
+      dailyPnl,
+      dailyPnlPct,
+      cumulativePnl,
+      totalTrades,
+      winCount,
+      lossCount,
+      winRate,
+      totalFee,
+      grossPnl,
+      bestTradeSymbol,
+      bestTradePnl: bestTradePnl !== undefined ? Math.round(bestTradePnl * 100) / 100 : undefined,
+      worstTradeSymbol,
+      worstTradePnl: worstTradePnl !== undefined ? Math.round(worstTradePnl * 100) / 100 : undefined,
+      spikesDetected: targetDateStr === todayWib ? this.spikesDetectedToday : undefined,
+      strategyBreakdown: {
+        wickSniperTrades: wsTrades,
+        wickSniperPnl: Math.round(wsPnl * 100) / 100,
+        smartMoneyTrades: smTrades,
+        smartMoneyPnl: Math.round(smPnl * 100) / 100,
+        momentumLongTrades: mlTrades,
+        momentumLongPnl: Math.round(mlPnl * 100) / 100,
+      },
+      timestamp: Date.now(),
+      createdAt: new Date().toISOString(),
+    };
+
+    const existingIdx = this.dailySnapshots.findIndex((s) => s.id === snapshot.id);
+    if (existingIdx >= 0) {
+      this.dailySnapshots[existingIdx] = snapshot;
+    } else {
+      this.dailySnapshots.unshift(snapshot);
+      this.dailySnapshots.sort((a, b) => b.date.localeCompare(a.date));
+      if (this.dailySnapshots.length > 50) this.dailySnapshots.pop();
+    }
+
+    if (db.isConnected) {
+      await db.saveDailySnapshot(snapshot);
+    }
+
+    // Kirim notifikasi Telegram saat reset otomatis tengah malam atau saat user meminta manual
+    if (!manual) {
+      telegram.notifyDailySummary(snapshot).catch(() => {});
+    }
+
+    logger.log(
+      'SUCCESS',
+      `📸 [SNAPSHOT HARIAN TERSIMPAN] Tanggal: ${targetDateStr} (${tradingMode}) | PnL: ${dailyPnl >= 0 ? '+' : ''}$${dailyPnl} (${winRate}% WR, ${totalTrades} trades) | Saldo: $${endingBalance}`
+    );
+
+    this.broadcastStatus();
+    return snapshot;
   }
 }

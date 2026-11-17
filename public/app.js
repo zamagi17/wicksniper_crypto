@@ -512,6 +512,7 @@ async function fetchInitialData() {
     }
     renderStatus(resStatus);
     renderLogs(resLogs);
+    fetchDailySnapshots();
   } catch (err) {
     console.error('Gagal mengambil data awal:', err);
   }
@@ -1010,6 +1011,11 @@ function renderStatus(status) {
     tradesState.totalPages = Math.ceil(status.totalTrades / tradesState.limit) || 1;
     renderClosedTradesTable(status.recentTrades || []);
     updateTradesPaginationUI();
+  }
+
+  // 8. Render Daily Snapshots
+  if (status.dailySnapshots && status.dailySnapshots.length > 0) {
+    renderDailySnapshotsTable(status.dailySnapshots);
   }
 }
 
@@ -2561,6 +2567,160 @@ function renderPostExitSnapshotHtml(t) {
       </div>
     </div>
   `;
+}
+
+// ============================================================================
+// DAILY PERFORMANCE SNAPSHOTS (00:00 WIB RECAP)
+// ============================================================================
+let currentDailySnapshots = [];
+
+async function fetchDailySnapshots() {
+  try {
+    const res = await authFetch('/api/daily-snapshots?limit=30&_t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.success && Array.isArray(data.snapshots)) {
+      currentDailySnapshots = data.snapshots;
+      renderDailySnapshotsTable(currentDailySnapshots);
+    }
+  } catch (err) {
+    console.warn('[Snapshot] Gagal fetch snapshot harian:', err);
+  }
+}
+
+function renderDailySnapshotsTable(snapshots) {
+  currentDailySnapshots = snapshots || [];
+  const tbody = document.getElementById('daily-snapshots-body');
+  const tag = document.getElementById('snapshot-count-tag');
+  if (tag) {
+    tag.textContent = `${currentDailySnapshots.length} Hari`;
+  }
+  if (!tbody) return;
+
+  if (!snapshots || snapshots.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted">Belum ada snapshot kinerja harian. Snapshot dicatat otomatis tiap 00:00 WIB atau klik "⚡ Ambil Snapshot".</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = snapshots
+    .map((s) => {
+      const pnl = Number(s.dailyPnl || 0);
+      const isWin = pnl >= 0;
+      const pnlColor = isWin ? 'text-green' : 'text-red';
+      const sign = isWin ? '+' : '';
+      const pnlPct = Number(s.dailyPnlPct || 0);
+      const pctSign = pnlPct >= 0 ? '+' : '';
+
+      const modeBadge = s.tradingMode === 'LIVE'
+        ? `<span class="badge-tag" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; font-size: 9.5px; padding: 2px 6px; font-weight: 700; border-radius: 4px;">🟢 LIVE</span>`
+        : `<span class="badge-tag" style="background: rgba(100, 210, 255, 0.15); border: 1px solid rgba(100, 210, 255, 0.4); color: #64d2ff; font-size: 9.5px; padding: 2px 6px; font-weight: 700; border-radius: 4px;">🧪 PAPER</span>`;
+
+      const cumPnl = Number(s.cumulativePnl || 0);
+      const isCumWin = cumPnl >= 0;
+      const cumColor = isCumWin ? 'text-green' : 'text-red';
+      const cumSign = isCumWin ? '+' : '';
+
+      let bestWorstHtml = '-';
+      if (s.bestTradeSymbol || s.worstTradeSymbol) {
+        const bestText = s.bestTradeSymbol
+          ? `<span class="text-green" style="font-size: 11px; font-weight: 600;">🌟 ${s.bestTradeSymbol} (+$${Number(s.bestTradePnl || 0).toFixed(2)})</span>`
+          : '';
+        const worstText = s.worstTradeSymbol
+          ? `<span class="text-red" style="font-size: 11px; font-weight: 600;">🥀 ${s.worstTradeSymbol} ($${Number(s.worstTradePnl || 0).toFixed(2)})</span>`
+          : '';
+        bestWorstHtml = [bestText, worstText].filter(Boolean).join('<br>');
+      }
+
+      // Tooltip breakdown strategi
+      let stratBreakdown = '';
+      if (s.strategyBreakdown) {
+        const sb = s.strategyBreakdown;
+        stratBreakdown = `title="Wick Sniper: ${sb.wickSniperTrades || 0} trade ($${(sb.wickSniperPnl || 0).toFixed(2)}) | Smart Money: ${sb.smartMoneyTrades || 0} trade ($${(sb.smartMoneyPnl || 0).toFixed(2)}) | Momentum Long: ${sb.momentumLongTrades || 0} trade ($${(sb.momentumLongPnl || 0).toFixed(2)})"`;
+      }
+
+      const totalFee = Number(s.totalFee || 0);
+      const grossPnl = Number(s.grossPnl || 0);
+
+      return `
+        <tr>
+          <td>
+            <div style="font-weight: 600; color: var(--color-text-main); font-family: monospace; font-size: 12.5px;">
+              📅 ${s.date}
+            </div>
+            <span style="font-size: 10px; color: var(--color-text-muted);">WIB (00:00 Rollover)</span>
+          </td>
+          <td>${modeBadge}</td>
+          <td>
+            <div style="font-weight: 700; color: var(--color-text-main); font-family: monospace;">
+              $${Number(s.endingBalance || 0).toFixed(2)}
+            </div>
+            ${s.startBalance ? `<span style="font-size: 10px; color: var(--color-text-muted);">Awal: $${Number(s.startBalance).toFixed(2)}</span>` : ''}
+          </td>
+          <td>
+            <div class="${pnlColor}" style="font-weight: 700; font-size: 13px; font-family: monospace;">
+              ${sign}$${pnl.toFixed(2)}
+            </div>
+            <span class="${pnlColor}" style="font-size: 10.5px; font-weight: 600;">(${pctSign}${pnlPct.toFixed(2)}%)</span>
+          </td>
+          <td>
+            <div style="font-weight: 700; font-size: 12.5px; color: ${s.winRate >= 70 ? '#30d158' : s.winRate >= 50 ? '#ffd60a' : '#ff453a'};">
+              ${Number(s.winRate || 0).toFixed(1)}%
+            </div>
+            <span style="font-size: 10px; color: var(--color-text-muted);">${s.winCount || 0}W / ${s.lossCount || 0}L</span>
+          </td>
+          <td>
+            <span class="tag-counter" style="font-size: 11px; padding: 2px 7px; cursor: help;" ${stratBreakdown}>
+              ${s.totalTrades || 0} Trade
+            </span>
+          </td>
+          <td>
+            <div style="font-size: 11.5px; color: var(--color-text-muted); font-family: monospace;" title="Gross PnL: ${grossPnl >= 0 ? '+' : ''}$${grossPnl.toFixed(2)}">
+              $${totalFee.toFixed(3)}
+            </div>
+          </td>
+          <td>${bestWorstHtml}</td>
+          <td>
+            <div class="${cumColor}" style="font-weight: 700; font-family: monospace; font-size: 12.5px;">
+              ${cumSign}$${cumPnl.toFixed(2)}
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+async function triggerManualDailySnapshot() {
+  const btn = document.getElementById('btn-trigger-snapshot');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Merekam...';
+  }
+  try {
+    const res = await authFetch('/api/daily-snapshots/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (data && data.success) {
+      if (typeof showToast === 'function') {
+        showToast('Snapshot harian berhasil diperbarui!', 'success');
+      } else {
+        alert(data.message || 'Snapshot harian berhasil diperbarui!');
+      }
+      await fetchDailySnapshots();
+    } else {
+      alert('Gagal mengambil snapshot: ' + (data?.message || 'Unknown error'));
+    }
+  } catch (err) {
+    alert('Error trigger snapshot: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '⚡ Ambil Snapshot';
+    }
+  }
 }
 
 function openTradeDetailModal(tradeId, tradeIndex) {
