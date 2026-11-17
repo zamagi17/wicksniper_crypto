@@ -882,7 +882,7 @@ export class WickSniperEngine {
     };
     const tpPct = isLong
       ? this.config.momentumLong?.takeProfitPct ?? 6
-      : this.config.exit?.takeProfitPct ?? 1.2;
+      : this.config.exit?.takeProfitPct ?? 1.6;
     const slPct = isLong
       ? this.config.momentumLong?.stopLossPct ?? 2.5
       : this.config.exit?.hardStopLossPct ?? 3.5;
@@ -946,6 +946,9 @@ export class WickSniperEngine {
         lowestDiffPct: 0,
         outcome: 'TRACKING',
         simulatedPnlPct: 0,
+        priceMovePct: 0,
+        simulatedRealizedPnl: 0,
+        leverage: lev,
         durationMinutes: 0,
         maxHoldMinutes: this.config.exit?.maxHoldMinutes || 45,
         isComplete: false,
@@ -6839,7 +6842,8 @@ export class WickSniperEngine {
       }
 
       const isLong = sim.side === 'LONG';
-      const lev = this.config.leverage || 3;
+      const lev = sim.leverage || this.config.leverage || 5;
+      sim.leverage = lev;
       const tpPct = isLong
         ? this.config.momentumLong?.takeProfitPct ?? 6
         : this.config.exit?.takeProfitPct ?? 1.6;
@@ -6880,6 +6884,7 @@ export class WickSniperEngine {
             // BEP Defense jika terisi >= bepMaxLayersTrigger (default 5)
             const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
             const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
+            sim.isBepTriggered = isBep;
             if (isBep) {
               const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
               sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
@@ -6900,6 +6905,7 @@ export class WickSniperEngine {
         const gainPct = isLong
           ? ((sim.targetTpPrice - effectiveEntry) / effectiveEntry) * 100
           : ((effectiveEntry - sim.targetTpPrice) / effectiveEntry) * 100;
+        sim.priceMovePct = parseFloat(gainPct.toFixed(2));
         sim.simulatedPnlPct = parseFloat((gainPct * lev).toFixed(2));
         sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (sim.simulatedPnlPct / 100)).toFixed(2));
         sim.isComplete = true;
@@ -6917,6 +6923,7 @@ export class WickSniperEngine {
         const lossPct = isLong
           ? ((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100
           : -((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100;
+        sim.priceMovePct = parseFloat(lossPct.toFixed(2));
         sim.simulatedPnlPct = parseFloat((lossPct * lev).toFixed(2));
         sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || (isLong ? 5 : 61.25)) * (sim.simulatedPnlPct / 100)).toFixed(2));
         sim.isComplete = true;
@@ -6931,6 +6938,7 @@ export class WickSniperEngine {
         const diffPct = isLong
           ? ((livePrice - effectiveEntry) / effectiveEntry) * 100
           : ((effectiveEntry - livePrice) / effectiveEntry) * 100;
+        sim.priceMovePct = parseFloat(diffPct.toFixed(2));
         sim.simulatedPnlPct = parseFloat((diffPct * lev).toFixed(2));
         sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (sim.simulatedPnlPct / 100)).toFixed(2));
         sim.isComplete = true;
@@ -6943,6 +6951,7 @@ export class WickSniperEngine {
       const currentDiffPct = isLong
         ? ((livePrice - effectiveEntry) / effectiveEntry) * 100
         : ((effectiveEntry - livePrice) / effectiveEntry) * 100;
+      sim.priceMovePct = parseFloat(currentDiffPct.toFixed(2));
       sim.simulatedPnlPct = parseFloat((currentDiffPct * lev).toFixed(2));
       sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (sim.simulatedPnlPct / 100)).toFixed(2));
       if (Math.floor(elapsedMs / 1000) % 10 === 0) {
@@ -7001,7 +7010,8 @@ export class WickSniperEngine {
       let hitMinute = res.data.length;
 
       const isLong = sim.side === 'LONG';
-      const lev = this.config.leverage || 3;
+      const lev = sim.leverage || this.config.leverage || 5;
+      sim.leverage = lev;
       const tpPct = isLong
         ? this.config.momentumLong?.takeProfitPct ?? 6
         : this.config.exit?.takeProfitPct ?? 1.6;
@@ -7044,6 +7054,7 @@ export class WickSniperEngine {
             sim.simulatedMarginUsed = parseFloat(totalMargin.toFixed(2));
             const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
             const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
+            sim.isBepTriggered = isBep;
             if (isBep) {
               const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
               sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
@@ -7064,6 +7075,7 @@ export class WickSniperEngine {
           const gainPct = isLong
             ? ((sim.targetTpPrice - effectiveEntry) / effectiveEntry) * 100
             : ((effectiveEntry - sim.targetTpPrice) / effectiveEntry) * 100;
+          sim.priceMovePct = parseFloat(gainPct.toFixed(2));
           simulatedPnlPct = parseFloat((gainPct * lev).toFixed(2));
           sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (simulatedPnlPct / 100)).toFixed(2));
           hitMinute = i + 1;
@@ -7073,6 +7085,7 @@ export class WickSniperEngine {
           const lossPct = isLong
             ? ((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100
             : -((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100;
+          sim.priceMovePct = parseFloat(lossPct.toFixed(2));
           simulatedPnlPct = parseFloat((lossPct * lev).toFixed(2));
           sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || (isLong ? 5 : 61.25)) * (simulatedPnlPct / 100)).toFixed(2));
           hitMinute = i + 1;
@@ -7082,6 +7095,7 @@ export class WickSniperEngine {
           const lossPct = isLong
             ? ((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100
             : -((sim.hardSlPrice - effectiveEntry) / effectiveEntry) * 100;
+          sim.priceMovePct = parseFloat(lossPct.toFixed(2));
           simulatedPnlPct = parseFloat((lossPct * lev).toFixed(2));
           sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || (isLong ? 5 : 61.25)) * (simulatedPnlPct / 100)).toFixed(2));
           hitMinute = i + 1;
@@ -7096,7 +7110,13 @@ export class WickSniperEngine {
       if (outcome === 'TRACKING' && isComplete) {
         outcome = 'TIMEOUT';
         const lastClose = parseFloat(res.data[res.data.length - 1][4]);
-        simulatedPnlPct = parseFloat((((sim.side === 'LONG' ? lastClose - sim.hypotheticalEntryPrice : sim.hypotheticalEntryPrice - lastClose) / sim.hypotheticalEntryPrice) * 100).toFixed(2));
+        const effectiveEntry = sim.avgEntryPrice || sim.hypotheticalEntryPrice;
+        const diffPct = isLong
+          ? ((lastClose - effectiveEntry) / effectiveEntry) * 100
+          : ((effectiveEntry - lastClose) / effectiveEntry) * 100;
+        sim.priceMovePct = parseFloat(diffPct.toFixed(2));
+        simulatedPnlPct = parseFloat((diffPct * lev).toFixed(2));
+        sim.simulatedRealizedPnl = parseFloat(((sim.simulatedMarginUsed || 5) * (simulatedPnlPct / 100)).toFixed(2));
       }
 
       sim.highestPrice = parseFloat(highest.toFixed(8));

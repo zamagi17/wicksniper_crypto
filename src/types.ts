@@ -483,6 +483,9 @@ export interface SpikeSimResult {
   simulatedMarginUsed?: number;
   simulatedRealizedPnl?: number;
   plannedLayers?: PlannedSimLayer[];
+  leverage?: number;
+  priceMovePct?: number;
+  isBepTriggered?: boolean;
 }
 
 export interface SpikeAlert {

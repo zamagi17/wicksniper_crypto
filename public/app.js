@@ -1954,23 +1954,28 @@ function renderSpikesTable(spikes) {
         const pnlSign = pnl >= 0 ? '+' : '';
         const pnlStr = `${pnlSign}${pnl.toFixed(2)}%`;
         const layersInfo = sim.totalLayers && sim.totalLayers > 1 ? ` (${sim.layersFilled || 1}/${sim.totalLayers}L)` : '';
+        const simMargin = Number(sim.simulatedMarginUsed || 5);
+        const simRealPnl = Number(sim.simulatedRealizedPnl !== undefined ? sim.simulatedRealizedPnl : (simMargin * (pnl / 100)));
 
         if (sim.outcome === 'SAVED_SL') {
+          const savedUsdt = Math.abs(simRealPnl);
           simBadge = `
-            <button type="button" class="badge-sim-outcome saved" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Filter berhasil menyelamatkan modal dari Stop Loss setelah jaring terisi!">
-              🛡️ Selamat SL${layersInfo} (${pnlStr})
+            <button type="button" class="badge-sim-outcome saved" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Filter berhasil menyelamatkan modal dari Stop Loss setelah jaring terisi! (Potensi Rugi yang Dihindari: -$${savedUsdt.toFixed(2)} | ${pnlStr} ROE)">
+              🛡️ Selamat SL${layersInfo} (Cegah Rugi -$${savedUsdt.toFixed(2)})
             </button>
           `;
         } else if (sim.outcome === 'MISSED_TP') {
+          const missedUsdt = Math.abs(simRealPnl);
           simBadge = `
-            <button type="button" class="badge-sim-outcome missed" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Koin berbalik arah dan menyentuh Target TP.">
-              💸 Terlewat TP${layersInfo} (${pnlStr})
+            <button type="button" class="badge-sim-outcome missed" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Koin berbalik arah dan menyentuh Target TP (Estimasi Profit: +$${missedUsdt.toFixed(2)} USDT | ${pnlStr} ROE).">
+              💸 Terlewat TP${layersInfo} (+${missedUsdt.toFixed(2)} USDT)
             </button>
           `;
         } else if (sim.outcome === 'TIMEOUT') {
+          const timeoutPnlStr = `${simRealPnl >= 0 ? '+' : '-'}$${Math.abs(simRealPnl).toFixed(2)}`;
           simBadge = `
-            <button type="button" class="badge-sim-outcome timeout" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan selesai tanpa kena TP/SL.">
-              ⏱️ Timeout${layersInfo} (${pnlStr})
+            <button type="button" class="badge-sim-outcome timeout" onclick="openSpikeSimModal('${escapeHtml(s.id)}')" title="Klik untuk rincian: Pemantauan selesai tanpa kena TP/SL (PnL: ${timeoutPnlStr} USDT | ${pnlStr} ROE).">
+              ⏱️ Timeout${layersInfo} (${timeoutPnlStr})
             </button>
           `;
         } else {
@@ -2109,18 +2114,36 @@ function openRadarSpikeDetail(spikeId) {
         <b>${escapeHtml(formatParamValue(value))}</b>
       </div>`)
     .join('');
-  const simDetails = sim
-    ? `<div class="td-section-title">Simulasi Pasca-Filter</div>
-       <div class="td-post-exit-grid">
-         ${renderStat('Arah simulasi', sim.side || sideLabel)}
-         ${renderStat('Harga masuk hipotetis', `$${formatCryptoPrice(Number(sim.hypotheticalEntryPrice || 0))}`)}
-         ${renderStat(`Target TP (${tpPct ?? '-'}%)`, `$${formatCryptoPrice(Number(sim.targetTpPrice || 0))}`)}
-         ${renderStat(`Hard SL (${slPct ?? '-'}%)`, `$${formatCryptoPrice(Number(sim.hardSlPrice || 0))}`)}
-         ${renderStat('Hasil', outcomeLabels[sim.outcome] || sim.outcome || '-')}
-         ${renderStat('Estimasi PnL', `${Number(sim.simulatedPnlPct || 0) >= 0 ? '+' : ''}${Number(sim.simulatedPnlPct || 0).toFixed(2)}%`)}
-         ${renderStat('Durasi simulasi', `${Number(sim.durationMinutes || 0)} menit`)}
-       </div>`
-    : '<div class="td-section-title">Belum ada hasil simulasi pasca-filter.</div>';
+  let simDetails = '<div class="td-section-title">Belum ada hasil simulasi pasca-filter.</div>';
+  if (sim) {
+    const simLev = Number(sim.leverage || params.leverage || currentBotConfig?.leverage || 5);
+    const pnlVal = Number(sim.simulatedPnlPct || 0);
+    const rawMove = sim.priceMovePct !== undefined
+      ? Number(sim.priceMovePct)
+      : (simLev > 0 ? (pnlVal / simLev) : pnlVal);
+    const moveStr = `${rawMove >= 0 ? '+' : ''}${rawMove.toFixed(2)}%`;
+    const roeStr = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)}% ROE`;
+    const marginUsdt = Number(sim.simulatedMarginUsed || 5);
+    const pnlUsdt = Number(sim.simulatedRealizedPnl !== undefined ? sim.simulatedRealizedPnl : (marginUsdt * (pnlVal / 100)));
+    const savedUsdt = Math.abs(pnlUsdt).toFixed(2);
+    const pnlUsdtStr = sim.outcome === 'SAVED_SL'
+      ? `+$${savedUsdt} USDT (Cegah Rugi)`
+      : `${pnlUsdt >= 0 ? '+' : '-'}$${Math.abs(pnlUsdt).toFixed(2)} USDT`;
+
+    simDetails = `
+      <div class="td-section-title">Simulasi Pasca-Filter (Shadow Trading)</div>
+      <div class="td-post-exit-grid">
+        ${renderStat('Arah simulasi', sim.side || sideLabel)}
+        ${renderStat('Harga rata-rata hipotetis', `$${formatCryptoPrice(Number(sim.avgEntryPrice || sim.hypotheticalEntryPrice || 0))}`)}
+        ${renderStat(`Target TP (${sim.isBepTriggered ? 'BEP +0.2%' : `${tpPct ?? '-'}%`})`, `$${formatCryptoPrice(Number(sim.targetTpPrice || 0))}`)}
+        ${renderStat(`Hard SL (${slPct ?? '-'}%)`, `$${formatCryptoPrice(Number(sim.hardSlPrice || 0))}`)}
+        ${renderStat('Hasil evaluasi', outcomeLabels[sim.outcome] || sim.outcome || '-')}
+        ${renderStat('Pergerakan harga riil', moveStr)}
+        ${renderStat(`Hasil ROE (${simLev}x)`, roeStr)}
+        ${renderStat('Estimasi nominal USDT', pnlUsdtStr)}
+        ${renderStat('Durasi simulasi', `${Number(sim.durationMinutes || 0)} menit`)}
+      </div>`;
+  }
 
   const title = document.getElementById('radar-spike-detail-title');
   const badge = document.getElementById('radar-spike-detail-badge');
@@ -2186,15 +2209,24 @@ function openSpikeSimModal(spikeId) {
   const bodyEl = document.getElementById('spike-sim-body');
   if (!modal || !bodyEl) return;
 
+  const lev = Number(sim.leverage || params.leverage || currentBotConfig?.leverage || 5);
   const pnl = Number(sim.simulatedPnlPct || 0);
   const pnlSign = pnl >= 0 ? '+' : '';
-  const pnlStr = `${pnlSign}${pnl.toFixed(2)}%`;
+  const pnlStr = `${pnlSign}${pnl.toFixed(2)}% ROE`;
+  const rawPriceMove = sim.priceMovePct !== undefined
+    ? Number(sim.priceMovePct)
+    : (lev > 0 ? (pnl / lev) : pnl);
+  const priceMoveSign = rawPriceMove >= 0 ? '+' : '';
+  const priceMoveStr = `${priceMoveSign}${rawPriceMove.toFixed(2)}%`;
+
   const layersFilled = sim.layersFilled || 1;
   const totalLayers = sim.totalLayers || 1;
   const avgPrice = Number(sim.avgEntryPrice || sim.hypotheticalEntryPrice || 0);
   const simMargin = Number(sim.simulatedMarginUsed || 5).toFixed(2);
-  const realPnlVal = Number(sim.simulatedRealizedPnl || 0);
-  const realPnlStr = `${realPnlVal >= 0 ? '+' : ''}$${realPnlVal.toFixed(2)} USDT`;
+  const realPnlVal = Number(sim.simulatedRealizedPnl !== undefined ? sim.simulatedRealizedPnl : (Number(simMargin) * (pnl / 100)));
+  const savedUsdt = Math.abs(realPnlVal).toFixed(2);
+  const missedUsdt = Math.abs(realPnlVal).toFixed(2);
+  const realPnlStr = `${realPnlVal >= 0 ? '+' : '-'}$${Math.abs(realPnlVal).toFixed(2)} USDT`;
 
   const maxHoldMins = sim.maxHoldMinutes || params.maxHoldMinutes || currentBotConfig?.exit?.maxHoldMinutes || 45;
   let outcomeClass = 'tracking';
@@ -2208,7 +2240,7 @@ function openSpikeSimModal(spikeId) {
     bannerClass = 'saved';
     bannerText = `<b>🛡️ Filter Berhasil Melindungi Modal! (Tembus SL di Menit ke-${sim.durationMinutes || 1})</b><br>
     Setelah lonjakan ditolak, harga melonjak dan mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> hingga menembus batas <b>Hard Stop Loss</b> ($${formatCryptoPrice(sim.hardSlPrice)}) dalam <b>${sim.durationMinutes || 1} menit</b>.<br>
-    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan akun dari kerugian riil <b>${realPnlStr} (${pnlStr})</b>.<br>
+    Keputusan filter membatalkan trade terbukti tepat dan menyelamatkan modal sebesar <b>+$${savedUsdt} USDT</b> dari potensi kerugian riil <b>-${savedUsdt} USDT (${pnl.toFixed(2)}% ROE)</b>.<br>
     <small style="color: var(--text-muted); font-size: 11px;">ℹ️ Batas toleransi hold trading riil adalah <b>${maxHoldMins} menit</b>.</small>`;
   } else if (sim.outcome === 'MISSED_TP') {
     outcomeClass = 'missed';
@@ -2216,17 +2248,18 @@ function openSpikeSimModal(spikeId) {
     bannerClass = 'missed';
     bannerText = `<b>💸 Peluang Profit Terlewat! (Kena TP Cepat di Menit ke-${sim.durationMinutes || 1})</b><br>
     Posisi hipotetis menyerap <b>${layersFilled}/${totalLayers} layer jaring</b> dan langsung berbalik arah menyentuh <b>Target Take Profit</b> ($${formatCryptoPrice(sim.targetTpPrice)}) dalam waktu <b>${sim.durationMinutes || 1} menit</b>.<br>
-    Jika dieksekusi, trade ini akan menghasilkan estimasi profit <b>${realPnlStr} (${pnlStr})</b>.<br>
+    Jika dieksekusi, trade ini akan menghasilkan profit <b>+$${missedUsdt} USDT (+${Math.abs(pnl).toFixed(2)}% ROE)</b> dari pergerakan harga <b>${priceMoveStr}</b> dengan leverage <b>${lev}x</b>.<br>
+    ${sim.isBepTriggered ? '<div style="color: #64d2ff; font-size: 11px; margin-top: 4px;">🛡️ BEP Defense aktif pada layer ini (target disesuaikan ke +0.20% buffer).</div>' : ''}
     <small style="color: var(--text-muted); font-size: 11px;">ℹ️ Sama seperti trading riil, saat target TP tercapai, posisi otomatis ditutup sukses seketika (tidak perlu ditahan hingga batas maksimal <b>${maxHoldMins} menit</b>).</small>`;
   } else if (sim.outcome === 'TIMEOUT') {
     outcomeClass = 'timeout';
     outcomeTitle = `⏱️ Batas Waktu Tercapai (${layersFilled}/${totalLayers} Layer)`;
     bannerClass = 'timeout';
     bannerText = `<b>⏱️ Pemantauan Selesai (${maxHoldMins} Menit Penuh) Tanpa Kena TP/SL</b><br>
-    Selama durasi pengamatan maksimal (<b>${maxHoldMins} menit</b>), harga bergerak konsolidasi setelah mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> tanpa menyentuh TP maupun SL. Estimasi PnL mengambang di akhir pengamatan adalah <b>${realPnlStr} (${pnlStr})</b>.`;
+    Selama durasi pengamatan maksimal (<b>${maxHoldMins} menit</b>), harga bergerak konsolidasi setelah mengisi <b>${layersFilled}/${totalLayers} layer jaring</b> tanpa menyentuh TP maupun SL. Estimasi PnL mengambang di akhir pengamatan adalah <b>${realPnlStr} (${pnlStr})</b> dari pergerakan harga <b>${priceMoveStr}</b>.`;
   } else {
     bannerText = `<b>⏳ Simulasi Jaring Real-Time Sedang Berlangsung</b><br>
-    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} / ${maxHoldMins} menit</b> | <b>${layersFilled}/${totalLayers} layer terisi</b>). PnL mengambang saat ini: <b>${pnlStr}</b>.`;
+    Sedang memantau pergerakan harga live Binance secara real-time (Berjalan: <b>${sim.durationMinutes || 0} / ${maxHoldMins} menit</b> | <b>${layersFilled}/${totalLayers} layer terisi</b>). PnL mengambang saat ini: <b>${realPnlStr} (${pnlStr})</b>.`;
   }
 
   if (titleEl) titleEl.innerText = `🔬 Simulasi Koin Ditolak: ${s.symbol}`;
@@ -2278,24 +2311,38 @@ function openSpikeSimModal(spikeId) {
         <div class="pe-val" style="color: var(--text-main); font-weight: 600;">$${simMargin} USDT</div>
       </div>
       <div class="td-pe-stat">
-        <div class="pe-label">Target Take Profit (${tpParam}%)</div>
-        <div class="pe-val" style="color: var(--color-green);">$${formatCryptoPrice(tp)}</div>
-      </div>
-      <div class="td-pe-stat">
-        <div class="pe-label">Batas Hard Stop Loss (${slParam}%)</div>
-        <div class="pe-val" style="color: var(--color-red);">$${formatCryptoPrice(sl)}</div>
-      </div>
-      <div class="td-pe-stat">
-        <div class="pe-label">Estimasi PnL Riil</div>
-        <div class="pe-val" style="color: ${pnl >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight: 700;">
-          ${realPnlStr} <small style="font-size: 11px;">(${pnlStr})</small>
+        <div class="pe-label">Target Take Profit</div>
+        <div class="pe-val" style="color: var(--color-green);">
+          $${formatCryptoPrice(tp)}
+          <small class="pe-diff" style="color: var(--color-green);">(${sim.isBepTriggered ? 'BEP +0.2%' : `${tpParam}%`})</small>
         </div>
       </div>
-    </div>
       <div class="td-pe-stat">
-        <div class="pe-label">Hasil Simulasi PnL</div>
+        <div class="pe-label">Batas Hard Stop Loss</div>
+        <div class="pe-val" style="color: var(--color-red);">
+          $${formatCryptoPrice(sl)}
+          <small class="pe-diff" style="color: var(--color-red);">(${slParam}%)</small>
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Pergerakan Harga Hipotetis</div>
+        <div class="pe-val" style="color: ${rawPriceMove >= 0 ? (isLong ? 'var(--color-green)' : 'var(--color-red)') : (isLong ? 'var(--color-red)' : 'var(--color-green)')}; font-weight: 700;">
+          ${priceMoveStr} <small style="font-size: 11px; color: var(--text-muted);">(Tanpa Lev)</small>
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">Hasil Simulasi ROE (${lev}x)</div>
         <div class="pe-val" style="color: ${pnl >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight: 700;">
           ${pnlStr}
+        </div>
+      </div>
+      <div class="td-pe-stat">
+        <div class="pe-label">${sim.outcome === 'SAVED_SL' ? 'Modal Terselamatkan' : (sim.outcome === 'MISSED_TP' ? 'Profit Terlewat' : 'Estimasi PnL Nominal')}</div>
+        <div class="pe-val" style="color: ${sim.outcome === 'SAVED_SL' || realPnlVal >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight: 700;">
+          ${sim.outcome === 'SAVED_SL' ? `+$${savedUsdt} USDT` : (realPnlVal >= 0 ? `+$${missedUsdt} USDT` : `-$${Math.abs(realPnlVal).toFixed(2)} USDT`)}
+          <small style="font-size: 10px; display: block; color: var(--text-muted); font-weight: normal;">
+            ${sim.outcome === 'SAVED_SL' ? `(Cegah rugi -$${savedUsdt})` : `(${lev}x margin $${simMargin})`}
+          </small>
         </div>
       </div>
     </div>
