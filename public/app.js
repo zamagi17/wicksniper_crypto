@@ -333,12 +333,27 @@ function renderProfileSelectDropdown(users) {
   if (countTag) countTag.innerText = `${users.length} Profil`;
 }
 
+function updateSettingsProfileBadge() {
+  const badge = document.getElementById('settings-active-profile-badge');
+  if (!badge) return;
+  const select = document.getElementById('active-profile-select');
+  const selectedText = select?.options[select.selectedIndex]?.text?.replace(/👑|🧪|Profil:\s*/g, '').trim();
+  const profileName = selectedText || (currentActiveProfileId === 'admin' ? 'admin (Master)' : currentActiveProfileId);
+  badge.innerText = `Profil Aktif: ${profileName}`;
+}
+window.updateSettingsProfileBadge = updateSettingsProfileBadge;
+
 function switchActiveProfile(profileId) {
   currentActiveProfileId = profileId || 'admin';
   const select = document.getElementById('active-profile-select');
   if (select) select.value = currentActiveProfileId;
   closeRndModal();
+  updateSettingsProfileBadge();
   fetchInitialData();
+  fetchPaginatedTrades(1);
+  fetchPaginatedSpikes(1);
+  fetchDailySnapshots();
+  fetchCoinPerformance();
 }
 window.switchActiveProfile = switchActiveProfile;
 
@@ -678,29 +693,34 @@ function connectWebSocket() {
   socket.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
       if (msg.type === 'STATUS') {
-        renderStatus(msg.data);
-      } else if (msg.type === 'CONFIG') {
-        currentConfig = msg.data;
-        try {
-          localStorage.setItem('wicksniper_config', JSON.stringify(msg.data));
-        } catch (e) {}
-        if (currentStatus) renderStatus(currentStatus);
-
-        // Perbarui formulir pengaturan jika modal sedang tertutup atau belum diubah manual oleh pengguna
-        const modal = document.getElementById('settings-modal');
-        const isModalOpen = modal && modal.classList.contains('open');
-        if (!isModalOpen || !isFormModifiedByUser) {
-          populateSettingsForm(msg.data);
-          isFormModifiedByUser = false;
+        if (!msg.userId || msg.userId === activeUser) {
+          renderStatus(msg.data);
         }
+      } else if (msg.type === 'CONFIG') {
+        if (!msg.userId || msg.userId === activeUser) {
+          currentConfig = msg.data;
+          try {
+            localStorage.setItem('wicksniper_config_' + activeUser, JSON.stringify(msg.data));
+          } catch (e) {}
+          if (currentStatus) renderStatus(currentStatus);
 
-        // Sinkronkan juga input backtest lab jika sedang tidak diedit aktif oleh user
-        const btModal = document.getElementById('backtest-modal');
-        const isBtModalOpen = btModal && btModal.style.display === 'flex';
-        if (!isBtModalOpen || !_backtestFormModifiedByUser) {
-          applyConfigToBacktestInputs(msg.data);
-          _backtestFormModifiedByUser = false;
+          // Perbarui formulir pengaturan jika modal sedang tertutup atau belum diubah manual oleh pengguna
+          const modal = document.getElementById('settings-modal');
+          const isModalOpen = modal && modal.classList.contains('open');
+          if (!isModalOpen || !isFormModifiedByUser) {
+            populateSettingsForm(msg.data);
+            isFormModifiedByUser = false;
+          }
+
+          // Sinkronkan juga input backtest lab jika sedang tidak diedit aktif oleh user
+          const btModal = document.getElementById('backtest-modal');
+          const isBtModalOpen = btModal && btModal.style.display === 'flex';
+          if (!isBtModalOpen || !_backtestFormModifiedByUser) {
+            applyConfigToBacktestInputs(msg.data);
+            _backtestFormModifiedByUser = false;
+          }
         }
       } else if (msg.type === 'LOG') {
         appendLog(msg.data);
@@ -778,11 +798,12 @@ function playProfitSound() {
 }
 
 async function fetchInitialData() {
+  const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
   // Coba muat cache lokal terlebih dahulu untuk kecepatan render
   try {
     // Bersihkan draft tersisa dari versi sebelumnya agar tidak menimpa setting real dari DB
     localStorage.removeItem('wicksniper_settings_draft');
-    const cachedCfg = localStorage.getItem('wicksniper_config');
+    const cachedCfg = localStorage.getItem('wicksniper_config_' + activeUser);
     if (cachedCfg) {
       currentConfig = JSON.parse(cachedCfg);
       populateSettingsForm(currentConfig);
@@ -798,7 +819,7 @@ async function fetchInitialData() {
     if (resConfig && !resConfig.message && resConfig.exit) {
       currentConfig = resConfig;
       try {
-        localStorage.setItem('wicksniper_config', JSON.stringify(resConfig));
+        localStorage.setItem('wicksniper_config_' + activeUser, JSON.stringify(resConfig));
       } catch (e) {}
       populateSettingsForm(resConfig);
       settingsFormInitialized = true;
@@ -810,6 +831,7 @@ async function fetchInitialData() {
     renderLogs(resLogs);
     fetchDailySnapshots();
     fetchCoinPerformance();
+    fetchPaginatedTrades(1);
     measurePingNow();
   } catch (err) {
     console.error('Gagal mengambil data awal:', err);
@@ -2092,7 +2114,7 @@ async function fetchPaginatedTrades(page = 1) {
     if (mode !== 'ALL') params.append('mode', mode);
     if (strategy !== 'ALL') params.append('strategy', strategy);
 
-    const res = await fetch(`/api/trades?${params.toString()}`);
+    const res = await authFetch(`/api/trades?${params.toString()}`);
     const data = await res.json();
     if (data.success) {
       tradesState.totalPages = data.totalPages || 1;
@@ -2159,7 +2181,7 @@ async function fetchPaginatedSpikes(page = 1) {
     if (symbol) params.append('symbol', symbol);
     if (status !== 'ALL') params.append('status', status);
 
-    const res = await fetch(`/api/spikes?${params.toString()}`);
+    const res = await authFetch(`/api/spikes?${params.toString()}`);
     const data = await res.json();
     if (data.success) {
       radarState.totalPages = data.totalPages || 1;
@@ -5673,6 +5695,9 @@ async function reloadConfigFromServer() {
 async function openSettingsModal(skipReload = false) {
   const modal = document.getElementById('settings-modal');
   if (modal) modal.classList.add('open');
+  if (typeof updateSettingsProfileBadge === 'function') {
+    updateSettingsProfileBadge();
+  }
   const activeStrat = currentConfig?.triggerStrategy || 'SMART_MONEY';
   if (typeof switchSettingsTab === 'function') {
     switchSettingsTab(activeStrat === 'WICK_SNIPER' ? 'wick-sniper' : 'smart-money');
@@ -5680,13 +5705,14 @@ async function openSettingsModal(skipReload = false) {
 
   if (skipReload) return;
 
+  const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
   // Selalu sinkronkan dengan database/server setiap kali modal pengaturan dibuka
   try {
     const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
     if (fresh && fresh.exit) {
       currentConfig = fresh;
       try {
-        localStorage.setItem('wicksniper_config', JSON.stringify(fresh));
+        localStorage.setItem('wicksniper_config_' + activeUser, JSON.stringify(fresh));
         localStorage.removeItem('wicksniper_settings_draft');
       } catch (e) {}
       populateSettingsForm(fresh);
@@ -5708,6 +5734,7 @@ function closeSettingsModal() {
 
 async function saveSettings() {
   const updated = getSettingsFormData();
+  const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
 
   try {
     const res = await authFetch('/api/config', {
@@ -5719,13 +5746,20 @@ async function saveSettings() {
     if (res.success) {
       currentConfig = res.config;
       try {
-        localStorage.setItem('wicksniper_config', JSON.stringify(res.config));
+        localStorage.setItem('wicksniper_config_' + activeUser, JSON.stringify(res.config));
         localStorage.removeItem('wicksniper_settings_draft');
       } catch (e) {}
       isFormModifiedByUser = false;
       populateSettingsForm(res.config);
       closeSettingsModal();
-      alert('✅ Pengaturan berhasil disimpan!');
+      alert(`✅ Pengaturan profil '${activeUser}' berhasil disimpan!`);
+    } else {
+      alert(`Gagal menyimpan: ${res.message || 'Unknown error'}`);
+    }
+  } catch (err) {
+    alert(`Gagal menyimpan: ${err.message}`);
+  }
+}
     } else {
       alert(`Gagal menyimpan: ${res.message || 'Unknown error'}`);
     }

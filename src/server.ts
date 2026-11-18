@@ -738,13 +738,13 @@ app.get('/api/coin-performance', async (req, res) => {
 // WebSocket Realtime Broadcaster
 wss.on('connection', (ws) => {
   // Kirim initial state & safe config
-  ws.send(JSON.stringify({ type: 'STATUS', data: engine.getStatus() }));
-  ws.send(JSON.stringify({ type: 'CONFIG', data: getSafeConfig(engine.getConfig()) }));
+  ws.send(JSON.stringify({ type: 'STATUS', data: engine.getStatus(), userId: 'admin' }));
+  ws.send(JSON.stringify({ type: 'CONFIG', data: getSafeConfig(engine.getConfig()), userId: 'admin' }));
   ws.send(JSON.stringify({ type: 'LOGS', data: logger.getLogs() }));
 });
 
-function broadcast(type: string, data: any) {
-  const payload = JSON.stringify({ type, data });
+function broadcast(type: string, data: any, userId?: string) {
+  const payload = JSON.stringify({ type, data, userId });
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(payload);
@@ -752,12 +752,12 @@ function broadcast(type: string, data: any) {
   });
 }
 
-engine.onStatus((status) => {
-  broadcast('STATUS', status);
+engineManager.onEngineStatus((userId, status) => {
+  broadcast('STATUS', status, userId);
 });
 
-engine.onConfig((config) => {
-  broadcast('CONFIG', getSafeConfig(config));
+engineManager.onEngineConfig((userId, config) => {
+  broadcast('CONFIG', getSafeConfig(config), userId);
 });
 
 logger.onLog((log) => {

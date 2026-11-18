@@ -131,15 +131,16 @@
         👥 R&D Lab
       </button>
 
-      <div id="user-profile-badge" class="status-pill" style="display: none; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); color: #cbd5e1; font-size: 11px; font-weight: 600;">
+      <div id="user-profile-badge" class="status-pill" style="display: none; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); color: #cbd5e1; font-size: 11px; font-weight: 600; align-items: center; gap: 4px;">
         <span id="user-profile-name">👤 admin</span>
+        <button type="button" onclick="logoutSession()" title="Logout Akun" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; padding: 1px 6px; font-size: 10px; border-radius: 4px; cursor: pointer; margin-left: 2px;">Logout</button>
       </div>
 
       <button class="btn btn-secondary nav-btn-desktop" onclick="openSymbolInspectorModal()" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(99, 102, 241, 0.2)); border-color: rgba(168, 85, 247, 0.45); color: #c084fc; font-weight: 600;">🔍 Cek Simbol</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openAutoTunerModal()">🧠 Auto-Tuner</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openBacktestModal()">🧪 Backtest Lab</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openSettingsModal()">⚙️ Pengaturan</button>
-      <button class="btn btn-secondary nav-btn-desktop" id="btn-lock-terminal" onclick="logoutSession()" title="Kunci Dashboard"><span class="icon">🔒</span> Kunci</button>
+      <button class="btn btn-danger nav-btn-desktop" id="btn-lock-terminal" onclick="logoutSession()" title="Keluar / Logout Akun" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-weight: 700;"><span class="icon">🚪</span> Logout</button>
       <button class="btn btn-danger nav-btn-desktop" id="btn-reset-demo" onclick="resetDemo()">🧹 Reset Demo</button>
 
       <!-- MOBILE ACTION DRAWER TOGGLE (Visible on Mobile & Tablet) -->
@@ -678,11 +679,11 @@
             <span class="dm-arrow">›</span>
           </button>
 
-          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); logoutSession();">
-            <div class="dm-icon bg-red">🔒</div>
+          <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); logoutSession();" style="border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1);">
+            <div class="dm-icon bg-red">🚪</div>
             <div class="dm-info">
-              <b>Kunci Terminal</b>
-              <small>Logout & kunci akses dashboard</small>
+              <b style="color: #fca5a5;">Keluar / Logout Akun</b>
+              <small style="color: #f87171;">Kunci terminal & keluar dari dashboard</small>
             </div>
             <span class="dm-arrow">›</span>
           </button>
@@ -707,7 +708,10 @@
     <div class="modal-card modal-lg">
       <div class="modal-header">
         <div class="modal-title-box">
-          <h3>⚙️ Pengaturan Parameter Bot</h3>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h3 style="margin: 0;">⚙️ Pengaturan Parameter Bot</h3>
+            <span id="settings-active-profile-badge" class="badge-tag" style="background: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700;">Profil: admin</span>
+          </div>
           <button type="button" class="btn-refresh-cfg" onclick="reloadConfigFromServer()" title="Ambil konfigurasi tersimpan dari server">🔄 Refresh Server</button>
         </div>
         <button class="btn-close" onclick="closeSettingsModal()">&times;</button>

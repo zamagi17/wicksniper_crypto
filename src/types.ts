@@ -757,6 +757,7 @@ export interface ClosedTrade {
 }
 
 export interface EngineStatus {
+  userId?: string;
   isRunning: boolean;
   tradingMode: 'PAPER' | 'LIVE';
   virtualBalance: number;

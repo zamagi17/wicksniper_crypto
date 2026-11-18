@@ -413,12 +413,21 @@ export class DatabaseService {
     }
   }
 
-  public async loadRecentTrades(limit: number = 50, isPaper?: boolean): Promise<ClosedTrade[]> {
+  public async loadRecentTrades(limit: number = 50, isPaper?: boolean, userId?: string): Promise<ClosedTrade[]> {
     if (!this.isConnected || !this.pool) return [];
     try {
-      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $2' : '';
+      const conditions: string[] = [];
       const params: any[] = [limit];
-      if (isPaper !== undefined) params.push(isPaper);
+      let valIdx = 2;
+      if (isPaper !== undefined) {
+        conditions.push(`is_paper = $${valIdx++}`);
+        params.push(isPaper);
+      }
+      if (userId && userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        params.push(userId);
+      }
+      const whereMode = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const res = await this.pool.query(
         `SELECT id, symbol, side, entry_price AS "entryPrice", exit_price AS "exitPrice",
                 qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
@@ -431,7 +440,8 @@ export class DatabaseService {
                 post_exit_30m AS "postExit30m",
                 highest_price AS "highestPrice", lowest_price AS "lowestPrice",
                 mfe_pct AS "mfePct", mae_pct AS "maePct",
-                price_change_24h_pct AS "priceChange24hPct"
+                price_change_24h_pct AS "priceChange24hPct",
+                user_id AS "userId"
          FROM wicksniper_trades
          ${whereMode}
          ORDER BY timestamp DESC
@@ -563,7 +573,7 @@ export class DatabaseService {
     }
   }
 
-  public async getTradeStats(todayStartTs: number, isPaper?: boolean): Promise<{
+  public async getTradeStats(todayStartTs: number, isPaper?: boolean, userId?: string): Promise<{
     totalTrades: number;
     totalWins: number;
     accumulatedPnl: number;
@@ -576,9 +586,18 @@ export class DatabaseService {
   } | null> {
     if (!this.isConnected || !this.pool) return null;
     try {
-      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $2' : '';
+      const conditions: string[] = [];
       const params: any[] = [todayStartTs];
-      if (isPaper !== undefined) params.push(isPaper);
+      let valIdx = 2;
+      if (isPaper !== undefined) {
+        conditions.push(`is_paper = $${valIdx++}`);
+        params.push(isPaper);
+      }
+      if (userId && userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        params.push(userId);
+      }
+      const whereMode = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       const res = await this.pool.query(
         `SELECT 

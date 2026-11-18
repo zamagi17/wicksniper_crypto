@@ -1,7 +1,7 @@
 import { WickSniperEngine } from './engine';
 import { db } from './db';
 import { logger } from './logger';
-import { BotConfig, UserRecord, UserSummary } from '../types';
+import { BotConfig, EngineStatus, UserRecord, UserSummary } from '../types';
 import { hashPassword, verifyPassword } from '../utils/auth';
 
 export class EngineManager {
@@ -9,11 +9,31 @@ export class EngineManager {
   private primaryEngine: WickSniperEngine;
   private configPath: string;
   private isInitialized: boolean = false;
+  private onEngineStatusListeners: Array<(userId: string, status: EngineStatus) => void> = [];
+  private onEngineConfigListeners: Array<(userId: string, config: BotConfig) => void> = [];
 
   constructor(configPath: string) {
     this.configPath = configPath;
     this.primaryEngine = new WickSniperEngine(configPath, 'admin');
     this.engines.set('admin', this.primaryEngine);
+    this.hookEngineEvents(this.primaryEngine);
+  }
+
+  public onEngineStatus(cb: (userId: string, status: EngineStatus) => void) {
+    this.onEngineStatusListeners.push(cb);
+  }
+
+  public onEngineConfig(cb: (userId: string, config: BotConfig) => void) {
+    this.onEngineConfigListeners.push(cb);
+  }
+
+  private hookEngineEvents(eng: WickSniperEngine) {
+    eng.onStatus((status) => {
+      this.onEngineStatusListeners.forEach((cb) => cb(eng.userId, status));
+    });
+    eng.onConfig((config) => {
+      this.onEngineConfigListeners.forEach((cb) => cb(eng.userId, config));
+    });
   }
 
   public async init(): Promise<void> {
@@ -78,6 +98,7 @@ export class EngineManager {
             user.virtualBalance
           );
           this.engines.set(user.id, userEngine);
+          this.hookEngineEvents(userEngine);
           await userEngine.start();
           logger.log('INFO', `🚀 [R&D PROFILE RUNNING] Profil '${user.displayName}' (@${user.username}) aktif berjalan.`);
         } catch (engineErr: any) {
@@ -283,6 +304,7 @@ export class EngineManager {
       userRecord.virtualBalance
     );
     this.engines.set(userId, newEngine);
+    this.hookEngineEvents(newEngine);
     await newEngine.start();
 
     logger.log('SUCCESS', `🎉 [PROFIL R&D BARU DIBUAT] Profil '${userRecord.displayName}' (@${cleanUsername}) siap berburu spike.`);
@@ -328,6 +350,7 @@ export class EngineManager {
       if (activeUser) {
         const userEngine = new WickSniperEngine(this.configPath, userId, activeUser.config, activeUser.virtualBalance);
         this.engines.set(userId, userEngine);
+        this.hookEngineEvents(userEngine);
         await userEngine.start();
       }
     }

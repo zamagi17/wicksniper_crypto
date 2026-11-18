@@ -6219,6 +6219,7 @@ export class WickSniperEngine {
     }
 
     return {
+      userId: this.userId,
       isRunning: this.isRunning,
       tradingMode: this.config.tradingMode,
       virtualBalance: Math.round(this.virtualBalance * 100) / 100,
@@ -6630,6 +6631,28 @@ export class WickSniperEngine {
       if (!db.isConnected) return false;
     }
     try {
+      if (this.userId !== 'admin') {
+        const user = await db.getUserById(this.userId);
+        if (!user || !user.config) return false;
+        const raw = JSON.stringify(user.config);
+        if (raw !== this.lastSyncedConfigJson) {
+          this.lastSyncedConfigJson = raw;
+          this.config = {
+            ...this.config,
+            ...user.config,
+            tradingMode: 'PAPER',
+          };
+          this.scanner.updateConfig(this.config.scanner);
+          if (this.config.smartMoney) {
+            this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
+          }
+          this.broadcastConfig();
+          this.broadcastStatus();
+          return true;
+        }
+        return false;
+      }
+
       const dbCfg = await db.loadConfig();
       if (!dbCfg) return false;
       const raw = JSON.stringify(dbCfg);
@@ -6699,8 +6722,8 @@ export class WickSniperEngine {
     try {
       const isPaper = this.config.tradingMode === 'PAPER';
       const [recentTrades, dbStats, spikesCount] = await Promise.all([
-        db.loadRecentTrades(50, isPaper),
-        db.getTradeStats(this.getStartOfDayWibTimestamp(), isPaper),
+        db.loadRecentTrades(50, isPaper, this.userId),
+        db.getTradeStats(this.getStartOfDayWibTimestamp(), isPaper, this.userId),
         db.getSpikesCount(),
       ]);
       if (recentTrades && recentTrades.length >= 0) {
