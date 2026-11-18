@@ -625,18 +625,21 @@ app.get('/api/trades/:id/post-exit-30m', async (req, res) => {
 
 app.get('/api/spikes', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const targetEngine = getTargetEngine(req);
+  const targetUserId = targetEngine ? targetEngine.getUserId() : 'admin';
   const page = parseInt(String(req.query.page || '1'), 10) || 1;
   const limit = parseInt(String(req.query.limit || '15'), 10) || 15;
   const symbol = req.query.symbol ? String(req.query.symbol).trim() : undefined;
   const status = req.query.status ? String(req.query.status) : undefined;
 
   if (db.isConnected) {
-    const result = await db.querySpikes({ page, limit, symbol, status });
+    const result = await db.querySpikes({ page, limit, symbol, status, userId: targetUserId });
     return res.json({ success: true, ...result });
   }
 
   // Memory fallback
-  let list = engine.getRecentSpikes();
+  const activeEngine = targetEngine || engine;
+  let list = activeEngine.getRecentSpikes();
   if (symbol) {
     list = list.filter((s) => s.symbol.toUpperCase().includes(symbol.toUpperCase()));
   }
@@ -649,7 +652,7 @@ app.get('/api/spikes', async (req, res) => {
   const offset = (page - 1) * limit;
   const spikes = list.slice(offset, offset + limit);
 
-  const allRecent = engine.getRecentSpikes();
+  const allRecent = activeEngine.getRecentSpikes();
   const simStats = {
     totalSkipped: allRecent.filter((s) => s.status === 'SKIPPED').length,
     savedSlCount: allRecent.filter((s) => s.status === 'SKIPPED' && s.simResult?.outcome === 'SAVED_SL').length,

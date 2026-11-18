@@ -175,6 +175,8 @@ export class DatabaseService {
           ALTER TABLE wicksniper_spikes ALTER COLUMN skip_reason TYPE TEXT;
           ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS params_snapshot JSONB;
           ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS sim_result JSONB;
+          ALTER TABLE wicksniper_spikes ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'admin';
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_spikes_user_id ON wicksniper_spikes (user_id);
         `);
 
         // 5. Tabel Riwayat Auto-Tuning Parameter
@@ -818,13 +820,14 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_spikes (
-           id, symbol, start_price, current_price, surge_pct, lookback_seconds, status, skip_reason, timestamp, params_snapshot, sim_result
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           id, symbol, start_price, current_price, surge_pct, lookback_seconds, status, skip_reason, timestamp, params_snapshot, sim_result, user_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (id) DO UPDATE SET
            status = EXCLUDED.status,
            skip_reason = EXCLUDED.skip_reason,
            params_snapshot = COALESCE(EXCLUDED.params_snapshot, wicksniper_spikes.params_snapshot),
-           sim_result = COALESCE(EXCLUDED.sim_result, wicksniper_spikes.sim_result);`,
+           sim_result = COALESCE(EXCLUDED.sim_result, wicksniper_spikes.sim_result),
+           user_id = COALESCE(EXCLUDED.user_id, wicksniper_spikes.user_id);`,
         [
           s.id,
           s.symbol,
@@ -837,6 +840,7 @@ export class DatabaseService {
           s.timestamp,
           s.paramsSnapshot ? JSON.stringify(s.paramsSnapshot) : null,
           s.simResult ? JSON.stringify(s.simResult) : null,
+          s.userId || 'admin',
         ]
       );
     } catch (e: any) {
@@ -856,9 +860,11 @@ export class DatabaseService {
     }
   }
 
-  public async loadRecentSpikes(limit: number = 50): Promise<SpikeAlert[]> {
+  public async loadRecentSpikes(limit: number = 50, userId?: string): Promise<SpikeAlert[]> {
     if (!this.isConnected || !this.pool) return [];
     try {
+      const whereClause = userId ? `WHERE user_id = $2` : '';
+      const params = userId ? [limit, userId] : [limit];
       const res = await this.pool.query(
         `SELECT id, symbol,
                 start_price AS "startPrice",
@@ -868,14 +874,17 @@ export class DatabaseService {
                 status, skip_reason AS "skipReason",
                 timestamp,
                 params_snapshot AS "paramsSnapshot",
-                sim_result AS "simResult"
+                sim_result AS "simResult",
+                user_id AS "userId"
          FROM wicksniper_spikes
+         ${whereClause}
          ORDER BY timestamp DESC
          LIMIT $1;`,
-        [limit]
+        params
       );
       return res.rows.map((r: any) => ({
         id: r.id,
+        userId: r.userId || undefined,
         symbol: r.symbol,
         startPrice: parseFloat(r.startPrice),
         currentPrice: parseFloat(r.currentPrice),
@@ -1028,6 +1037,7 @@ export class DatabaseService {
     limit?: number;
     symbol?: string;
     status?: string;
+    userId?: string;
   }): Promise<{
     spikes: SpikeAlert[];
     total: number;
@@ -1047,6 +1057,11 @@ export class DatabaseService {
       const conditions: string[] = [];
       const values: any[] = [];
       let valIdx = 1;
+
+      if (options.userId) {
+        conditions.push(`user_id = $${valIdx++}`);
+        values.push(options.userId);
+      }
 
       if (options.symbol && options.symbol.trim() !== '') {
         conditions.push(`symbol ILIKE $${valIdx++}`);
@@ -1077,7 +1092,8 @@ export class DatabaseService {
                 status, skip_reason AS "skipReason",
                 timestamp,
                 params_snapshot AS "paramsSnapshot",
-                sim_result AS "simResult"
+                sim_result AS "simResult",
+                user_id AS "userId"
          FROM wicksniper_spikes
          ${whereClause}
          ORDER BY timestamp DESC
@@ -1087,6 +1103,7 @@ export class DatabaseService {
 
       const spikes: SpikeAlert[] = res.rows.map((r: any) => ({
         id: r.id,
+        userId: r.userId || undefined,
         symbol: r.symbol,
         startPrice: parseFloat(r.startPrice),
         currentPrice: parseFloat(r.currentPrice),
@@ -1101,6 +1118,8 @@ export class DatabaseService {
 
       let simStats = { totalSkipped: 0, savedSlCount: 0, missedTpCount: 0, trackingCount: 0, timeoutCount: 0 };
       try {
+        const statsWhere = options.userId ? `WHERE user_id = $1` : '';
+        const statsParams = options.userId ? [options.userId] : [];
         const statsRes = await this.pool.query(
           `SELECT 
              COUNT(*) FILTER (WHERE status = 'SKIPPED')::int AS total_skipped,
@@ -1108,7 +1127,8 @@ export class DatabaseService {
              COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'MISSED_TP')::int AS missed_tp,
              COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'TRACKING')::int AS tracking,
              COUNT(*) FILTER (WHERE status = 'SKIPPED' AND sim_result->>'outcome' = 'TIMEOUT')::int AS timeout
-           FROM wicksniper_spikes;`
+           FROM wicksniper_spikes ${statsWhere};`,
+          statsParams
         );
         if (statsRes.rows.length > 0) {
           const row = statsRes.rows[0];
@@ -1129,10 +1149,12 @@ export class DatabaseService {
     }
   }
 
-  public async getSpikesCount(): Promise<number> {
+  public async getSpikesCount(userId?: string): Promise<number> {
     if (!this.isConnected || !this.pool) return 0;
     try {
-      const res = await this.pool.query('SELECT COUNT(*)::int AS total FROM wicksniper_spikes;');
+      const whereClause = userId ? `WHERE user_id = $1` : '';
+      const params = userId ? [userId] : [];
+      const res = await this.pool.query(`SELECT COUNT(*)::int AS total FROM wicksniper_spikes ${whereClause};`, params);
       return res.rows[0]?.total || 0;
     } catch (e: any) {
       return 0;

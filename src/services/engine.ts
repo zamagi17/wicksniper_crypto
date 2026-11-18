@@ -711,7 +711,7 @@ export class WickSniperEngine {
         }
       }
       await this.syncTradesFromDb();
-      const dbSpikes = await db.loadRecentSpikes(50);
+      const dbSpikes = await db.loadRecentSpikes(50, this.userId);
       if (dbSpikes.length > 0) {
         this.scanner.setRecentSpikes(dbSpikes);
         const now = Date.now();
@@ -720,9 +720,9 @@ export class WickSniperEngine {
             this.activeSimSpikes.set(s.id, s);
           }
         }
-        logger.log('INFO', `📡 [DATABASE] ${dbSpikes.length} riwayat spike dimuat (${this.activeSimSpikes.size} simulasi aktif dilanjutkan).`);
+        logger.log('INFO', `📡 [DATABASE:${this.userId}] ${dbSpikes.length} riwayat spike dimuat (${this.activeSimSpikes.size} simulasi aktif dilanjutkan).`);
       }
-      this.totalSpikesCount = await db.getSpikesCount();
+      this.totalSpikesCount = await db.getSpikesCount(this.userId);
       await this.initDailySnapshots();
     }
 
@@ -919,6 +919,10 @@ export class WickSniperEngine {
    * Mencatat spike yang ditolak/dilewati filter dan menginisialisasi simulasi pelacakan pergerakan harga
    */
   private recordSkippedSpike(alert: SpikeAlert, reason: string, side: 'SHORT' | 'LONG' = 'SHORT'): void {
+    alert.userId = this.userId;
+    if (this.userId !== 'admin' && !alert.id.startsWith(this.userId + '_')) {
+      alert.id = `${this.userId}_${alert.id}`;
+    }
     alert.status = 'SKIPPED';
     alert.skipReason = reason;
     const isLong = side === 'LONG';
@@ -1016,6 +1020,10 @@ export class WickSniperEngine {
    */
   private async handleSpikeAlert(alert: SpikeAlert) {
     if (!this.isRunning) return;
+    alert.userId = this.userId;
+    if (this.userId !== 'admin' && !alert.id.startsWith(this.userId + '_')) {
+      alert.id = `${this.userId}_${alert.id}`;
+    }
     if (this.config.triggerStrategy === 'SMART_MONEY') {
       return; // Mode Smart Money murni aktif; jangan tembak lonjakan wick
     }

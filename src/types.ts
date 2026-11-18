@@ -492,6 +492,7 @@ export interface SpikeSimResult {
 
 export interface SpikeAlert {
   id: string;
+  userId?: string;
   symbol: string;
   startPrice: number;
   currentPrice: number;
