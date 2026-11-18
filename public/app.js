@@ -5786,13 +5786,6 @@ async function saveSettings() {
     alert(`Gagal menyimpan: ${err.message}`);
   }
 }
-    } else {
-      alert(`Gagal menyimpan: ${res.message || 'Unknown error'}`);
-    }
-  } catch (err) {
-    alert(`Gagal menyimpan: ${err.message}`);
-  }
-}
 
 async function testBinanceConnection() {
   const apiKey = (document.getElementById('cfg-api-key')?.value || '').trim();
