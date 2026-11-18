@@ -238,6 +238,22 @@ export class EngineManager {
     const finalConfig: BotConfig = {
       ...baseConfig,
       ...(params.configOverrides || {}),
+      scanner: {
+        ...baseConfig.scanner,
+        ...(params.configOverrides?.scanner || {}),
+      },
+      exit: {
+        ...baseConfig.exit,
+        ...(params.configOverrides?.exit || {}),
+      },
+      grid: {
+        ...baseConfig.grid,
+        ...(params.configOverrides?.grid || {}),
+      },
+      risk: {
+        ...baseConfig.risk,
+        ...(params.configOverrides?.risk || {}),
+      },
       tradingMode: 'PAPER', // Profil baru selalu aman dalam mode simulasi paper trading
     };
 
