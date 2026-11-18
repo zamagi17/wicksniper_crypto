@@ -131,16 +131,25 @@ function clearAuthToken() {
 let currentUser = null;
 let currentActiveProfileId = 'admin';
 
+function getActiveProfileId() {
+  if (currentUser && currentUser.role !== 'ADMIN') {
+    return currentUser.id;
+  }
+  return currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
+}
+window.getActiveProfileId = getActiveProfileId;
+
 async function authFetch(url, options = {}) {
   const token = getAuthToken();
   const headers = { ...(options.headers || {}) };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  if (currentActiveProfileId && currentActiveProfileId !== 'admin') {
-    headers['X-Profile-Id'] = currentActiveProfileId;
+  const activeProfile = getActiveProfileId();
+  if (activeProfile && activeProfile !== 'admin') {
+    headers['X-Profile-Id'] = activeProfile;
     if (typeof url === 'string' && !url.includes('profileId=')) {
-      url += (url.includes('?') ? '&' : '?') + 'profileId=' + encodeURIComponent(currentActiveProfileId);
+      url += (url.includes('?') ? '&' : '?') + 'profileId=' + encodeURIComponent(activeProfile);
     }
   }
   const res = await fetch(url, { ...options, headers });
@@ -225,6 +234,7 @@ async function handleLoginSubmit(e) {
     if (res.success && res.token) {
       setAuthToken(res.token);
       currentUser = res.user || { id: 'admin', username: 'admin', role: 'ADMIN', displayName: 'Administrator' };
+      currentActiveProfileId = currentUser.role === 'ADMIN' ? 'admin' : currentUser.id;
       localStorage.setItem('wicksniper_user', JSON.stringify(currentUser));
       hideLoginOverlay();
       updateAuthUI();
@@ -260,6 +270,7 @@ async function logoutSession() {
   } catch {}
   clearAuthToken();
   currentUser = null;
+  currentActiveProfileId = 'admin';
   localStorage.removeItem('wicksniper_user');
   showLoginOverlay();
 }
@@ -345,9 +356,12 @@ function renderProfileSelectDropdown(users) {
 function updateSettingsProfileBadge() {
   const badge = document.getElementById('settings-active-profile-badge');
   if (!badge) return;
+  const activeProfile = getActiveProfileId();
   const select = document.getElementById('active-profile-select');
   const selectedText = select?.options[select.selectedIndex]?.text?.replace(/👑|🧪|Profil:\s*/g, '').trim();
-  const profileName = selectedText || (currentActiveProfileId === 'admin' ? 'admin (Master)' : currentActiveProfileId);
+  const profileName = (currentUser && currentUser.role !== 'ADMIN')
+    ? (currentUser.displayName || currentUser.username)
+    : (selectedText || (activeProfile === 'admin' ? 'admin (Master)' : activeProfile));
   badge.innerText = `Profil Aktif: ${profileName}`;
 }
 window.updateSettingsProfileBadge = updateSettingsProfileBadge;
@@ -642,6 +656,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (checkRes && checkRes.success) {
         currentUser = checkRes.user;
+        currentActiveProfileId = currentUser.role === 'ADMIN' ? 'admin' : currentUser.id;
         localStorage.setItem('wicksniper_user', JSON.stringify(currentUser));
         hideLoginOverlay();
         updateAuthUI();
@@ -704,13 +719,13 @@ function connectWebSocket() {
   socket.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
-      const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
+      const activeUser = getActiveProfileId();
       if (msg.type === 'STATUS') {
-        if (!msg.userId || msg.userId === activeUser) {
+        if (msg.userId === activeUser) {
           renderStatus(msg.data);
         }
       } else if (msg.type === 'CONFIG') {
-        if (!msg.userId || msg.userId === activeUser) {
+        if (msg.userId === activeUser) {
           currentConfig = msg.data;
           try {
             localStorage.setItem('wicksniper_config_' + activeUser, JSON.stringify(msg.data));
@@ -809,7 +824,7 @@ function playProfitSound() {
 }
 
 async function fetchInitialData() {
-  const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
+  const activeUser = getActiveProfileId();
   // Coba muat cache lokal terlebih dahulu untuk kecepatan render
   try {
     // Bersihkan draft tersisa dari versi sebelumnya agar tidak menimpa setting real dari DB
@@ -5716,7 +5731,7 @@ async function openSettingsModal(skipReload = false) {
 
   if (skipReload) return;
 
-  const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
+  const activeUser = getActiveProfileId();
   // Selalu sinkronkan dengan database/server setiap kali modal pengaturan dibuka
   try {
     const fresh = await authFetch('/api/config?_t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
@@ -5745,7 +5760,7 @@ function closeSettingsModal() {
 
 async function saveSettings() {
   const updated = getSettingsFormData();
-  const activeUser = currentActiveProfileId || (currentUser ? currentUser.id : 'admin');
+  const activeUser = getActiveProfileId();
 
   try {
     const res = await authFetch('/api/config', {

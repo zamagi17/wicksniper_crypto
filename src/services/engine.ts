@@ -660,29 +660,45 @@ export class WickSniperEngine {
 
     await db.init();
     if (db.isConnected) {
-      const dbCfg = await db.loadConfig();
-      if (dbCfg) {
-        this.config = {
-          ...this.config,
-          ...dbCfg,
-          exit: { ...this.config.exit, ...(dbCfg.exit || {}) },
-          scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
-          grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
-          telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
-          schedule: { ...(this.config.schedule || this.getDefaultTradingScheduleConfig()), ...(dbCfg.schedule || {}) },
-          security: { ...this.config.security, ...(dbCfg.security || {}) },
-        };
-        this.scanner.updateConfig(this.config.scanner);
-        if (this.config.telegram) {
-          telegram.updateConfig(this.config.telegram);
-        }
-        this.lastSyncedConfigJson = JSON.stringify(dbCfg);
-        if (this.config.apiKey && this.config.apiSecret) {
-          binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+      if (this.userId === 'admin') {
+        const dbCfg = await db.loadConfig();
+        if (dbCfg) {
+          this.config = {
+            ...this.config,
+            ...dbCfg,
+            exit: { ...this.config.exit, ...(dbCfg.exit || {}) },
+            scanner: { ...this.config.scanner, ...(dbCfg.scanner || {}) },
+            grid: { ...this.config.grid, ...(dbCfg.grid || {}) },
+            telegram: { ...this.config.telegram, ...(dbCfg.telegram || {}) },
+            schedule: { ...(this.config.schedule || this.getDefaultTradingScheduleConfig()), ...(dbCfg.schedule || {}) },
+            security: { ...this.config.security, ...(dbCfg.security || {}) },
+          };
+          this.scanner.updateConfig(this.config.scanner);
+          if (this.config.telegram) {
+            telegram.updateConfig(this.config.telegram);
+          }
+          this.lastSyncedConfigJson = JSON.stringify(dbCfg);
+          if (this.config.apiKey && this.config.apiSecret) {
+            binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+          }
+        } else {
+          await db.saveConfig(this.config);
+          this.lastSyncedConfigJson = JSON.stringify(this.config);
         }
       } else {
-        await db.saveConfig(this.config);
-        this.lastSyncedConfigJson = JSON.stringify(this.config);
+        const userRec = await db.getUserById(this.userId);
+        if (userRec && userRec.config) {
+          this.config = {
+            ...this.config,
+            ...userRec.config,
+            tradingMode: 'PAPER',
+          };
+          this.scanner.updateConfig(this.config.scanner);
+          if (this.config.smartMoney) {
+            this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
+          }
+          this.lastSyncedConfigJson = JSON.stringify(userRec.config);
+        }
       }
       const dbState = await db.loadState(this.userId);
       if (dbState) {
@@ -727,7 +743,7 @@ export class WickSniperEngine {
 
     // Pulihkan status cooldown koin dari riwayat trade terakhir di database agar tidak hilang saat restart
     try {
-      const recentTrades = await db.loadRecentTrades(30);
+      const recentTrades = await db.loadRecentTrades(30, undefined, this.userId);
       const now = Date.now();
       for (const t of recentTrades) {
         if (!t.symbol || !t.timestamp) continue;
@@ -8295,9 +8311,11 @@ export class WickSniperEngine {
     try {
       const mode = this.config.tradingMode === 'PAPER' ? 'PAPER' : 'LIVE';
       if (db.isConnected) {
-        const list = await db.getDailySnapshots(30, mode);
+        const list = await db.getDailySnapshots(30, mode, this.userId);
         this.dailySnapshots = list;
-        await this.backfillPastDailySnapshots();
+        if (this.userId === 'admin') {
+          await this.backfillPastDailySnapshots();
+        }
       }
     } catch (e: any) {
       logger.log('WARN', `Gagal inisialisasi daily snapshots: ${e.message}`);
