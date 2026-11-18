@@ -248,6 +248,8 @@ async function handleLoginSubmit(e) {
       currentUser = res.user || { id: 'admin', username: 'admin', role: 'ADMIN', displayName: 'Administrator' };
       currentActiveProfileId = currentUser.role === 'ADMIN' ? 'admin' : currentUser.id;
       localStorage.setItem('wicksniper_user', JSON.stringify(currentUser));
+      currentDailySnapshots = [];
+      renderDailySnapshotsTable([]);
       hideLoginOverlay();
       updateAuthUI();
       connectWebSocket();
@@ -386,6 +388,8 @@ function switchActiveProfile(profileId) {
   if (mobSelect) mobSelect.value = currentActiveProfileId;
   closeRndModal();
   updateSettingsProfileBadge();
+  currentDailySnapshots = [];
+  renderDailySnapshotsTable([]);
   fetchInitialData();
   fetchPaginatedTrades(1);
   fetchPaginatedSpikes(1);
@@ -1117,6 +1121,20 @@ function renderStatus(status) {
     modeBadge.innerText = '🧪 PAPER TRADING';
     document.getElementById('metric-balance-type').innerText = 'Mode Virtual Paper';
     document.getElementById('metric-balance').innerText = `$${status.virtualBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  if (!currentDailySnapshots || currentDailySnapshots.length === 0) {
+    const balEl = document.getElementById('equity-current-val');
+    if (balEl) {
+      const b = (status.tradingMode === 'LIVE' ? (status.realBalance || status.liveAvailableBalance) : status.virtualBalance) || 0;
+      balEl.textContent = `$${b.toFixed(2)} USDT`;
+      balEl.style.color = '#30d158';
+    }
+    const growthTag = document.getElementById('equity-total-growth');
+    if (growthTag) {
+      growthTag.textContent = '+0.00%';
+      growthTag.style.color = 'var(--color-text-muted, #8e8e93)';
+    }
   }
 
   const resetDemoBtn = document.getElementById('btn-reset-demo');
@@ -3165,15 +3183,29 @@ async function triggerManualDailySnapshot() {
 // EQUITY CURVE & PNL CALENDAR (FEATURE 1)
 // ============================================================================
 function renderEquityCurveAndCalendar(snapshots) {
+  const currentBalEl = document.getElementById('equity-current-val');
+  const growthTag = document.getElementById('equity-total-growth');
+  const svgWrap = document.getElementById('equity-svg-wrapper');
+  const calGrid = document.getElementById('pnl-calendar-grid');
+
   if (!snapshots || snapshots.length === 0) {
-    const svgWrap = document.getElementById('equity-svg-wrapper');
+    const bal = currentStatus
+      ? (currentStatus.tradingMode === 'LIVE' ? (currentStatus.realBalance || currentStatus.liveAvailableBalance) : currentStatus.virtualBalance) || 0
+      : 0;
+    if (currentBalEl) {
+      currentBalEl.textContent = `$${bal.toFixed(2)} USDT`;
+      currentBalEl.style.color = '#30d158';
+    }
+    if (growthTag) {
+      growthTag.textContent = '+0.00%';
+      growthTag.style.color = 'var(--color-text-muted, #8e8e93)';
+    }
     if (svgWrap) {
       svgWrap.innerHTML = `
         <div style="height: 140px; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 12px;">
           📊 Belum cukup data snapshot harian untuk membuat grafik kurva modal.
         </div>`;
     }
-    const calGrid = document.getElementById('pnl-calendar-grid');
     if (calGrid) {
       calGrid.innerHTML = `<div class="text-muted" style="font-size: 12px;">Belum ada rekap harian.</div>`;
     }
@@ -3190,11 +3222,10 @@ function renderEquityCurveAndCalendar(snapshots) {
   const growthUsdt = currentBal - initialBase;
   const growthPct = initialBase > 0 ? (growthUsdt / initialBase) * 100 : 0;
 
-  const currentBalEl = document.getElementById('equity-current-val');
   if (currentBalEl) {
     currentBalEl.textContent = `$${currentBal.toFixed(2)} USDT`;
+    currentBalEl.style.color = '#30d158';
   }
-  const growthTag = document.getElementById('equity-total-growth');
   if (growthTag) {
     const sign = growthUsdt >= 0 ? '+' : '';
     growthTag.textContent = `${sign}$${growthUsdt.toFixed(2)} (${sign}${growthPct.toFixed(2)}%)`;
@@ -3202,7 +3233,6 @@ function renderEquityCurveAndCalendar(snapshots) {
   }
 
   // 1. RENDER PURE SVG EQUITY CURVE
-  const svgWrap = document.getElementById('equity-svg-wrapper');
   if (svgWrap) {
     const width = 800;
     const height = 160;
@@ -3283,7 +3313,6 @@ function renderEquityCurveAndCalendar(snapshots) {
   }
 
   // 2. RENDER MINI PNL CALENDAR
-  const calGrid = document.getElementById('pnl-calendar-grid');
   if (calGrid) {
     const recent = [...snapshots].slice(0, 14);
     calGrid.innerHTML = recent
