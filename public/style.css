@@ -2285,9 +2285,10 @@ body {
   .nav-actions {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     flex-shrink: 0;
     min-width: 0;
+    margin-left: auto;
   }
 
   .nav-btn-desktop {
@@ -2298,28 +2299,29 @@ body {
     display: none !important;
   }
 
+  #schedule-badge {
+    display: none !important;
+  }
+
+  #user-profile-badge {
+    display: none !important;
+  }
+
   .status-pill {
     padding: 3px 6px;
-    font-size: 9px;
+    font-size: 9.5px;
     gap: 4px;
     flex-shrink: 0;
+    border-radius: 6px;
   }
 
   .status-pill .dot {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
   }
 
   .badge-schedule {
-    padding: 3px 7px;
-    font-size: 10px;
-    gap: 4px;
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex-shrink: 1;
-    min-width: 0;
+    display: none !important;
   }
 
   .sched-dot {
@@ -2328,9 +2330,10 @@ body {
   }
 
   #btn-toggle-engine {
-    padding: 5px 8px;
-    font-size: 10.5px;
-    gap: 3px;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 700;
+    gap: 4px;
     border-radius: 6px;
     flex-shrink: 0;
     white-space: nowrap;
@@ -2338,16 +2341,22 @@ body {
 
   .btn-mobile-menu {
     display: inline-flex !important;
-    padding: 5px 8px;
-    font-size: 11px;
-    border-radius: 6px;
-    gap: 3px;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    font-size: 11.5px;
+    font-weight: 700;
+    border-radius: 7px;
+    gap: 4px;
     flex-shrink: 0;
     white-space: nowrap;
+    border: 1px solid rgba(99, 102, 241, 0.45) !important;
+    background: rgba(99, 102, 241, 0.2) !important;
+    color: #c7d2fe !important;
   }
 
   .btn-mobile-menu .btn-text {
-    display: none !important;
+    display: inline !important;
   }
 
   /* Container Strict Boundaries */
@@ -2710,15 +2719,12 @@ body {
 }
 
 @media (max-width: 480px) {
-  .badge-schedule {
-    max-width: 82px;
-    padding: 2.5px 5px;
-    font-size: 9px;
-    gap: 3px;
+  #ws-indicator span:last-child {
+    display: none;
   }
 
   .brand-text h1 {
-    max-width: 85px;
+    max-width: 90px;
     font-size: 11.5px;
   }
 
@@ -2728,12 +2734,12 @@ body {
   }
 
   #btn-toggle-engine {
-    padding: 4px 6px;
-    font-size: 10px;
+    padding: 5px 8px;
+    font-size: 10.5px;
   }
 
   .btn-mobile-menu {
-    padding: 4px 7px;
+    padding: 5px 8px;
     font-size: 11px;
   }
 

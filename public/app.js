@@ -271,6 +271,9 @@ function updateAuthUI() {
   const profileSwitcherWrap = document.getElementById('profile-switcher-wrap');
   const btnRndLab = document.getElementById('btn-rnd-lab');
   const btnDrawerRndLab = document.getElementById('btn-drawer-rnd-lab');
+  const mobDrawerName = document.getElementById('mobile-drawer-user-name');
+  const mobDrawerRole = document.getElementById('mobile-drawer-user-role');
+  const mobProfileSwitcherWrap = document.getElementById('mobile-drawer-profile-switcher-wrap');
 
   if (!currentUser) {
     try {
@@ -283,6 +286,11 @@ function updateAuthUI() {
     if (badgeWrap && badgeName) {
       badgeName.innerText = `👤 ${currentUser.displayName || currentUser.username}`;
       badgeWrap.style.display = 'inline-flex';
+    }
+    if (mobDrawerName) mobDrawerName.innerText = currentUser.displayName || currentUser.username;
+    if (mobDrawerRole) mobDrawerRole.innerText = currentUser.role === 'ADMIN' ? '👑 Master Administrator' : '🧪 R&D Tester';
+    if (mobProfileSwitcherWrap) {
+      mobProfileSwitcherWrap.style.display = currentUser.role === 'ADMIN' ? 'block' : 'none';
     }
     if (currentUser.role === 'ADMIN') {
       if (profileSwitcherWrap) profileSwitcherWrap.style.display = 'inline-flex';
@@ -314,14 +322,15 @@ window.loadUserProfilesList = loadUserProfilesList;
 
 function renderProfileSelectDropdown(users) {
   const select = document.getElementById('active-profile-select');
+  const mobSelect = document.getElementById('mobile-active-profile-select');
   const cloneSelect = document.getElementById('new-param-clonefrom');
-  if (select) {
-    select.innerHTML = users.map(u => `
-      <option value="${u.id}" ${u.id === currentActiveProfileId ? 'selected' : ''}>
-        ${u.role === 'ADMIN' ? '👑' : '🧪'} Profil: ${u.displayName}
-      </option>
-    `).join('');
-  }
+  const optionsHtml = users.map(u => `
+    <option value="${u.id}" ${u.id === currentActiveProfileId ? 'selected' : ''}>
+      ${u.role === 'ADMIN' ? '👑' : '🧪'} Profil: ${u.displayName}
+    </option>
+  `).join('');
+  if (select) select.innerHTML = optionsHtml;
+  if (mobSelect) mobSelect.innerHTML = optionsHtml;
   if (cloneSelect) {
     cloneSelect.innerHTML = users.map(u => `
       <option value="${u.id}" ${u.id === 'admin' ? 'selected' : ''}>
@@ -346,7 +355,9 @@ window.updateSettingsProfileBadge = updateSettingsProfileBadge;
 function switchActiveProfile(profileId) {
   currentActiveProfileId = profileId || 'admin';
   const select = document.getElementById('active-profile-select');
+  const mobSelect = document.getElementById('mobile-active-profile-select');
   if (select) select.value = currentActiveProfileId;
+  if (mobSelect) mobSelect.value = currentActiveProfileId;
   closeRndModal();
   updateSettingsProfileBadge();
   fetchInitialData();
