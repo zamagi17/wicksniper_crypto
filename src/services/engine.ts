@@ -1209,8 +1209,9 @@ export class WickSniperEngine {
         && indicators.rsi1m > maxRsi1m;
       const simulationSide: 'SHORT' | 'LONG' = isMomentumLongCandidate ? 'LONG' : 'SHORT';
 
-      // Proteksi Cooldown Pasca Macro Cut-Loss
-      if (this.isMacroCutLossCoolingDown(simulationSide)) {
+      // Proteksi Cooldown Pasca Macro Cut-Loss (Hanya aktif jika scanner.btcTrendFilterEnabled diaktifkan)
+      const scannerBtcFilterOn = this.config.scanner?.btcTrendFilterEnabled === true;
+      if (scannerBtcFilterOn && this.isMacroCutLossCoolingDown(simulationSide)) {
         const remainingMinutes = this.getMacroCutLossRemainingMinutes(simulationSide);
         const reason = `Macro Cooldown pasca Cut-Loss BTC (${simulationSide}) aktif (${remainingMinutes}m tersisa)`;
         logger.log('INFO', `⏳ [MACRO COOLDOWN SKIP] Lonjakan pada ${symbol} (${simulationSide}) diabaikan: ${reason}.`, symbol);
@@ -1218,8 +1219,9 @@ export class WickSniperEngine {
         return;
       }
 
-      // Jika BTC filter melarang SHORT (misal tren BULLISH / Flash Surge), jangan proses atau log skip SHORT (kecuali Exhaustion Sniper pada Top Gainer)
-      if (!alert.isExhaustion && btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
+      // Filter Makro BTC (HANYA memblokir SHORT jika scanner.btcTrendFilterEnabled diaktifkan secara eksplisit).
+      // Secara default, Wick Sniper memburu lonjakan sumbu atas (upper wick) terlepas dari apakah BTC sedang Bullish.
+      if (scannerBtcFilterOn && !alert.isExhaustion && btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
         const cooldownMins = this.config.scanner.cooldownMinutes || 10;
         this.scanner.setCooldown(symbol, cooldownMins);
         this.recordSkippedSpike(alert, `BTC sedang ${btcTrend.trend} (Short dilarang oleh BTC Macro Guard)`, 'SHORT');
@@ -2410,87 +2412,91 @@ export class WickSniperEngine {
       //    atau Bearish/Sideways ➜ Bullish untuk SHORT) dan BTC bergerak melawan posisi >= trendShiftBtcDeltaPct (default: 0.5%),
       //    seluruh posisi aktif segera ditutup bahkan jika sedang floating loss demi menyelamatkan sisa modal.
       if (this.config.exit.trendShiftExitEnabled !== false) {
-        const entryTrend = pos.entryTrend || pos.btcTrendStatus?.trend || 'SIDEWAYS';
-        const currentBtcStatus = this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus();
-        const currentTrend = currentBtcStatus?.trend;
-        if (currentTrend && currentTrend !== entryTrend) {
-          const isLongShiftProfit = (entryTrend === 'SIDEWAYS' && currentTrend === 'BEARISH') ||
-                                    (entryTrend === 'BULLISH' && (currentTrend === 'SIDEWAYS' || currentTrend === 'BEARISH'));
-          const isShortShiftProfit = (entryTrend === 'SIDEWAYS' && currentTrend === 'BULLISH') ||
-                                     (entryTrend === 'BEARISH' && (currentTrend === 'SIDEWAYS' || currentTrend === 'BULLISH'));
+        const isSmartMoneyPos = pos.strategyType === 'SMART_MONEY' || !!pos.smartMoneyFlowStatus;
+        const applyToWickSniper = this.config.exit.trendShiftWickSniperEnabled === true;
+        if (isSmartMoneyPos || applyToWickSniper) {
+          const entryTrend = pos.entryTrend || pos.btcTrendStatus?.trend || 'SIDEWAYS';
+          const currentBtcStatus = this.lastBtcTrendStatus || binanceFutures.getLastBtcTrendStatus();
+          const currentTrend = currentBtcStatus?.trend;
+          if (currentTrend && currentTrend !== entryTrend) {
+            const isLongShiftProfit = (entryTrend === 'SIDEWAYS' && currentTrend === 'BEARISH') ||
+                                      (entryTrend === 'BULLISH' && (currentTrend === 'SIDEWAYS' || currentTrend === 'BEARISH'));
+            const isShortShiftProfit = (entryTrend === 'SIDEWAYS' && currentTrend === 'BULLISH') ||
+                                       (entryTrend === 'BEARISH' && (currentTrend === 'SIDEWAYS' || currentTrend === 'BULLISH'));
 
-          const isLongAdverseShift = (entryTrend === 'BULLISH' || entryTrend === 'SIDEWAYS') && currentTrend === 'BEARISH';
-          const isShortAdverseShift = (entryTrend === 'BEARISH' || entryTrend === 'SIDEWAYS') && currentTrend === 'BULLISH';
+            const isLongAdverseShift = (entryTrend === 'BULLISH' || entryTrend === 'SIDEWAYS') && currentTrend === 'BEARISH';
+            const isShortAdverseShift = (entryTrend === 'BEARISH' || entryTrend === 'SIDEWAYS') && currentTrend === 'BULLISH';
 
-          if ((isLong && (isLongShiftProfit || isLongAdverseShift)) || (!isLong && (isShortShiftProfit || isShortAdverseShift))) {
-            const minProfit = this.config.exit.trendShiftMinProfitPct ?? 0.5;
-            const priceProfitPct = isLong
-              ? ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100
-              : ((pos.avgEntryPrice - currentPrice) / pos.avgEntryPrice) * 100;
+            if ((isLong && (isLongShiftProfit || isLongAdverseShift)) || (!isLong && (isShortShiftProfit || isShortAdverseShift))) {
+              const minProfit = this.config.exit.trendShiftMinProfitPct ?? 0.5;
+              const priceProfitPct = isLong
+                ? ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100
+                : ((pos.avgEntryPrice - currentPrice) / pos.avgEntryPrice) * 100;
 
-            // 1. Amankan Profit jika posisi sudah untung >= minProfit%
-            if (((isLong && isLongShiftProfit) || (!isLong && isShortShiftProfit)) && priceProfitPct >= minProfit) {
-              logger.log(
-                'SUCCESS',
-                `🔄 [TREND SHIFT EXIT] ${pos.symbol} (${pos.side}): Trend Macro BTC bergeser ${entryTrend} ➜ ${currentTrend}! Menutup posisi segera karena sudah profit pergerakan harga +${priceProfitPct.toFixed(2)}% (>= min ${minProfit}%) @ $${formatCryptoPrice(currentPrice)}.`,
-                pos.symbol
-              );
-              this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
-              continue;
-            }
-
-            // 2. Cut Loss Darurat (Tutup posisi rugi/floating loss saat BTC berbalik dan menembus jarak >= btcDeltaThreshold% dari EMA 50)
-            if (this.config.exit.trendShiftCloseOnLoss !== false) {
-              const btcDeltaThreshold = this.config.exit.trendShiftBtcDeltaPct ?? 0.5;
-              const currentBtcPrice = currentBtcStatus?.btcPrice;
-              const btcEma = currentBtcStatus?.ema;
-
-              let isBtcDeltaTriggered = false;
-              let btcDeltaDetail = '';
-
-              if (isLong && isLongAdverseShift) {
-                // Long ditutup darurat jika BTC berbalik ke BEARISH dan breakdown >= btcDeltaThreshold% di bawah EMA 50
-                const btcBelowEma = (currentBtcStatus?.diffPct !== undefined && currentBtcStatus.diffPct < 0)
-                  ? Math.abs(currentBtcStatus.diffPct)
-                  : 0;
-
-                if (btcBelowEma >= btcDeltaThreshold) {
-                  isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC breakdown -${btcBelowEma.toFixed(2)}% di bawah EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${btcEma?.toFixed(0)})`;
-                }
-              } else if (!isLong && isShortAdverseShift) {
-                // Short ditutup darurat jika BTC berbalik ke BULLISH dan breakout >= btcDeltaThreshold% di atas EMA 50
-                const btcAboveEma = (currentBtcStatus?.diffPct !== undefined && currentBtcStatus.diffPct > 0)
-                  ? currentBtcStatus.diffPct
-                  : 0;
-
-                if (btcAboveEma >= btcDeltaThreshold) {
-                  isBtcDeltaTriggered = true;
-                  btcDeltaDetail = `BTC breakout +${btcAboveEma.toFixed(2)}% di atas EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${btcEma?.toFixed(0)})`;
-                }
-              }
-
-              if (isBtcDeltaTriggered) {
+              // 1. Amankan Profit jika posisi sudah untung >= minProfit%
+              if (((isLong && isLongShiftProfit) || (!isLong && isShortShiftProfit)) && priceProfitPct >= minProfit) {
                 logger.log(
-                  'WARN',
-                  `🚨 [REGIME SHIFT CUT-LOSS] ${pos.symbol} (${pos.side}): Trend Macro BTC berbalik ${entryTrend} ➜ ${currentTrend} & ${btcDeltaDetail} (jarak EMA >= ${btcDeltaThreshold}%)! Menutup posisi darurat @ $${formatCryptoPrice(currentPrice)} (PnL: ${priceProfitPct >= 0 ? '+' : ''}${priceProfitPct.toFixed(2)}%) demi memotong risiko kerugian lebih dalam.`,
+                  'SUCCESS',
+                  `🔄 [TREND SHIFT EXIT] ${pos.symbol} (${pos.side}): Trend Macro BTC bergeser ${entryTrend} ➜ ${currentTrend}! Menutup posisi segera karena sudah profit pergerakan harga +${priceProfitPct.toFixed(2)}% (>= min ${minProfit}%) @ $${formatCryptoPrice(currentPrice)}.`,
                   pos.symbol
                 );
+                this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
+                continue;
+              }
 
-                // Aktifkan Jeda / Cooldown Pasca Macro Cut-Loss untuk arah posisi ini
-                const cooldownMins = this.config.exit?.trendShiftCooldownMinutes ?? 45;
-                if (cooldownMins > 0) {
-                  this.macroCutLossCooldownUntil[pos.side] = Date.now() + cooldownMins * 60 * 1000;
-                  for (const [sym, pendingItem] of this.pendingSignals.entries()) {
-                    if (pendingItem.side === pos.side) {
-                      this.pendingSignals.delete(sym);
-                      logger.log('INFO', `🛑 [WATCHLIST MACRO PURGE] ${sym} (${pos.side}) dihapus dari watchlist antrean sinyal pasca Macro Cut-Loss BTC.`, sym);
-                    }
+              // 2. Cut Loss Darurat (Tutup posisi rugi/floating loss saat BTC berbalik dan menembus jarak >= btcDeltaThreshold% dari EMA 50)
+              if (this.config.exit.trendShiftCloseOnLoss !== false) {
+                const btcDeltaThreshold = this.config.exit.trendShiftBtcDeltaPct ?? 0.5;
+                const currentBtcPrice = currentBtcStatus?.btcPrice;
+                const btcEma = currentBtcStatus?.ema;
+
+                let isBtcDeltaTriggered = false;
+                let btcDeltaDetail = '';
+
+                if (isLong && isLongAdverseShift) {
+                  // Long ditutup darurat jika BTC berbalik ke BEARISH dan breakdown >= btcDeltaThreshold% di bawah EMA 50
+                  const btcBelowEma = (currentBtcStatus?.diffPct !== undefined && currentBtcStatus.diffPct < 0)
+                    ? Math.abs(currentBtcStatus.diffPct)
+                    : 0;
+
+                  if (btcBelowEma >= btcDeltaThreshold) {
+                    isBtcDeltaTriggered = true;
+                    btcDeltaDetail = `BTC breakdown -${btcBelowEma.toFixed(2)}% di bawah EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${btcEma?.toFixed(0)})`;
+                  }
+                } else if (!isLong && isShortAdverseShift) {
+                  // Short ditutup darurat jika BTC berbalik ke BULLISH dan breakout >= btcDeltaThreshold% di atas EMA 50
+                  const btcAboveEma = (currentBtcStatus?.diffPct !== undefined && currentBtcStatus.diffPct > 0)
+                    ? currentBtcStatus.diffPct
+                    : 0;
+
+                  if (btcAboveEma >= btcDeltaThreshold) {
+                    isBtcDeltaTriggered = true;
+                    btcDeltaDetail = `BTC breakout +${btcAboveEma.toFixed(2)}% di atas EMA50 ($${currentBtcPrice?.toFixed(0)} vs EMA $${btcEma?.toFixed(0)})`;
                   }
                 }
 
-                this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
-                continue;
+                if (isBtcDeltaTriggered) {
+                  logger.log(
+                    'WARN',
+                    `🚨 [REGIME SHIFT CUT-LOSS] ${pos.symbol} (${pos.side}): Trend Macro BTC berbalik ${entryTrend} ➜ ${currentTrend} & ${btcDeltaDetail} (jarak EMA >= ${btcDeltaThreshold}%)! Menutup posisi darurat @ $${formatCryptoPrice(currentPrice)} (PnL: ${priceProfitPct >= 0 ? '+' : ''}${priceProfitPct.toFixed(2)}%) demi memotong risiko kerugian lebih dalam.`,
+                    pos.symbol
+                  );
+
+                  // Aktifkan Jeda / Cooldown Pasca Macro Cut-Loss untuk arah posisi ini
+                  const cooldownMins = this.config.exit?.trendShiftCooldownMinutes ?? 45;
+                  if (cooldownMins > 0) {
+                    this.macroCutLossCooldownUntil[pos.side] = Date.now() + cooldownMins * 60 * 1000;
+                    for (const [sym, pendingItem] of this.pendingSignals.entries()) {
+                      if (pendingItem.side === pos.side) {
+                        this.pendingSignals.delete(sym);
+                        logger.log('INFO', `🛑 [WATCHLIST MACRO PURGE] ${sym} (${pos.side}) dihapus dari watchlist antrean sinyal pasca Macro Cut-Loss BTC.`, sym);
+                      }
+                    }
+                  }
+
+                  this.closePosition(pos, 'TREND_SHIFT_EXIT', currentPrice);
+                  continue;
+                }
               }
             }
           }

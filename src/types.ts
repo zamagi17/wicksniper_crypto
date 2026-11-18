@@ -45,6 +45,7 @@ export interface BotConfig {
     emaTrendSlowPeriod?: number;
     tradeQualityScoringEnabled?: boolean;
     tradeQualityThreshold?: number;
+    btcTrendFilterEnabled?: boolean; // Filter tren Makro BTC khusus Wick Sniper (default: false, Wick Sniper memburu wick terlepas dari BTC)
     // Leader Mode: MA Exhaustion Reversal on Top Gainers
     exhaustionModeEnabled?: boolean;       // Mode Exhaustion Reversal (Gaya Leader Binance)
     exhaustionMin24hChangePct?: number;   // Minimal kenaikan 24 jam koin (Top Gainer, default: 30%)
@@ -116,6 +117,7 @@ export interface BotConfig {
     portfolioTpTargetPct?: number; // Target floating profit seluruh koin (%) (default: 10.0%)
     portfolioTpMinProfitPct?: number; // Minimal profit pergerakan harga koin yang ditutup (%) (default: 0.5%)
     trendShiftExitEnabled?: boolean; // Tutup segera saat trend bergeser (default: true)
+    trendShiftWickSniperEnabled?: boolean; // Apakah Regime Shift Exit berlaku untuk Wick Sniper (default: false, khusus Smart Money)
     trendShiftMinProfitPct?: number; // Minimal profit pergerakan harga saat trend bergeser (%) (default: 0.5%)
     trendShiftCloseOnLoss?: boolean; // Tutup posisi rugi (Cut Loss Darurat) saat tren BTC bergeser berlawanan (default: true)
     trendShiftBtcDeltaPct?: number; // Toleransi pergeseran/penurunan BTC (%) untuk trigger cut loss darurat (default: 0.5%)

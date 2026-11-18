@@ -1133,10 +1133,15 @@ function renderBtcFilter(btc) {
     if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
     if (guardLabel) guardLabel.innerText = 'SHORT Diblokir (Flash Surge) ⚠️';
   } else if (isBullish) {
-    const shortStatus = btc.canShort ? 'SHORT Aman' : 'SHORT Ditahan';
-    if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish terkonfirmasi, sinyal LONG aman (${shortStatus}).`;
+    const isWickSniperFree = currentBotConfig?.triggerStrategy === 'WICK_SNIPER' && !currentBotConfig?.scanner?.btcTrendFilterEnabled;
+    const shortStatus = isWickSniperFree ? 'Wick Sniper SHORT Bebas Berburu' : (btc.canShort ? 'SHORT Aman' : 'SHORT Ditahan (Smart Money)');
+    if (summaryEl) {
+      summaryEl.innerHTML = isWickSniperFree
+        ? `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish makro terkonfirmasi. 🎯 <b>Wick Sniper tetap aktif memburu lonjakan SHORT</b> (Filter makro khusus Smart Money).`
+        : `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish terkonfirmasi, sinyal LONG aman (${shortStatus}).`;
+    }
     if (guardBadge) guardBadge.className = 'btc-guard-badge success';
-    if (guardLabel) guardLabel.innerText = 'BULLISH (LONG Aman) ✅';
+    if (guardLabel) guardLabel.innerText = isWickSniperFree ? 'BULLISH (Wick Sniper Siaga) ✅' : 'BULLISH (LONG Aman) ✅';
   } else if (isBearish) {
     const longStatus = btc.canLong ? 'LONG Aman' : 'LONG Ditahan';
     if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #ff3366;">bawah EMA ${period}</b> (${diffPct.toFixed(2)}%). Tren Bearish terkonfirmasi, sinyal SHORT diizinkan (${longStatus}).`;
