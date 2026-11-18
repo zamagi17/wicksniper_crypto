@@ -542,6 +542,7 @@ export interface GridLayer {
 
 export interface ActivePosition {
   id: string;
+  userId?: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
   strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY';
@@ -646,6 +647,7 @@ export interface PostExitSnapshot {
 
 export interface DailySnapshot {
   id: string; // e.g. "2026-11-16_PAPER" or "2026-11-16_LIVE"
+  userId?: string;
   date: string; // "YYYY-MM-DD" in WIB
   tradingMode: 'LIVE' | 'PAPER';
   endingBalance: number;
@@ -694,6 +696,7 @@ export interface CoinPerformanceRecord {
 
 export interface ClosedTrade {
   id: string;
+  userId?: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
   strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY';
@@ -797,6 +800,7 @@ export interface EngineStatus {
 
 export interface LogEntry {
   id: string;
+  userId?: string;
   timestamp: string;
   time?: number;
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR' | 'SNIPER';
@@ -851,5 +855,41 @@ export interface TuningHistoryRecord {
   status: 'PROPOSED' | 'APPLIED' | 'REJECTED' | 'ROLLED_BACK';
   appliedAt?: number;
   createdAt: number;
+}
+
+export interface UserRecord {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: 'ADMIN' | 'USER';
+  displayName: string;
+  status: 'ACTIVE' | 'DISABLED';
+  config: BotConfig;
+  virtualBalance: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserSummary {
+  id: string;
+  username: string;
+  displayName: string;
+  role: 'ADMIN' | 'USER';
+  status: 'ACTIVE' | 'DISABLED';
+  tradingMode: 'LIVE' | 'PAPER';
+  virtualBalance: number;
+  todayPnl: number;
+  todayPnlPct: number;
+  totalTrades: number;
+  winRate: number;
+  activePositionsCount: number;
+  keyParams: {
+    spikeMinPercent: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    leverage: number;
+    marginPerLayer: number;
+    maxActivePositions: number;
+  };
 }
 

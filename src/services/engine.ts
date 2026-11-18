@@ -294,23 +294,39 @@ export class WickSniperEngine {
     };
   }
 
-  constructor(configPath: string) {
+  public readonly userId: string;
+
+  constructor(configPath: string, userId: string = 'admin', initialConfig?: BotConfig, initialBalance?: number) {
+    this.userId = userId || 'admin';
     this.configPath = configPath;
-    this.config = this.loadConfig();
-    this.virtualBalance = this.config.paperTrading?.initialVirtualBalance || 1000;
+    this.config = initialConfig || this.loadConfig();
+    if (this.userId !== 'admin') {
+      this.config.tradingMode = 'PAPER'; // R&D profiles are always virtual paper trading
+    }
+    this.virtualBalance = initialBalance !== undefined ? initialBalance : (this.config.paperTrading?.initialVirtualBalance || 1000);
     this.scanner = new SpikeScanner(this.config.scanner);
     this.smartMoneyScanner = new SmartMoneyScanner(this.config.smartMoney || this.getDefaultSmartMoneyConfig(), this.config.scanner);
-    telegram.updateConfig(this.config.telegram);
-    if (this.config.apiKey && this.config.apiSecret) {
-      binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+    if (this.userId === 'admin') {
+      telegram.updateConfig(this.config.telegram);
+      if (this.config.apiKey && this.config.apiSecret) {
+        binanceFutures.configure(this.config.apiKey, this.config.apiSecret, this.config.isTestnet);
+      }
     }
     this.initListeners();
     this.updateBtcTrendStatus().catch(() => {});
-    if (this.config.tradingMode === 'LIVE') {
+    if (this.config.tradingMode === 'LIVE' && this.userId === 'admin') {
       setTimeout(() => {
         this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => { });
       }, 1500);
     }
+  }
+
+  public getUserId(): string {
+    return this.userId;
+  }
+
+  private async persistState(): Promise<void> {
+    await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday, this.userId).catch(() => {});
   }
 
   private loadConfig(): BotConfig {
@@ -551,19 +567,30 @@ export class WickSniperEngine {
       newConfig.paperTrading.initialVirtualBalance !== oldBalance
     ) {
       this.virtualBalance = newConfig.paperTrading.initialVirtualBalance;
-      await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+      await this.persistState();
       logger.log('INFO', `💰 Saldo Paper Trading disesuaikan ke $${this.virtualBalance.toFixed(2)} USDT.`);
     }
-    try {
-      fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
-      logger.log('INFO', '⚙️ Konfigurasi Wick Sniper berhasil diperbarui.');
-    } catch (e: any) {
-      logger.log('ERROR', `Gagal menyimpan konfigurasi: ${e.message}`);
+
+    if (this.userId !== 'admin') {
+      await db.updateUser(this.userId, {
+        config: this.config,
+        virtualBalance: this.virtualBalance,
+      }).catch(() => {});
+      logger.log('INFO', `⚙️ [${this.userId}] Konfigurasi R&D profil berhasil disimpan.`);
+    } else {
+      try {
+        fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+        logger.log('INFO', '⚙️ Konfigurasi Wick Sniper berhasil diperbarui.');
+      } catch (e: any) {
+        logger.log('ERROR', `Gagal menyimpan konfigurasi: ${e.message}`);
+      }
+      await db.saveConfig(this.config).catch(() => { });
+      await db.updateUser('admin', { config: this.config, virtualBalance: this.virtualBalance }).catch(() => {});
     }
-    await db.saveConfig(this.config).catch(() => { });
-    const reloadedDb = await db.loadConfig().catch(() => null);
+
+    const reloadedDb = this.userId === 'admin' ? await db.loadConfig().catch(() => null) : null;
     this.lastSyncedConfigJson = reloadedDb ? JSON.stringify(reloadedDb) : JSON.stringify(this.config);
-    if (this.config.tradingMode === 'LIVE') {
+    if (this.config.tradingMode === 'LIVE' && this.userId === 'admin') {
       binanceFutures.startUserDataStream().catch(() => {});
       this.syncLiveBalance().then(() => this.broadcastStatus()).catch(() => { });
     }
@@ -654,7 +681,7 @@ export class WickSniperEngine {
         await db.saveConfig(this.config);
         this.lastSyncedConfigJson = JSON.stringify(this.config);
       }
-      const dbState = await db.loadState();
+      const dbState = await db.loadState(this.userId);
       if (dbState) {
         this.virtualBalance = dbState.virtualBalance;
         this.spikesDetectedToday = dbState.spikesToday || 0;
@@ -1621,7 +1648,7 @@ export class WickSniperEngine {
       strategy: 'MOMENTUM_LONG',
     };
     await db.saveSpike(alert).catch(() => {});
-    await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+    await this.persistState();
 
     logger.log(
       'SUCCESS',
@@ -2071,7 +2098,7 @@ export class WickSniperEngine {
     } else {
       this.activePositions.set(symbol, initialPos);
     }
-    db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+    this.persistState();
 
     telegram.notifyNewOrder(
       initialPos,
@@ -2387,7 +2414,7 @@ export class WickSniperEngine {
           // Reset acuan puncak ATH/ATL agar tidak mewarisi harga ekstrem sebelum averaging
           pos.highestPrice = currentPrice;
           pos.lowestPrice = currentPrice;
-          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+          this.persistState();
         }
       }
 
@@ -2532,7 +2559,7 @@ export class WickSniperEngine {
             pos.symbol
           );
           telegram.notifyAutoBep(pos.symbol, pos.avgEntryPrice, pos.hardSlPrice, pos.unrealizedPnl, bepBufferPct);
-          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+          this.persistState();
         }
       }
 
@@ -3402,7 +3429,7 @@ export class WickSniperEngine {
     );
 
     this.broadcastStatus();
-    db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+    this.persistState();
     return true;
   }
 
@@ -3605,7 +3632,7 @@ export class WickSniperEngine {
       await this.closePosition(pos, 'LADDER_TP', currentPrice);
     } else {
       this.broadcastStatus();
-      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+      this.persistState();
     }
 
     return true;
@@ -3729,7 +3756,7 @@ export class WickSniperEngine {
       pos.targetTp2Price
     );
     this.broadcastStatus();
-    db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+    this.persistState();
   }
 
   /**
@@ -5020,13 +5047,16 @@ export class WickSniperEngine {
         exitReason: trade.exitReason,
         status: 'PERSISTED',
       });
+      trade.userId = this.userId;
       db.saveTrade(trade).then(() => this.syncTradesFromDb()).catch(() => { });
-      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+      this.persistState();
 
-      telegram.notifyTradeClosed(
-        trade,
-        isPaperTrade ? this.virtualBalance : undefined
-      );
+      if (this.userId === 'admin') {
+        telegram.notifyTradeClosed(
+          trade,
+          isPaperTrade ? this.virtualBalance : undefined
+        );
+      }
 
       if (this.config.autoTuner?.enabled) {
         this.handleAutoTunerPostTrade().catch(() => {});
@@ -5852,7 +5882,7 @@ export class WickSniperEngine {
           // Langsung pasangkan Limit Take Profit di Binance agar ada open order
           this.syncLiveTakeProfitOrder(adoptedPos).catch(() => { });
           this.broadcastStatus();
-          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+          this.persistState();
         }
       }
       this.evaluatePortfolioTakeProfit().catch(() => { });
@@ -5954,7 +5984,7 @@ export class WickSniperEngine {
       this.takeDailySnapshot(oldDate).catch((err) => {
         logger.log('WARN', `Gagal mengambil snapshot harian ${oldDate}: ${err.message}`);
       });
-      db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+      this.persistState();
       logger.log('INFO', `🌅 [RESET HARIAN 00:00 WIB] Pergantian hari (${oldDate} ➔ ${todayWib} WIB). Metrik & lonjakan harian telah direset.`);
       this.broadcastStatus();
     }
@@ -6636,7 +6666,7 @@ export class WickSniperEngine {
           this.config.paperTrading.initialVirtualBalance !== oldBalance
         ) {
           this.virtualBalance = this.config.paperTrading.initialVirtualBalance;
-          db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => { });
+          this.persistState();
           logger.log('INFO', `💰 Saldo Paper Trading disesuaikan ke $${this.virtualBalance.toFixed(2)} USDT.`);
         }
         logger.log('INFO', '🔄 [DATABASE AUTO-SYNC] Konfigurasi bot otomatis diperbarui dari PostgreSQL!');
@@ -6647,7 +6677,7 @@ export class WickSniperEngine {
 
       // Cek apakah ada perubahan saldo manual di tabel wicksniper_state (hanya jika tidak ada posisi floating)
       if (this.activePositions.size === 0) {
-        const dbState = await db.loadState();
+        const dbState = await db.loadState(this.userId);
         if (dbState && typeof dbState.virtualBalance === 'number') {
           if (Math.abs(dbState.virtualBalance - this.virtualBalance) > 0.01) {
             this.virtualBalance = dbState.virtualBalance;
@@ -6691,7 +6721,7 @@ export class WickSniperEngine {
     this.activePositions.clear();
     this.pendingSignals.clear();
     db.clearAllTrades().catch(() => { });
-    db.saveState(this.virtualBalance, [], 0).catch(() => { });
+    db.saveState(this.virtualBalance, [], 0, this.userId).catch(() => { });
     logger.log('INFO', '🧹 Saldo dan riwayat trade demo berhasil di-reset.');
     this.broadcastStatus();
   }
@@ -7987,7 +8017,7 @@ export class WickSniperEngine {
     };
 
     this.activePositions.set(symbol, initialPos);
-    await db.saveState(this.virtualBalance, Array.from(this.activePositions.values()), this.spikesDetectedToday).catch(() => {});
+    await this.persistState();
 
     if (this.config.tradingMode === 'LIVE') {
       if (numLayers > 1) {
@@ -8271,7 +8301,7 @@ export class WickSniperEngine {
   public async takeDailySnapshot(targetDateStr: string, manual: boolean = false): Promise<DailySnapshot> {
     const isPaper = this.config.tradingMode === 'PAPER';
     const tradingMode: 'LIVE' | 'PAPER' = isPaper ? 'PAPER' : 'LIVE';
-    const id = `${targetDateStr}_${tradingMode}`;
+    const id = this.userId === 'admin' ? `${targetDateStr}_${tradingMode}` : `${targetDateStr}_${tradingMode}_${this.userId}`;
 
     const startTs = new Date(`${targetDateStr}T00:00:00+07:00`).getTime();
     const endTs = new Date(`${targetDateStr}T23:59:59.999+07:00`).getTime();
@@ -8377,6 +8407,7 @@ export class WickSniperEngine {
 
     const snapshot: DailySnapshot = {
       id,
+      userId: this.userId,
       date: targetDateStr,
       tradingMode,
       endingBalance,
@@ -8420,8 +8451,8 @@ export class WickSniperEngine {
       await db.saveDailySnapshot(snapshot);
     }
 
-    // Kirim notifikasi Telegram saat reset otomatis tengah malam atau saat user meminta manual
-    if (!manual) {
+    // Kirim notifikasi Telegram saat reset otomatis tengah malam atau saat user meminta manual (hanya master admin)
+    if (!manual && this.userId === 'admin') {
       telegram.notifyDailySummary(snapshot).catch(() => {});
     }
 

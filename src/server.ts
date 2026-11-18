@@ -18,11 +18,22 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const CONFIG_PATH = path.resolve(__dirname, '../config.json');
-const engine = new WickSniperEngine(CONFIG_PATH);
+import { EngineManager } from './services/engineManager';
 
-// Sesi Token Login (Token -> Expiry Timestamp)
-const activeSessions = new Map<string, number>();
+const CONFIG_PATH = path.resolve(__dirname, '../config.json');
+export const engineManager = new EngineManager(CONFIG_PATH);
+export const engine = engineManager.getPrimaryEngine();
+
+export interface UserSession {
+  userId: string;
+  username: string;
+  role: 'ADMIN' | 'USER';
+  displayName: string;
+  expiresAt: number;
+}
+
+// Sesi Token Login (Token -> UserSession)
+const activeSessions = new Map<string, UserSession>();
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // Sesi aktif selama 7 hari
 const loginAttempts = new Map<string, { count: number; windowStartedAt: number; blockedUntil: number }>();
 const LOGIN_ATTEMPT_LIMIT = 5;
@@ -36,15 +47,19 @@ function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
-function isValidToken(token?: string | null): boolean {
-  if (!token) return false;
-  const expiresAt = activeSessions.get(token);
-  if (!expiresAt) return false;
-  if (Date.now() > expiresAt) {
+function getSession(token?: string | null): UserSession | null {
+  if (!token) return null;
+  const session = activeSessions.get(token);
+  if (!session) return null;
+  if (Date.now() > session.expiresAt) {
     activeSessions.delete(token);
-    return false;
+    return null;
   }
-  return true;
+  return session;
+}
+
+function isValidToken(token?: string | null): boolean {
+  return !!getSession(token);
 }
 
 function extractToken(req: express.Request): string | null {
@@ -64,13 +79,48 @@ function extractToken(req: express.Request): string | null {
 // Middleware Proteksi Akses API Sensitif
 function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = extractToken(req);
-  if (isValidToken(token)) {
+  const session = getSession(token);
+  if (session) {
+    (req as any).user = session;
     return next();
   }
   return res.status(401).json({
     success: false,
     message: 'Akses ditolak: Harap masukkan password login dashboard terlebih dahulu.',
   });
+}
+
+// Middleware opsional untuk melampirkan user jika token disertakan (misal /api/status)
+function attachAuthIfPresent(req: express.Request, _res: express.Response, next: express.NextFunction) {
+  const token = extractToken(req);
+  const session = getSession(token);
+  if (session) {
+    (req as any).user = session;
+  }
+  return next();
+}
+
+// Middleware khusus aksi Master Admin
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).user as UserSession | undefined;
+  if (!user || user.role !== 'ADMIN') {
+    return res.status(403).json({ success: false, message: 'Akses khusus Master Administrator.' });
+  }
+  return next();
+}
+
+// Helper untuk meresolusi Engine target berdasarkan user context atau profileId (Multi-User R&D)
+function getTargetEngine(req: express.Request): WickSniperEngine {
+  const user = (req as any).user as UserSession | undefined;
+  if (!user) return engine;
+  if (user.role === 'ADMIN') {
+    const requestedProfile = (req.query.profileId as string) || (req.headers['x-profile-id'] as string) || (req.body?.profileId as string);
+    if (requestedProfile && engineManager.hasEngine(requestedProfile)) {
+      return engineManager.getEngine(requestedProfile);
+    }
+    return engine;
+  }
+  return engineManager.getEngine(user.userId);
 }
 
 function getSafeConfig(config: any) {
@@ -102,7 +152,7 @@ app.use(
 // ==========================================
 // AUTHENTICATION APIs
 // ==========================================
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
   let attempt = loginAttempts.get(clientIp);
@@ -114,34 +164,59 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(429).json({ success: false, message: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' });
   }
 
-  const configuredPassword = engine.getConfig().security?.password || 'admin123';
-  if (REQUIRE_STRONG_REMOTE_PASSWORD && (configuredPassword === 'admin123' || configuredPassword.length < 12)) {
-    return res.status(403).json({ success: false, message: 'Akses remote memerlukan password dashboard minimal 12 karakter dan bukan password default.' });
+  const { username, password } = req.body || {};
+  const targetUsername = (username || 'admin').trim();
+
+  if (!password) {
+    return res.status(400).json({ success: false, message: 'Password wajib diisi.' });
   }
 
-  const { password } = req.body || {};
-  if (!password || !engine.verifyPassword(password)) {
+  const user = await engineManager.authenticate(targetUsername, password);
+  if (!user) {
     attempt.count++;
     if (attempt.count >= LOGIN_ATTEMPT_LIMIT) attempt.blockedUntil = now + LOGIN_BLOCK_MS;
-    logger.log('WARN', '⚠️ Percobaan login dashboard dengan password salah.');
-    return res.status(401).json({ success: false, message: 'Password salah! Periksa kembali password Anda.' });
+    logger.log('WARN', `⚠️ Percobaan login gagal untuk user '${targetUsername}'.`);
+    return res.status(401).json({ success: false, message: 'Username atau password salah! Periksa kembali kredensial Anda.' });
   }
 
   loginAttempts.delete(clientIp);
   const token = generateToken();
-  activeSessions.set(token, Date.now() + SESSION_DURATION_MS);
-  logger.log('SUCCESS', '🔓 Login dashboard berhasil. Sesi otentikasi aktif.');
+  activeSessions.set(token, {
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    displayName: user.displayName,
+    expiresAt: Date.now() + SESSION_DURATION_MS,
+  });
+
+  logger.log('SUCCESS', `🔓 Login berhasil: ${user.displayName} (@${user.username}) [${user.role}]. Sesi otentikasi aktif.`);
   return res.json({
     success: true,
     token,
-    message: 'Login berhasil! Selamat datang di Wick Sniper Terminal.',
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      displayName: user.displayName,
+    },
+    message: `Selamat datang di Wick Sniper Terminal, ${user.displayName}!`,
   });
 });
 
 app.get('/api/auth/check', (req, res) => {
   const token = extractToken(req);
-  if (isValidToken(token)) {
-    return res.json({ success: true, authenticated: true });
+  const session = getSession(token);
+  if (session) {
+    return res.json({
+      success: true,
+      authenticated: true,
+      user: {
+        id: session.userId,
+        username: session.username,
+        role: session.role,
+        displayName: session.displayName,
+      },
+    });
   }
   return res.status(401).json({ success: false, authenticated: false });
 });
@@ -157,14 +232,100 @@ app.post('/api/auth/logout', (req, res) => {
 app.post('/api/auth/change-password', requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
-    if (!currentPassword || !engine.verifyPassword(currentPassword)) {
+    const session = (req as any).user as UserSession;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Password lama dan baru harus diisi!' });
+    }
+    const verified = await engineManager.authenticate(session.username, currentPassword);
+    if (!verified) {
       return res.status(400).json({ success: false, message: 'Password lama tidak sesuai!' });
     }
-    await engine.changePassword(newPassword);
+    await engineManager.updateUserProfile(session.userId, { password: newPassword });
+    if (session.userId === 'admin') {
+      await engine.changePassword(newPassword);
+    }
     return res.json({ success: true, message: 'Password dashboard berhasil diubah! Simpan password baru Anda.' });
   } catch (err: any) {
     return res.status(400).json({ success: false, message: err.message });
   }
+});
+
+// ==========================================
+// R&D MULTI-USER PROFILES APIs
+// ==========================================
+app.get('/api/users', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const summaries = await engineManager.getUserSummaries();
+    return res.json({ success: true, users: summaries });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { username, password, displayName, role, initialBalance, cloneFromProfileId, configOverrides } = req.body || {};
+    const created = await engineManager.createUserProfile({
+      username,
+      password,
+      displayName,
+      role: role || 'USER',
+      initialBalance: initialBalance ? parseFloat(String(initialBalance)) : 1000,
+      cloneFromProfileId,
+      configOverrides,
+    });
+    return res.json({
+      success: true,
+      user: {
+        id: created.id,
+        username: created.username,
+        displayName: created.displayName,
+        role: created.role,
+        status: created.status,
+        virtualBalance: created.virtualBalance,
+      },
+      message: `Profil R&D '${created.displayName}' (@${created.username}) berhasil dibuat dan langsung aktif!`,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/users/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const session = (req as any).user as UserSession;
+    if (session.role !== 'ADMIN' && session.userId !== id) {
+      return res.status(403).json({ success: false, message: 'Tidak diizinkan mengubah profil user lain.' });
+    }
+    const { displayName, password, role, status, virtualBalance, config } = req.body || {};
+    await engineManager.updateUserProfile(id, {
+      displayName,
+      password,
+      role: session.role === 'ADMIN' ? role : undefined,
+      status: session.role === 'ADMIN' ? status : undefined,
+      virtualBalance: virtualBalance !== undefined ? parseFloat(String(virtualBalance)) : undefined,
+      config,
+    });
+    return res.json({ success: true, message: `Profil ${id} berhasil diperbarui.` });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await engineManager.deleteUserProfile(id);
+    return res.json({ success: true, message: `Profil R&D ${id} berhasil dihapus.` });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/api/users/current', requireAuth, (req, res) => {
+  const session = (req as any).user as UserSession;
+  return res.json({ success: true, user: session });
 });
 
 // ==========================================
@@ -180,19 +341,22 @@ app.get('/api/symbols', async (req, res) => {
   }
 });
 
-app.get('/api/status', (req, res) => {
-  res.json(engine.getStatus());
+app.get('/api/status', attachAuthIfPresent, (req, res) => {
+  const targetEngine = getTargetEngine(req);
+  res.json(targetEngine.getStatus());
 });
 
 app.get('/api/config', requireAuth, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  await engine.syncConfigFromDb();
-  res.json(getSafeConfig(engine.getConfig()));
+  const targetEngine = getTargetEngine(req);
+  await targetEngine.syncConfigFromDb();
+  res.json(getSafeConfig(targetEngine.getConfig()));
 });
 
 app.post('/api/config', requireAuth, async (req, res) => {
   try {
-    const updated = await engine.saveConfig(req.body);
+    const targetEngine = getTargetEngine(req);
+    const updated = await targetEngine.saveConfig(req.body);
     res.json({ success: true, config: getSafeConfig(updated) });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -200,18 +364,21 @@ app.post('/api/config', requireAuth, async (req, res) => {
 });
 
 app.post('/api/start', requireAuth, async (req, res) => {
-  await engine.start();
-  res.json({ success: true, status: engine.getStatus() });
+  const targetEngine = getTargetEngine(req);
+  await targetEngine.start();
+  res.json({ success: true, status: targetEngine.getStatus() });
 });
 
 app.post('/api/stop', requireAuth, (req, res) => {
-  engine.stop();
-  res.json({ success: true, status: engine.getStatus() });
+  const targetEngine = getTargetEngine(req);
+  targetEngine.stop();
+  res.json({ success: true, status: targetEngine.getStatus() });
 });
 
 app.post('/api/reset-demo', requireAuth, (req, res) => {
-  engine.resetDemoWallet();
-  res.json({ success: true, status: engine.getStatus() });
+  const targetEngine = getTargetEngine(req);
+  targetEngine.resetDemoWallet();
+  res.json({ success: true, status: targetEngine.getStatus() });
 });
 
 app.post('/api/close-position', requireAuth, async (req, res) => {
@@ -220,8 +387,9 @@ app.post('/api/close-position', requireAuth, async (req, res) => {
     if (!symbol) {
       return res.status(400).json({ success: false, message: 'Simbol koin harus diisi' });
     }
-    const closed = await engine.manualClosePosition(symbol);
-    res.json({ success: closed, status: engine.getStatus() });
+    const targetEngine = getTargetEngine(req);
+    const closed = await targetEngine.manualClosePosition(symbol);
+    res.json({ success: closed, status: targetEngine.getStatus() });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -230,8 +398,9 @@ app.post('/api/close-position', requireAuth, async (req, res) => {
 app.post('/api/pending-signals/:symbol/cancel', requireAuth, (req, res) => {
   try {
     const { symbol } = req.params;
-    const cancelled = engine.cancelPendingSignal(symbol);
-    res.json({ success: cancelled, status: engine.getStatus() });
+    const targetEngine = getTargetEngine(req);
+    const cancelled = targetEngine.cancelPendingSignal(symbol);
+    res.json({ success: cancelled, status: targetEngine.getStatus() });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -240,8 +409,9 @@ app.post('/api/pending-signals/:symbol/cancel', requireAuth, (req, res) => {
 app.post('/api/pending-signals/:symbol/trigger', requireAuth, async (req, res) => {
   try {
     const { symbol } = req.params;
-    const triggered = await engine.forceTriggerPendingSignal(symbol);
-    res.json({ success: triggered, status: engine.getStatus() });
+    const targetEngine = getTargetEngine(req);
+    const triggered = await targetEngine.forceTriggerPendingSignal(symbol);
+    res.json({ success: triggered, status: targetEngine.getStatus() });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -385,7 +555,7 @@ app.get('/api/logs', (req, res) => {
   res.json(logger.getLogs());
 });
 
-app.get('/api/trades', async (req, res) => {
+app.get('/api/trades', attachAuthIfPresent, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   const page = parseInt(String(req.query.page || '1'), 10) || 1;
   const limit = parseInt(String(req.query.limit || '20'), 10) || 20;
@@ -394,14 +564,17 @@ app.get('/api/trades', async (req, res) => {
   const mode = req.query.mode as 'ALL' | 'LIVE' | 'PAPER' | undefined;
   const strategy = req.query.strategy as 'ALL' | 'SMART_MONEY' | 'WICK_SNIPER' | undefined;
 
+  const targetEngine = getTargetEngine(req);
+  const targetUserId = targetEngine.getUserId();
+
   if (db.isConnected) {
-    const result = await db.queryTrades({ page, limit, symbol, outcome, mode, strategy });
-    engine.syncTradesFromDb().catch(() => {});
+    const result = await db.queryTrades({ page, limit, symbol, outcome, mode, strategy, userId: targetUserId });
+    targetEngine.syncTradesFromDb().catch(() => {});
     return res.json({ success: true, ...result });
   }
 
   // Memory fallback
-  let list = engine.getClosedTrades();
+  let list = targetEngine.getClosedTrades();
   if (symbol) {
     list = list.filter((t) => t.symbol.toUpperCase().includes(symbol.toUpperCase()));
   }
@@ -516,17 +689,19 @@ app.post('/api/blacklist/remove', requireAuth, (req, res) => {
   }
 });
 
-app.get('/api/daily-snapshots', async (req, res) => {
+app.get('/api/daily-snapshots', attachAuthIfPresent, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '30'), 10) || 30));
   const mode = req.query.mode as string | undefined;
+  const targetEngine = getTargetEngine(req);
+  const targetUserId = targetEngine.getUserId();
 
   if (db.isConnected) {
-    const snapshots = await db.getDailySnapshots(limit, mode);
+    const snapshots = await db.getDailySnapshots(limit, mode, targetUserId);
     return res.json({ success: true, snapshots });
   }
 
-  let list = engine.getDailySnapshots();
+  let list = targetEngine.getDailySnapshots();
   if (mode) {
     list = list.filter((s) => s.tradingMode === mode);
   }
@@ -593,10 +768,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : (engine.getConf
 
 server.listen(PORT, HOST, async () => {
   console.log(`\n======================================================`);
-  console.log(`🎯 WICK SNIPER BOT - HIGH-FREQUENCY REVERSAL ENGINE`);
+  console.log(`🎯 WICK SNIPER BOT - MULTI-USER R&D REVERSAL ENGINE`);
   console.log(`📡 Web Dashboard: http://localhost:${PORT}`);
   console.log(`======================================================\n`);
 
-  // Auto-start engine
+  // Auto-init multi-user manager & start engines
+  await engineManager.init();
   await engine.start();
 });

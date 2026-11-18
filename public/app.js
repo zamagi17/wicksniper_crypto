@@ -128,11 +128,20 @@ function clearAuthToken() {
   } catch {}
 }
 
+let currentUser = null;
+let currentActiveProfileId = 'admin';
+
 async function authFetch(url, options = {}) {
   const token = getAuthToken();
   const headers = { ...(options.headers || {}) };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (currentActiveProfileId && currentActiveProfileId !== 'admin') {
+    headers['X-Profile-Id'] = currentActiveProfileId;
+    if (typeof url === 'string' && !url.includes('profileId=')) {
+      url += (url.includes('?') ? '&' : '?') + 'profileId=' + encodeURIComponent(currentActiveProfileId);
+    }
   }
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401 && !url.includes('/api/auth/')) {
@@ -183,12 +192,14 @@ window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
 
 async function handleLoginSubmit(e) {
   if (e) e.preventDefault();
+  const userInput = document.getElementById('login-username-input');
   const input = document.getElementById('login-password-input');
   const btn = document.getElementById('btn-submit-login');
   const btnText = btn?.querySelector('.btn-login-text');
   const btnSpinner = btn?.querySelector('.btn-login-spinner');
   const errBox = document.getElementById('login-error-msg');
 
+  const username = (userInput?.value || 'admin').trim();
   const password = (input?.value || '').trim();
   if (!password) {
     if (errBox) {
@@ -208,17 +219,20 @@ async function handleLoginSubmit(e) {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     }).then((r) => r.json());
 
     if (res.success && res.token) {
       setAuthToken(res.token);
+      currentUser = res.user || { id: 'admin', username: 'admin', role: 'ADMIN', displayName: 'Administrator' };
+      localStorage.setItem('wicksniper_user', JSON.stringify(currentUser));
       hideLoginOverlay();
+      updateAuthUI();
       connectWebSocket();
       fetchInitialData();
     } else {
       if (errBox) {
-        errBox.innerText = res.message || 'Password salah!';
+        errBox.innerText = res.message || 'Username atau password salah!';
         errBox.style.display = 'block';
       }
       if (input) {
@@ -245,9 +259,286 @@ async function logoutSession() {
     await authFetch('/api/auth/logout', { method: 'POST' });
   } catch {}
   clearAuthToken();
+  currentUser = null;
+  localStorage.removeItem('wicksniper_user');
   showLoginOverlay();
 }
 window.logoutSession = logoutSession;
+
+function updateAuthUI() {
+  const badgeWrap = document.getElementById('user-profile-badge');
+  const badgeName = document.getElementById('user-profile-name');
+  const profileSwitcherWrap = document.getElementById('profile-switcher-wrap');
+  const btnRndLab = document.getElementById('btn-rnd-lab');
+  const btnDrawerRndLab = document.getElementById('btn-drawer-rnd-lab');
+
+  if (!currentUser) {
+    try {
+      const stored = localStorage.getItem('wicksniper_user');
+      if (stored) currentUser = JSON.parse(stored);
+    } catch {}
+  }
+
+  if (currentUser) {
+    if (badgeWrap && badgeName) {
+      badgeName.innerText = `👤 ${currentUser.displayName || currentUser.username}`;
+      badgeWrap.style.display = 'inline-flex';
+    }
+    if (currentUser.role === 'ADMIN') {
+      if (profileSwitcherWrap) profileSwitcherWrap.style.display = 'inline-flex';
+      if (btnRndLab) btnRndLab.style.display = 'inline-flex';
+      if (btnDrawerRndLab) btnDrawerRndLab.style.display = 'flex';
+      loadUserProfilesList();
+    } else {
+      if (profileSwitcherWrap) profileSwitcherWrap.style.display = 'none';
+      if (btnRndLab) btnRndLab.style.display = 'none';
+      if (btnDrawerRndLab) btnDrawerRndLab.style.display = 'none';
+    }
+  }
+}
+window.updateAuthUI = updateAuthUI;
+
+async function loadUserProfilesList() {
+  if (!currentUser || currentUser.role !== 'ADMIN') return;
+  try {
+    const res = await authFetch('/api/users').then(r => r.json());
+    if (res.success && Array.isArray(res.users)) {
+      renderProfileSelectDropdown(res.users);
+      renderLeaderboardTable(res.users);
+    }
+  } catch (e) {
+    console.warn('Gagal memuat daftar user:', e.message);
+  }
+}
+window.loadUserProfilesList = loadUserProfilesList;
+
+function renderProfileSelectDropdown(users) {
+  const select = document.getElementById('active-profile-select');
+  const cloneSelect = document.getElementById('new-param-clonefrom');
+  if (select) {
+    select.innerHTML = users.map(u => `
+      <option value="${u.id}" ${u.id === currentActiveProfileId ? 'selected' : ''}>
+        ${u.role === 'ADMIN' ? '👑' : '🧪'} Profil: ${u.displayName}
+      </option>
+    `).join('');
+  }
+  if (cloneSelect) {
+    cloneSelect.innerHTML = users.map(u => `
+      <option value="${u.id}" ${u.id === 'admin' ? 'selected' : ''}>
+        ${u.displayName} (@${u.username})
+      </option>
+    `).join('');
+  }
+  const countTag = document.getElementById('rnd-profile-count-tag');
+  if (countTag) countTag.innerText = `${users.length} Profil`;
+}
+
+function switchActiveProfile(profileId) {
+  currentActiveProfileId = profileId || 'admin';
+  const select = document.getElementById('active-profile-select');
+  if (select) select.value = currentActiveProfileId;
+  closeRndModal();
+  fetchInitialData();
+}
+window.switchActiveProfile = switchActiveProfile;
+
+function openRndModal() {
+  const modal = document.getElementById('modal-rnd-lab');
+  if (modal) modal.style.display = 'flex';
+  loadUserProfilesList();
+}
+window.openRndModal = openRndModal;
+
+function closeRndModal() {
+  const modal = document.getElementById('modal-rnd-lab');
+  if (modal) modal.style.display = 'none';
+}
+window.closeRndModal = closeRndModal;
+
+function handleRndModalBackdropClick(e) {
+  if (e.target && e.target.id === 'modal-rnd-lab') closeRndModal();
+}
+window.handleRndModalBackdropClick = handleRndModalBackdropClick;
+
+function toggleNewProfileForm() {
+  const card = document.getElementById('rnd-new-profile-card');
+  if (card) {
+    card.style.display = card.style.display === 'none' ? 'block' : 'none';
+    if (card.style.display === 'block') {
+      document.getElementById('new-user-username')?.focus();
+    }
+  }
+}
+window.toggleNewProfileForm = toggleNewProfileForm;
+
+async function handleCreateProfileSubmit(e) {
+  if (e) e.preventDefault();
+  const username = document.getElementById('new-user-username')?.value?.trim();
+  const password = document.getElementById('new-user-password')?.value?.trim();
+  const displayName = document.getElementById('new-user-displayname')?.value?.trim();
+  const initialBalance = parseFloat(document.getElementById('new-user-balance')?.value || '1000');
+  const cloneFromProfileId = document.getElementById('new-param-clonefrom')?.value || 'admin';
+  const spikeMin = parseFloat(document.getElementById('new-param-spikemin')?.value || '2.0');
+  const tp = parseFloat(document.getElementById('new-param-tp')?.value || '1.5');
+  const sl = parseFloat(document.getElementById('new-param-sl')?.value || '3.0');
+  const leverage = parseInt(document.getElementById('new-param-leverage')?.value || '5', 10);
+  const marginPerLayer = parseFloat(document.getElementById('new-param-margin')?.value || '25');
+  const errBox = document.getElementById('new-profile-error');
+  const submitBtn = document.getElementById('btn-save-new-profile');
+
+  if (!username || !password || !displayName) {
+    if (errBox) {
+      errBox.innerText = 'Username, password, dan nama tampilan wajib diisi.';
+      errBox.style.display = 'block';
+    }
+    return;
+  }
+
+  if (errBox) errBox.style.display = 'none';
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const res = await authFetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        password,
+        displayName,
+        initialBalance,
+        cloneFromProfileId,
+        configOverrides: {
+          leverage,
+          scanner: {
+            spikeMinPercent: spikeMin,
+          },
+          exit: {
+            takeProfitPct: tp,
+            hardStopLossPct: sl,
+          },
+          grid: {
+            marginPerLayerUsdt: marginPerLayer,
+          },
+        },
+      }),
+    }).then(r => r.json());
+
+    if (res.success) {
+      alert(res.message || 'Profil berhasil dibuat!');
+      toggleNewProfileForm();
+      document.getElementById('new-user-username').value = '';
+      document.getElementById('new-user-password').value = '';
+      document.getElementById('new-user-displayname').value = '';
+      loadUserProfilesList();
+    } else {
+      if (errBox) {
+        errBox.innerText = res.message || 'Gagal membuat profil.';
+        errBox.style.display = 'block';
+      }
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.innerText = `Error: ${err.message}`;
+      errBox.style.display = 'block';
+    }
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+window.handleCreateProfileSubmit = handleCreateProfileSubmit;
+
+async function deleteUserProfile(userId, username) {
+  if (userId === 'admin') {
+    alert('Profil master admin tidak dapat dihapus.');
+    return;
+  }
+  if (!confirm(`Yakin ingin menghapus profil '${username}'? Semua data simulasi profil ini akan dihentikan.`)) {
+    return;
+  }
+  try {
+    const res = await authFetch(`/api/users/${userId}`, { method: 'DELETE' }).then(r => r.json());
+    if (res.success) {
+      alert(res.message || 'Profil berhasil dihapus.');
+      loadUserProfilesList();
+    } else {
+      alert(res.message || 'Gagal menghapus profil.');
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+window.deleteUserProfile = deleteUserProfile;
+
+function renderLeaderboardTable(users) {
+  const tbody = document.getElementById('rnd-leaderboard-tbody');
+  if (!tbody) return;
+
+  if (!users || users.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 20px; color: var(--text-muted);">Belum ada profil R&D terdaftar.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = users.map((u) => {
+    const isCurrentActive = u.id === currentActiveProfileId;
+    const pnlColor = u.todayPnl > 0 ? '#30d158' : u.todayPnl < 0 ? '#ff453a' : '#94a3b8';
+    const pnlSign = u.todayPnl > 0 ? '+' : '';
+    const wrColor = u.winRate >= 70 ? '#30d158' : u.winRate >= 50 ? '#fbbf24' : '#94a3b8';
+
+    return `
+      <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); ${isCurrentActive ? 'background: rgba(59, 130, 246, 0.08);' : ''}">
+        <td style="padding: 10px 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">${u.role === 'ADMIN' ? '👑' : '🧪'}</span>
+            <div>
+              <div style="font-weight: 700; color: #fff;">${u.displayName}</div>
+              <div style="font-size: 11px; color: var(--text-muted);">@${u.username} ${u.role === 'ADMIN' ? '<span class="badge-tag" style="font-size: 9px; padding: 1px 4px;">Master</span>' : ''}</div>
+            </div>
+          </div>
+        </td>
+        <td style="padding: 10px 12px;">
+          <span class="badge-mode ${u.tradingMode === 'LIVE' ? 'live' : 'paper'}" style="font-size: 10px; padding: 2px 6px;">
+            ${u.tradingMode === 'LIVE' ? '⚡ LIVE' : '🧪 PAPER'}
+          </span>
+        </td>
+        <td style="padding: 10px 12px; text-align: right; font-weight: 700; font-family: monospace;">
+          $${(u.virtualBalance || 0).toFixed(2)}
+        </td>
+        <td style="padding: 10px 12px; text-align: right; font-weight: 700; font-family: monospace; color: ${pnlColor};">
+          ${pnlSign}$${(u.todayPnl || 0).toFixed(2)} (${pnlSign}${(u.todayPnlPct || 0).toFixed(2)}%)
+        </td>
+        <td style="padding: 10px 12px; text-align: center; font-weight: 700; font-family: monospace; color: ${wrColor};">
+          ${(u.winRate || 0).toFixed(1)}%
+        </td>
+        <td style="padding: 10px 12px; text-align: center; font-family: monospace;">
+          ${u.totalTrades || 0}
+        </td>
+        <td style="padding: 10px 12px; text-align: center;">
+          <span class="tag-counter" style="font-size: 10px; padding: 2px 6px;">${u.activePositionsCount || 0}</span>
+        </td>
+        <td style="padding: 10px 12px; font-size: 11px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <span style="background: rgba(255,255,255,0.05); padding: 2px 5px; border-radius: 4px;">Spike: ≥${u.keyParams?.spikeMinPercent}%</span>
+            <span style="background: rgba(48, 209, 88, 0.1); color: #30d158; padding: 2px 5px; border-radius: 4px;">TP: +${u.keyParams?.takeProfitPct}%</span>
+            <span style="background: rgba(255, 69, 58, 0.1); color: #ff453a; padding: 2px 5px; border-radius: 4px;">SL: -${u.keyParams?.stopLossPct}%</span>
+            <span style="background: rgba(255,255,255,0.05); padding: 2px 5px; border-radius: 4px;">Lev: ${u.keyParams?.leverage}x</span>
+          </div>
+        </td>
+        <td style="padding: 10px 12px; text-align: center;">
+          <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
+            ${isCurrentActive
+              ? `<span style="font-size: 11px; color: #60a5fa; font-weight: 700;">🟢 Aktif</span>`
+              : `<button type="button" class="btn btn-xs btn-primary" onclick="switchActiveProfile('${u.id}')" style="font-size: 11px; padding: 3px 8px;">Pilih</button>`
+            }
+            ${u.role !== 'ADMIN'
+              ? `<button type="button" class="btn btn-xs btn-danger" onclick="deleteUserProfile('${u.id}', '${u.username}')" style="font-size: 11px; padding: 3px 6px;" title="Hapus profil">🗑️</button>`
+              : ''
+            }
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
 
 async function handlePasswordChange() {
   const currentPassword = (document.getElementById('cfg-current-password')?.value || '').trim();
@@ -321,9 +612,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const checkRes = await fetch('/api/auth/check', {
         headers: { Authorization: `Bearer ${token}` },
-      });
-      if (checkRes.ok) {
+      }).then(r => r.json()).catch(() => null);
+
+      if (checkRes && checkRes.success) {
+        currentUser = checkRes.user;
+        localStorage.setItem('wicksniper_user', JSON.stringify(currentUser));
         hideLoginOverlay();
+        updateAuthUI();
         connectWebSocket();
         fetchInitialData();
       } else {
@@ -332,6 +627,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     } catch {
       // offline fallback
+      updateAuthUI();
       connectWebSocket();
       fetchInitialData();
     }

@@ -41,6 +41,20 @@
       </div>
 
       <form id="login-form" onsubmit="handleLoginSubmit(event)" class="login-form">
+        <div class="login-input-wrap" style="margin-bottom: 12px;">
+          <span class="login-input-icon">👤</span>
+          <input 
+            type="text" 
+            id="login-username-input" 
+            class="login-input" 
+            placeholder="Username (default: admin)..." 
+            autocomplete="username"
+            value="admin"
+            required
+            autofocus
+          >
+        </div>
+
         <div class="login-input-wrap">
           <span class="login-input-icon">🔑</span>
           <input 
@@ -50,7 +64,6 @@
             placeholder="Masukkan Password..." 
             autocomplete="current-password"
             required
-            autofocus
           >
           <button type="button" class="btn-toggle-eye" id="login-eye-btn" onclick="toggleLoginPasswordVisibility()" title="Lihat Password">
             👁️
@@ -106,6 +119,21 @@
         <span id="btn-engine-icon">▶</span>
         <span id="btn-engine-text">Jalankan Bot</span>
       </button>
+
+      <!-- MULTI-USER R&D PROFILE CONTROLS -->
+      <div id="profile-switcher-wrap" style="display: none; align-items: center; gap: 6px;">
+        <select id="active-profile-select" class="btn btn-secondary nav-btn-desktop" style="padding: 5px 10px; font-size: 11px; background: rgba(30, 41, 59, 0.85); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 6px; font-weight: 700; cursor: pointer;" onchange="switchActiveProfile(this.value)">
+          <option value="admin">👑 Profil: admin</option>
+        </select>
+      </div>
+
+      <button class="btn btn-secondary nav-btn-desktop" id="btn-rnd-lab" onclick="openRndModal()" style="display: none; background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(16, 185, 129, 0.25)); border-color: rgba(59, 130, 246, 0.5); color: #60a5fa; font-weight: 700;" title="Buka Lab R&D Parameter Multi-User">
+        👥 R&D Lab
+      </button>
+
+      <div id="user-profile-badge" class="status-pill" style="display: none; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); color: #cbd5e1; font-size: 11px; font-weight: 600;">
+        <span id="user-profile-name">👤 admin</span>
+      </div>
 
       <button class="btn btn-secondary nav-btn-desktop" onclick="openSymbolInspectorModal()" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(99, 102, 241, 0.2)); border-color: rgba(168, 85, 247, 0.45); color: #c084fc; font-weight: 600;">🔍 Cek Simbol</button>
       <button class="btn btn-secondary nav-btn-desktop" onclick="openAutoTunerModal()">🧠 Auto-Tuner</button>
@@ -596,6 +624,15 @@
         </div>
 
         <div class="drawer-menu-grid">
+          <button type="button" class="drawer-menu-card" id="btn-drawer-rnd-lab" onclick="closeMobileDrawer(); openRndModal();" style="display: none;">
+            <div class="dm-icon bg-cyan">👥</div>
+            <div class="dm-info">
+              <b>Multi-User R&D Lab</b>
+              <small>Kelola profil & bandingkan parameter 24/7</small>
+            </div>
+            <span class="dm-arrow">›</span>
+          </button>
+
           <button type="button" class="drawer-menu-card" onclick="closeMobileDrawer(); openSettingsModal();">
             <div class="dm-icon bg-cyan">⚙️</div>
             <div class="dm-info">
@@ -3192,6 +3229,131 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.5.4"></script>
+  <!-- MODAL R&D PARAMETER LAB (MULTI-USER ENGINE) -->
+  <div id="modal-rnd-lab" class="modal-backdrop" style="display: none;" onclick="handleRndModalBackdropClick(event)">
+    <div class="modal-card modal-lg" style="max-width: 1080px; width: 95%;">
+      <div class="modal-header" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(16, 185, 129, 0.1)); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+        <div class="modal-title-box">
+          <h3 style="display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px;">
+            <span style="font-size: 22px;">👥</span> Multi-User R&D Parameter Lab
+            <span class="badge-tag" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-size: 11px;">A/B Parameter Testing</span>
+          </h3>
+          <p style="margin: 4px 0 0 0; font-size: 12px; color: var(--text-muted);">
+            Jalankan berbagai kombinasi parameter secara paralel 24/7 pada stream WebSocket Binance yang sama tanpa membebani server atau limit API.
+          </p>
+        </div>
+        <button type="button" class="btn-close" onclick="closeRndModal()">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding: 18px; max-height: calc(85vh - 130px); overflow-y: auto;">
+        <!-- Top Toolbar: Leaderboard Summary & Add Profile Button -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-weight: 700; font-size: 14px; color: #fff;">🏆 Leaderboard Kinerja Profil</span>
+            <span class="tag-counter" id="rnd-profile-count-tag">1 Profil</span>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="toggleNewProfileForm()" style="font-size: 12px; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px;">
+            <span>➕</span> Tambah Profil R&D Baru
+          </button>
+        </div>
+
+        <!-- Collapsible Form: Buat Profil Baru -->
+        <div id="rnd-new-profile-card" style="display: none; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 18px;">
+          <h4 style="margin: 0 0 12px 0; font-size: 14px; color: #93c5fd; display: flex; align-items: center; gap: 6px;">
+            <span>🧪</span> Buat Profil & Parameter Eksperimen Baru
+          </h4>
+          <form onsubmit="handleCreateProfileSubmit(event)">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Username (Login)</label>
+                <input type="text" id="new-user-username" class="form-input" placeholder="contoh: rnd_agresif" required style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Password (Login)</label>
+                <input type="password" id="new-user-password" class="form-input" placeholder="Minimal 6 karakter" required style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Nama Tampilan Profil</label>
+                <input type="text" id="new-user-displayname" class="form-input" placeholder="contoh: R&D Agresif 2% TP" required style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Saldo Virtual ($ USDT)</label>
+                <input type="number" id="new-user-balance" class="form-input" value="1000" min="10" step="10" required style="width: 100%;">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 14px; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 6px;">
+              <div>
+                <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Spike Min %</label>
+                <input type="number" id="new-param-spikemin" class="form-input" value="2.0" step="0.1" style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Take Profit %</label>
+                <input type="number" id="new-param-tp" class="form-input" value="1.5" step="0.1" style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Hard Stop Loss %</label>
+                <input type="number" id="new-param-sl" class="form-input" value="3.0" step="0.1" style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Leverage</label>
+                <input type="number" id="new-param-leverage" class="form-input" value="5" min="1" max="50" style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Margin Per Koin ($)</label>
+                <input type="number" id="new-param-margin" class="form-input" value="25" min="5" style="width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Kloning Dari</label>
+                <select id="new-param-clonefrom" class="form-input" style="width: 100%;">
+                  <option value="admin">admin (Master)</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="new-profile-error" style="display: none; color: #f87171; font-size: 12px; margin-bottom: 10px;"></div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary" onclick="toggleNewProfileForm()">Batal</button>
+              <button type="submit" id="btn-save-new-profile" class="btn btn-primary" style="background: #2563eb;">🚀 Simpan & Jalankan Profil</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Leaderboard Table -->
+        <div class="table-responsive" style="border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); overflow-x: auto;">
+          <table class="data-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 12px;">
+            <thead>
+              <tr style="background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                <th style="padding: 10px 12px;">Profil / Akun</th>
+                <th style="padding: 10px 12px;">Mode</th>
+                <th style="padding: 10px 12px; text-align: right;">Saldo</th>
+                <th style="padding: 10px 12px; text-align: right;">PnL Hari Ini</th>
+                <th style="padding: 10px 12px; text-align: center;">Win Rate</th>
+                <th style="padding: 10px 12px; text-align: center;">Trades</th>
+                <th style="padding: 10px 12px; text-align: center;">Posisi</th>
+                <th style="padding: 10px 12px;">Parameter Kunci</th>
+                <th style="padding: 10px 12px; text-align: center;">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="rnd-leaderboard-tbody">
+              <tr>
+                <td colspan="9" style="text-align: center; padding: 20px; color: var(--text-muted);">Memuat profil R&D...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer floating-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; color: var(--text-muted);">
+          💡 Tips: Klik <b>Buka Dashboard</b> pada profil manapun untuk mengamati & mengontrol bot dengan parameter tersebut.
+        </span>
+        <button type="button" class="btn btn-secondary" onclick="closeRndModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=2.6.0"></script>
 </body>
 </html>

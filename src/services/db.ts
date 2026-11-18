@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord, DailySnapshot, CoinPerformanceRecord } from '../types';
+import { BotConfig, ClosedTrade, ActivePosition, SpikeAlert, SpikeSimResult, TuningHistoryRecord, DailySnapshot, CoinPerformanceRecord, UserRecord } from '../types';
 
 dotenv.config();
 
@@ -8,8 +8,8 @@ export class DatabaseService {
   private pool: Pool | null = null;
   public isConnected: boolean = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private stateWriteQueue: any = null;
-  private stateWriteTimer: NodeJS.Timeout | null = null;
+  private stateWriteQueues: Map<string, { virtualBalance: number; activePositions: ActivePosition[]; spikesToday: number }> = new Map();
+  private stateWriteTimers: Map<string, NodeJS.Timeout> = new Map();
   private readonly STATE_WRITE_INTERVAL = 5000; // Flush every 5s
   private tuningLogsMemory: TuningHistoryRecord[] = [];
   private dailySnapshotsMemory: DailySnapshot[] = [];
@@ -221,6 +221,41 @@ export class DatabaseService {
           CREATE INDEX IF NOT EXISTS idx_wicksniper_daily_snapshots_mode ON wicksniper_daily_snapshots (trading_mode);
         `);
 
+        // 7. Tabel Akun & Profil R&D Multi-User
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS wicksniper_users (
+            id VARCHAR(64) PRIMARY KEY,
+            username VARCHAR(64) UNIQUE NOT NULL,
+            password_hash VARCHAR(256) NOT NULL,
+            role VARCHAR(16) NOT NULL DEFAULT 'USER',
+            display_name VARCHAR(128) NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+            config JSONB NOT NULL,
+            virtual_balance NUMERIC DEFAULT 1000,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_users_username ON wicksniper_users (username);
+
+          -- Migrasi aman Multi-User ke State, Trades & Snapshots
+          ALTER TABLE wicksniper_state ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'admin';
+          UPDATE wicksniper_state SET user_id = 'admin' WHERE user_id IS NULL;
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'uq_wicksniper_state_user_id'
+            ) THEN
+              ALTER TABLE wicksniper_state ADD CONSTRAINT uq_wicksniper_state_user_id UNIQUE (user_id);
+            END IF;
+          END $$;
+
+          ALTER TABLE wicksniper_trades ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'admin';
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_trades_user_id ON wicksniper_trades (user_id);
+
+          ALTER TABLE wicksniper_daily_snapshots ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'admin';
+          CREATE INDEX IF NOT EXISTS idx_wicksniper_daily_snapshots_user_id ON wicksniper_daily_snapshots (user_id);
+        `);
+
         this.isConnected = true;
         console.log('[Database] ✅ Berhasil terhubung ke PostgreSQL (tabel wicksniper_*)!');
         return true;
@@ -264,53 +299,67 @@ export class DatabaseService {
   }
 
   // --- STATE PERSISTENCE ---
-  public async loadState(): Promise<{ virtualBalance: number; activePositions: ActivePosition[]; spikesToday: number } | null> {
+  public async loadState(userId: string = 'admin'): Promise<{ virtualBalance: number; activePositions: ActivePosition[]; spikesToday: number } | null> {
     if (!this.isConnected || !this.pool) return null;
     try {
-      const res = await this.pool.query('SELECT * FROM wicksniper_state WHERE id = 1;');
+      const res = await this.pool.query('SELECT * FROM wicksniper_state WHERE user_id = $1 LIMIT 1;', [userId]);
       if (res.rows.length > 0) {
         const row = res.rows[0];
         return {
-          virtualBalance: parseFloat(row.virtual_balance || '245'),
+          virtualBalance: parseFloat(row.virtual_balance || '1000'),
           activePositions: (row.active_positions as ActivePosition[]) || [],
           spikesToday: parseInt(row.spikes_today || '0', 10),
         };
+      } else if (userId === 'admin') {
+        const fallback = await this.pool.query('SELECT * FROM wicksniper_state WHERE id = 1 LIMIT 1;');
+        if (fallback.rows.length > 0) {
+          const row = fallback.rows[0];
+          return {
+            virtualBalance: parseFloat(row.virtual_balance || '1000'),
+            activePositions: (row.active_positions as ActivePosition[]) || [],
+            spikesToday: parseInt(row.spikes_today || '0', 10),
+          };
+        }
       }
     } catch (e: any) {
-      console.error('[Database] Gagal load state dari DB:', e.message);
+      console.error(`[Database] Gagal load state untuk user ${userId} dari DB:`, e.message);
     }
     return null;
   }
 
-  public async saveState(virtualBalance: number, activePositions: ActivePosition[], spikesToday: number): Promise<void> {
+  public async saveState(virtualBalance: number, activePositions: ActivePosition[], spikesToday: number, userId: string = 'admin'): Promise<void> {
     if (!this.isConnected || !this.pool) return;
     
-    // Queue the state write instead of executing immediately
-    this.stateWriteQueue = { virtualBalance, activePositions, spikesToday };
+    // Queue the state write per user profile
+    this.stateWriteQueues.set(userId, { virtualBalance, activePositions, spikesToday });
     
-    // Schedule flush if not already scheduled
-    if (!this.stateWriteTimer) {
-      this.stateWriteTimer = setTimeout(() => this.flushStateWrite(), this.STATE_WRITE_INTERVAL);
+    // Schedule flush if not already scheduled for this user
+    if (!this.stateWriteTimers.has(userId)) {
+      const timer = setTimeout(() => this.flushStateWrite(userId), this.STATE_WRITE_INTERVAL);
+      this.stateWriteTimers.set(userId, timer);
     }
   }
 
-  private async flushStateWrite(): Promise<void> {
-    this.stateWriteTimer = null;
-    if (!this.stateWriteQueue || !this.isConnected || !this.pool) return;
+  private async flushStateWrite(userId: string): Promise<void> {
+    const timer = this.stateWriteTimers.get(userId);
+    if (timer) clearTimeout(timer);
+    this.stateWriteTimers.delete(userId);
+
+    const queued = this.stateWriteQueues.get(userId);
+    if (!queued || !this.isConnected || !this.pool) return;
+    this.stateWriteQueues.delete(userId);
     
-    const { virtualBalance, activePositions, spikesToday } = this.stateWriteQueue;
-    this.stateWriteQueue = null;
-    
+    const { virtualBalance, activePositions, spikesToday } = queued;
     try {
       await this.pool.query(
-        `INSERT INTO wicksniper_state (id, virtual_balance, active_positions, spikes_today, updated_at)
-         VALUES (1, $1, $2, $3, CURRENT_TIMESTAMP)
-         ON CONFLICT (id) DO UPDATE
-         SET virtual_balance = $1, active_positions = $2, spikes_today = $3, updated_at = CURRENT_TIMESTAMP;`,
-        [virtualBalance, JSON.stringify(activePositions), spikesToday]
+        `INSERT INTO wicksniper_state (user_id, virtual_balance, active_positions, spikes_today, updated_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (user_id) DO UPDATE
+         SET virtual_balance = $2, active_positions = $3, spikes_today = $4, updated_at = CURRENT_TIMESTAMP;`,
+        [userId, virtualBalance, JSON.stringify(activePositions), spikesToday]
       );
     } catch (e: any) {
-      console.error('[Database] Gagal simpan state ke DB:', e.message);
+      console.error(`[Database] Gagal simpan state untuk user ${userId} ke DB:`, e.message);
     }
   }
 
@@ -320,15 +369,16 @@ export class DatabaseService {
     try {
       await this.pool.query(
         `INSERT INTO wicksniper_trades (
-           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled, post_exit_30m, highest_price, lowest_price, mfe_pct, mae_pct, price_change_24h_pct
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+           id, symbol, side, entry_price, exit_price, qty, margin_used, realized_pnl, pnl_pct, duration_seconds, exit_reason, is_paper, closed_at, timestamp, params_snapshot, layers_detail, fee, gross_pnl, layers_filled, post_exit_30m, highest_price, lowest_price, mfe_pct, mae_pct, price_change_24h_pct, user_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
          ON CONFLICT (id) DO UPDATE SET 
            post_exit_30m = COALESCE(EXCLUDED.post_exit_30m, wicksniper_trades.post_exit_30m),
            highest_price = COALESCE(EXCLUDED.highest_price, wicksniper_trades.highest_price),
            lowest_price = COALESCE(EXCLUDED.lowest_price, wicksniper_trades.lowest_price),
            mfe_pct = COALESCE(EXCLUDED.mfe_pct, wicksniper_trades.mfe_pct),
            mae_pct = COALESCE(EXCLUDED.mae_pct, wicksniper_trades.mae_pct),
-           price_change_24h_pct = COALESCE(EXCLUDED.price_change_24h_pct, wicksniper_trades.price_change_24h_pct);`,
+           price_change_24h_pct = COALESCE(EXCLUDED.price_change_24h_pct, wicksniper_trades.price_change_24h_pct),
+           user_id = COALESCE(wicksniper_trades.user_id, EXCLUDED.user_id);`,
         [
           t.id,
           t.symbol,
@@ -355,6 +405,7 @@ export class DatabaseService {
           t.mfePct !== undefined ? t.mfePct : (t.paramsSnapshot?.mfePct !== undefined ? parseFloat(t.paramsSnapshot.mfePct) : null),
           t.maePct !== undefined ? t.maePct : (t.paramsSnapshot?.maePct !== undefined ? parseFloat(t.paramsSnapshot.maePct) : null),
           t.priceChange24hPct !== undefined && t.priceChange24hPct !== null ? t.priceChange24hPct : (t.paramsSnapshot?.priceChange24hPct !== undefined ? Number(t.paramsSnapshot.priceChange24hPct) : (t.marketSnapshot?.priceChange24hPct ?? null)),
+          t.userId || 'admin',
         ]
       );
     } catch (e: any) {
@@ -391,6 +442,7 @@ export class DatabaseService {
         const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
         return {
           id: r.id,
+          userId: r.userId || 'admin',
           symbol: r.symbol,
           side: r.side,
           entryPrice: parseFloat(r.entryPrice),
@@ -610,6 +662,7 @@ export class DatabaseService {
         const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
         return {
           id: r.id,
+          userId: r.userId || 'admin',
           symbol: r.symbol,
           side: r.side,
           entryPrice: parseFloat(r.entryPrice),
@@ -798,6 +851,7 @@ export class DatabaseService {
     outcome?: 'ALL' | 'WIN' | 'LOSS';
     mode?: 'ALL' | 'LIVE' | 'PAPER';
     strategy?: 'ALL' | 'SMART_MONEY' | 'WICK_SNIPER';
+    userId?: string;
   }): Promise<{ trades: ClosedTrade[]; total: number; page: number; totalPages: number }> {
     const page = Math.max(1, parseInt(String(options.page || 1), 10));
     const limit = Math.min(100, Math.max(5, parseInt(String(options.limit || 20), 10)));
@@ -811,6 +865,11 @@ export class DatabaseService {
       const conditions: string[] = [];
       const values: any[] = [];
       let valIdx = 1;
+
+      if (options.userId && options.userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        values.push(options.userId);
+      }
 
       if (options.symbol && options.symbol.trim() !== '') {
         conditions.push(`symbol ILIKE $${valIdx++}`);
@@ -857,7 +916,8 @@ export class DatabaseService {
                 post_exit_30m AS "postExit30m",
                 highest_price AS "highestPrice", lowest_price AS "lowestPrice",
                 mfe_pct AS "mfePct", mae_pct AS "maePct",
-                price_change_24h_pct AS "priceChange24hPct"
+                price_change_24h_pct AS "priceChange24hPct",
+                user_id AS "userId"
          FROM wicksniper_trades
          ${whereClause}
          ORDER BY timestamp DESC
@@ -869,6 +929,7 @@ export class DatabaseService {
         const parsedSnap = typeof r.paramsSnapshot === 'string' ? JSON.parse(r.paramsSnapshot) : r.paramsSnapshot || null;
         return {
           id: r.id,
+          userId: r.userId || 'admin',
           symbol: r.symbol,
           side: r.side,
           entryPrice: parseFloat(r.entryPrice),
@@ -1138,9 +1199,9 @@ export class DatabaseService {
           daily_pnl_pct, cumulative_pnl, total_trades, win_count, loss_count,
           win_rate, total_fee, gross_pnl, best_trade_symbol, best_trade_pnl,
           worst_trade_symbol, worst_trade_pnl, spikes_detected, strategy_breakdown,
-          details, timestamp
+          details, timestamp, user_id
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
         ) ON CONFLICT (id) DO UPDATE SET
           ending_balance = EXCLUDED.ending_balance,
           start_balance = EXCLUDED.start_balance,
@@ -1160,7 +1221,8 @@ export class DatabaseService {
           spikes_detected = EXCLUDED.spikes_detected,
           strategy_breakdown = EXCLUDED.strategy_breakdown,
           details = EXCLUDED.details,
-          timestamp = EXCLUDED.timestamp;`,
+          timestamp = EXCLUDED.timestamp,
+          user_id = COALESCE(wicksniper_daily_snapshots.user_id, EXCLUDED.user_id);`,
         [
           s.id,
           s.date,
@@ -1184,6 +1246,7 @@ export class DatabaseService {
           s.strategyBreakdown ? JSON.stringify(s.strategyBreakdown) : null,
           s.details ? JSON.stringify(s.details) : null,
           s.timestamp,
+          s.userId || 'admin',
         ]
       );
     } catch (e: any) {
@@ -1191,14 +1254,31 @@ export class DatabaseService {
     }
   }
 
-  public async getDailySnapshots(limit: number = 30, tradingMode?: string): Promise<DailySnapshot[]> {
+  public async getDailySnapshots(limit: number = 30, tradingMode?: string, userId?: string): Promise<DailySnapshot[]> {
     if (!this.isConnected || !this.pool) {
       let filtered = this.dailySnapshotsMemory;
       if (tradingMode) filtered = filtered.filter((s) => s.tradingMode === tradingMode);
+      if (userId && userId !== 'ALL') filtered = filtered.filter((s) => (s.userId || 'admin') === userId);
       return filtered.slice(0, limit);
     }
     try {
-      let query = `
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let valIdx = 1;
+
+      if (tradingMode) {
+        conditions.push(`trading_mode = $${valIdx++}`);
+        params.push(tradingMode);
+      }
+      if (userId && userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        params.push(userId);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      params.push(limit);
+
+      const query = `
         SELECT id, date, trading_mode AS "tradingMode",
                ending_balance AS "endingBalance", start_balance AS "startBalance",
                daily_pnl AS "dailyPnl", daily_pnl_pct AS "dailyPnlPct",
@@ -1208,25 +1288,23 @@ export class DatabaseService {
                best_trade_symbol AS "bestTradeSymbol", best_trade_pnl AS "bestTradePnl",
                worst_trade_symbol AS "worstTradeSymbol", worst_trade_pnl AS "worstTradePnl",
                spikes_detected AS "spikesDetected", strategy_breakdown AS "strategyBreakdown",
-               details, timestamp, created_at AS "createdAt"
+               details, timestamp, user_id AS "userId", created_at AS "createdAt"
         FROM wicksniper_daily_snapshots
+        ${whereClause}
+        ORDER BY date DESC
+        LIMIT $${valIdx};
       `;
-      const params: any[] = [];
-      if (tradingMode) {
-        query += ` WHERE trading_mode = $1 ORDER BY date DESC LIMIT $2;`;
-        params.push(tradingMode, limit);
-      } else {
-        query += ` ORDER BY date DESC LIMIT $1;`;
-        params.push(limit);
-      }
+
       const res = await this.pool.query(query, params);
       if (res.rows.length === 0) {
         let filtered = this.dailySnapshotsMemory;
         if (tradingMode) filtered = filtered.filter((s) => s.tradingMode === tradingMode);
+        if (userId && userId !== 'ALL') filtered = filtered.filter((s) => (s.userId || 'admin') === userId);
         return filtered.slice(0, limit);
       }
       return res.rows.map((r: any) => ({
         id: r.id,
+        userId: r.userId || 'admin',
         date: r.date,
         tradingMode: r.tradingMode,
         endingBalance: parseFloat(r.endingBalance),
@@ -1253,6 +1331,183 @@ export class DatabaseService {
     } catch (e: any) {
       console.error('[Database] Gagal load daily snapshots dari DB:', e.message);
       return this.dailySnapshotsMemory.slice(0, limit);
+    }
+  }
+
+  // --- USER PERSISTENCE (R&D MULTI-USER) ---
+  public async getUsers(): Promise<UserRecord[]> {
+    if (!this.isConnected || !this.pool) return [];
+    try {
+      const res = await this.pool.query(
+        `SELECT id, username, password_hash AS "passwordHash", role, display_name AS "displayName",
+                status, config, virtual_balance AS "virtualBalance",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM wicksniper_users
+         ORDER BY (CASE WHEN id = 'admin' THEN 0 ELSE 1 END), created_at ASC;`
+      );
+      return res.rows.map((r: any) => ({
+        id: r.id,
+        username: r.username,
+        passwordHash: r.passwordHash,
+        role: r.role,
+        displayName: r.displayName,
+        status: r.status,
+        config: typeof r.config === 'string' ? JSON.parse(r.config) : r.config,
+        virtualBalance: parseFloat(r.virtualBalance || '1000'),
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : new Date().toISOString(),
+      }));
+    } catch (e: any) {
+      console.error('[Database] Gagal mengambil daftar user:', e.message);
+      return [];
+    }
+  }
+
+  public async getUserById(id: string): Promise<UserRecord | null> {
+    if (!this.isConnected || !this.pool) return null;
+    try {
+      const res = await this.pool.query(
+        `SELECT id, username, password_hash AS "passwordHash", role, display_name AS "displayName",
+                status, config, virtual_balance AS "virtualBalance",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM wicksniper_users WHERE id = $1 LIMIT 1;`,
+        [id]
+      );
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        username: r.username,
+        passwordHash: r.passwordHash,
+        role: r.role,
+        displayName: r.displayName,
+        status: r.status,
+        config: typeof r.config === 'string' ? JSON.parse(r.config) : r.config,
+        virtualBalance: parseFloat(r.virtualBalance || '1000'),
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : new Date().toISOString(),
+      };
+    } catch (e: any) {
+      console.error(`[Database] Gagal ambil user by id ${id}:`, e.message);
+      return null;
+    }
+  }
+
+  public async getUserByUsername(username: string): Promise<UserRecord | null> {
+    if (!this.isConnected || !this.pool) return null;
+    try {
+      const res = await this.pool.query(
+        `SELECT id, username, password_hash AS "passwordHash", role, display_name AS "displayName",
+                status, config, virtual_balance AS "virtualBalance",
+                created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM wicksniper_users WHERE LOWER(username) = LOWER($1) LIMIT 1;`,
+        [username]
+      );
+      if (res.rows.length === 0) return null;
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        username: r.username,
+        passwordHash: r.passwordHash,
+        role: r.role,
+        displayName: r.displayName,
+        status: r.status,
+        config: typeof r.config === 'string' ? JSON.parse(r.config) : r.config,
+        virtualBalance: parseFloat(r.virtualBalance || '1000'),
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : new Date().toISOString(),
+      };
+    } catch (e: any) {
+      console.error(`[Database] Gagal ambil user by username ${username}:`, e.message);
+      return null;
+    }
+  }
+
+  public async createUser(user: UserRecord): Promise<void> {
+    if (!this.isConnected || !this.pool) return;
+    try {
+      await this.pool.query(
+        `INSERT INTO wicksniper_users (
+           id, username, password_hash, role, display_name, status, config, virtual_balance, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO UPDATE SET
+           username = EXCLUDED.username,
+           password_hash = EXCLUDED.password_hash,
+           role = EXCLUDED.role,
+           display_name = EXCLUDED.display_name,
+           status = EXCLUDED.status,
+           config = EXCLUDED.config,
+           virtual_balance = EXCLUDED.virtual_balance,
+           updated_at = CURRENT_TIMESTAMP;`,
+        [
+          user.id,
+          user.username,
+          user.passwordHash,
+          user.role || 'USER',
+          user.displayName || user.username,
+          user.status || 'ACTIVE',
+          JSON.stringify(user.config),
+          user.virtualBalance || 1000,
+        ]
+      );
+    } catch (e: any) {
+      console.error(`[Database] Gagal membuat user ${user.username}:`, e.message);
+      throw e;
+    }
+  }
+
+  public async updateUser(id: string, updates: Partial<UserRecord>): Promise<void> {
+    if (!this.isConnected || !this.pool) return;
+    try {
+      const setClauses: string[] = ['updated_at = CURRENT_TIMESTAMP'];
+      const values: any[] = [id];
+      let valIdx = 2;
+
+      if (updates.displayName !== undefined) {
+        setClauses.push(`display_name = $${valIdx++}`);
+        values.push(updates.displayName);
+      }
+      if (updates.passwordHash !== undefined) {
+        setClauses.push(`password_hash = $${valIdx++}`);
+        values.push(updates.passwordHash);
+      }
+      if (updates.role !== undefined) {
+        setClauses.push(`role = $${valIdx++}`);
+        values.push(updates.role);
+      }
+      if (updates.status !== undefined) {
+        setClauses.push(`status = $${valIdx++}`);
+        values.push(updates.status);
+      }
+      if (updates.config !== undefined) {
+        setClauses.push(`config = $${valIdx++}`);
+        values.push(JSON.stringify(updates.config));
+      }
+      if (updates.virtualBalance !== undefined) {
+        setClauses.push(`virtual_balance = $${valIdx++}`);
+        values.push(updates.virtualBalance);
+      }
+
+      await this.pool.query(
+        `UPDATE wicksniper_users SET ${setClauses.join(', ')} WHERE id = $1;`,
+        values
+      );
+    } catch (e: any) {
+      console.error(`[Database] Gagal update user ${id}:`, e.message);
+      throw e;
+    }
+  }
+
+  public async deleteUser(id: string): Promise<void> {
+    if (!this.isConnected || !this.pool) return;
+    if (id === 'admin') {
+      throw new Error('Akun master admin tidak dapat dihapus');
+    }
+    try {
+      await this.pool.query('DELETE FROM wicksniper_users WHERE id = $1;', [id]);
+    } catch (e: any) {
+      console.error(`[Database] Gagal menghapus user ${id}:`, e.message);
+      throw e;
     }
   }
 
