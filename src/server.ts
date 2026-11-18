@@ -358,6 +358,14 @@ app.get('/api/config', requireAuth, async (req, res) => {
 app.post('/api/config', requireAuth, async (req, res) => {
   try {
     const targetEngine = getTargetEngine(req);
+    const targetUserId = targetEngine.getUserId();
+    if (targetUserId !== 'admin') {
+      delete req.body.apiKey;
+      delete req.body.apiSecret;
+      delete req.body.telegram;
+      delete req.body.security;
+      delete req.body.tradingMode;
+    }
     const updated = await targetEngine.saveConfig(req.body);
     res.json({ success: true, config: getSafeConfig(updated) });
   } catch (err: any) {
@@ -421,7 +429,8 @@ app.post('/api/pending-signals/:symbol/trigger', requireAuth, async (req, res) =
 
 app.get('/api/smart-money/metrics', requireAuth, (req, res) => {
   try {
-    const scanner = engine.getSmartMoneyScanner();
+    const targetEngine = getTargetEngine(req);
+    const scanner = targetEngine.getSmartMoneyScanner();
     const metrics = scanner ? scanner.getTrackedMetrics() : [];
     res.json({ success: true, metrics });
   } catch (err: any) {
@@ -432,7 +441,8 @@ app.get('/api/smart-money/metrics', requireAuth, (req, res) => {
 app.get('/api/smart-money/analyze/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol;
-    const result = await engine.analyzeSymbol(symbol);
+    const targetEngine = getTargetEngine(req);
+    const result = await targetEngine.analyzeSymbol(symbol);
     res.json({ success: true, data: result });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -448,7 +458,7 @@ app.get('/api/btc-trend', async (req, res) => {
   }
 });
 
-app.post('/api/check-binance', requireAuth, async (req, res) => {
+app.post('/api/check-binance', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { apiKey, apiSecret, isTestnet } = req.body || {};
     if (apiKey && apiSecret) {
@@ -461,7 +471,7 @@ app.post('/api/check-binance', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/check-telegram', requireAuth, async (req, res) => {
+app.post('/api/check-telegram', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { botToken, chatId } = req.body || {};
     const result = await telegram.testConnection(botToken, chatId);
@@ -476,8 +486,9 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   try {
+    const targetEngine = getTargetEngine(req);
     const { symbols, startTime, endTime, bypassCache, ...customParams } = req.body;
-    const configSymbols = engine.getConfig()?.scanner?.whitelistSymbols;
+    const configSymbols = targetEngine.getConfig()?.scanner?.whitelistSymbols;
     const defaultSymbols = (configSymbols && configSymbols.length > 0) ? configSymbols : ['AKEUSDT', 'CROSSUSDT', 'BTWUSDT'];
     const symbolList = symbols && symbols.length > 0 ? symbols : defaultSymbols;
     const now = Date.now();
@@ -504,51 +515,6 @@ app.post('/api/backtest/clear-cache', requireAuth, (req, res) => {
     res.json({ success: true, deletedCount, message: `Berhasil membersihkan ${deletedCount} file cache klines.` });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ==========================================
-// AUTO-TUNER REST APIs (PROTECTED)
-// ==========================================
-app.get('/api/autotune/status', requireAuth, async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  try {
-    const status = engine.getAutoTunerStatus();
-    const history = await db.loadTuningLogs(10);
-    return res.json({ success: true, status, history });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.post('/api/autotune/analyze', requireAuth, async (req, res) => {
-  try {
-    const result = await engine.runAutoTuneAnalysis();
-    const status = engine.getAutoTunerStatus();
-    return res.json({ ...result, status });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.post('/api/autotune/apply', requireAuth, async (req, res) => {
-  try {
-    const { proposalId } = req.body || {};
-    const result = await engine.applyTuningProposal(proposalId);
-    const status = engine.getAutoTunerStatus();
-    return res.json({ ...result, status });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.post('/api/autotune/rollback', requireAuth, async (req, res) => {
-  try {
-    const result = await engine.rollbackLastTuning();
-    const status = engine.getAutoTunerStatus();
-    return res.json({ ...result, status });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -666,10 +632,11 @@ app.get('/api/spikes', async (req, res) => {
   return res.json({ success: true, spikes, total, page, totalPages, simStats });
 });
 
-// Blacklist management endpoints (protected)
+// Blacklist management endpoints (protected per profile)
 app.get('/api/blacklist', requireAuth, (req, res) => {
   try {
-    const list = engine.getScanner().getBlacklist();
+    const targetEngine = getTargetEngine(req);
+    const list = targetEngine.getScanner().getBlacklist();
     return res.json({ success: true, list });
   } catch (e: any) {
     return res.status(500).json({ success: false, message: e.message });
@@ -678,7 +645,8 @@ app.get('/api/blacklist', requireAuth, (req, res) => {
 
 app.post('/api/blacklist/clear', requireAuth, (req, res) => {
   try {
-    engine.getScanner().clearBlacklist();
+    const targetEngine = getTargetEngine(req);
+    targetEngine.getScanner().clearBlacklist();
     return res.json({ success: true });
   } catch (e: any) {
     return res.status(500).json({ success: false, message: e.message });
@@ -689,7 +657,8 @@ app.post('/api/blacklist/remove', requireAuth, (req, res) => {
   try {
     const { symbol } = req.body || {};
     if (!symbol) return res.status(400).json({ success: false, message: 'symbol required' });
-    engine.getScanner().removeBlacklist(symbol);
+    const targetEngine = getTargetEngine(req);
+    targetEngine.getScanner().removeBlacklist(symbol);
     return res.json({ success: true });
   } catch (e: any) {
     return res.status(500).json({ success: false, message: e.message });

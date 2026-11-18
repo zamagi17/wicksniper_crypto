@@ -145,7 +145,6 @@ export interface BotConfig {
   triggerStrategy?: 'WICK_SNIPER' | 'SMART_MONEY' | 'HYBRID';
   smartMoney?: SmartMoneyConfig;
   momentumLong?: MomentumLongConfig;
-  autoTuner?: AutoTunerConfig;
   schedule?: TradingScheduleConfig;
   security?: {
     password?: string;
@@ -808,25 +807,6 @@ export interface LogEntry {
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR' | 'SNIPER';
   message: string;
   symbol?: string;
-}
-
-export interface AutoTunerConfig {
-  enabled: boolean;
-  mode: 'SEMI_AUTO' | 'FULL_AUTO';
-  minSampleSize?: number; // default: 15
-  evalPeriodDays?: number; // default: 7
-  autoApplyIntervalHours?: number; // default: 24
-  circuitBreakerLosses?: number; // default: 3
-  stepSizePct?: number; // default: 10 (max 10% perubahan per parameter)
-  targetParams?: {
-    spikeMinPercent?: boolean;
-    takeProfitPct?: boolean;
-    layerSpacingPct?: boolean;
-    trailingCallbackPct?: boolean;
-    minRsi1m?: boolean;
-    maxVolRatio?: boolean;
-    maxHoldMinutes?: boolean;
-  };
 }
 
 export interface TuningProposal {

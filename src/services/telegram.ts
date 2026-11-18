@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { ActivePosition, ClosedTrade, GridLayer, DailySnapshot } from '../types';
-import { logger } from './logger';
+import { logger, userLogContext } from './logger';
 
 export interface TelegramConfig {
   enabled: boolean;
@@ -42,6 +42,8 @@ export class TelegramService {
   private lastHeartbeatSentAt: number = 0;
 
   public updateConfig(cfg?: Partial<TelegramConfig>) {
+    const activeUserId = userLogContext.getStore();
+    if (activeUserId && activeUserId !== 'admin') return;
     if (!cfg) return;
     this.config = {
       ...this.config,
@@ -56,6 +58,10 @@ export class TelegramService {
   }
 
   public async sendMessage(htmlText: string): Promise<boolean> {
+    const activeUserId = userLogContext.getStore();
+    if (activeUserId && activeUserId !== 'admin') {
+      return false; // Isolasi: Profil R&D murni tidak mengirim alert ke Telegram master Admin
+    }
     if (!this.isConfigured()) return false;
 
     const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;

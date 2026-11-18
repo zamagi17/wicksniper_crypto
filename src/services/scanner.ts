@@ -29,14 +29,17 @@ export class SpikeScanner {
   private blacklistMap: Map<string, BlacklistEntry> = new Map();
   private blacklistSaveTimer: NodeJS.Timeout | null = null;
   private exhaustionCheckThrottle: Map<string, number> = new Map();
+  private userId: string;
 
-  constructor(config: BotConfig['scanner']) {
+  constructor(config: BotConfig['scanner'], userId: string = 'admin') {
     this.config = config;
+    this.userId = userId;
     this.loadBlacklistFromDisk();
   }
 
   private getBlacklistPath(): string {
-    return path.resolve(__dirname, '../../data_cache/blacklist.json');
+    const filename = this.userId && this.userId !== 'admin' ? `blacklist_${this.userId}.json` : 'blacklist.json';
+    return path.resolve(__dirname, `../../data_cache/${filename}`);
   }
 
   private loadBlacklistFromDisk() {
