@@ -542,6 +542,9 @@ export class WickSniperEngine {
         : this.config.schedule,
       security: { ...this.config.security, ...(newConfig.security || {}) },
     };
+    if (this.userId !== 'admin') {
+      this.config.tradingMode = 'PAPER';
+    }
     this.scanner.updateConfig(this.config.scanner);
     if (this.config.smartMoney) {
       this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
