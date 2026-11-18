@@ -162,6 +162,7 @@ async function authFetch(url, options = {}) {
 function showLoginOverlay(errMsg = '') {
   const overlay = document.getElementById('login-overlay');
   const errBox = document.getElementById('login-error-msg');
+  const userInput = document.getElementById('login-username-input');
   const input = document.getElementById('login-password-input');
   if (overlay) overlay.classList.remove('hidden');
   if (errBox) {
@@ -172,9 +173,12 @@ function showLoginOverlay(errMsg = '') {
       errBox.style.display = 'none';
     }
   }
+  if (userInput) {
+    userInput.value = '';
+    setTimeout(() => userInput.focus(), 150);
+  }
   if (input) {
     input.value = '';
-    setTimeout(() => input.focus(), 150);
   }
 }
 
@@ -208,8 +212,16 @@ async function handleLoginSubmit(e) {
   const btnSpinner = btn?.querySelector('.btn-login-spinner');
   const errBox = document.getElementById('login-error-msg');
 
-  const username = (userInput?.value || 'admin').trim();
+  const username = (userInput?.value || '').trim();
   const password = (input?.value || '').trim();
+  if (!username) {
+    if (errBox) {
+      errBox.innerText = 'Harap masukkan username Anda.';
+      errBox.style.display = 'block';
+    }
+    userInput?.focus();
+    return;
+  }
   if (!password) {
     if (errBox) {
       errBox.innerText = 'Harap masukkan password dashboard.';
@@ -749,6 +761,10 @@ function connectWebSocket() {
           }
         }
       } else if (msg.type === 'LOG') {
+        const logUserId = msg.userId || msg.data?.userId;
+        if (logUserId && currentActiveProfileId && logUserId !== currentActiveProfileId) {
+          return;
+        }
         appendLog(msg.data);
         if (msg.data.level === 'SNIPER') {
           playSpikeAlertSound();
@@ -756,7 +772,9 @@ function connectWebSocket() {
           playProfitSound();
         }
       } else if (msg.type === 'LOGS') {
-        renderLogs(msg.data);
+        const logs = Array.isArray(msg.data) ? msg.data : [];
+        const filtered = logs.filter((l) => !l.userId || l.userId === currentActiveProfileId);
+        renderLogs(filtered);
       }
     } catch (e) {
       console.error('Error parsing WebSocket message:', e);

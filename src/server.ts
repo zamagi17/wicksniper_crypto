@@ -554,7 +554,9 @@ app.post('/api/autotune/rollback', requireAuth, async (req, res) => {
 
 
 app.get('/api/logs', (req, res) => {
-  res.json(logger.getLogs());
+  const targetEngine = getTargetEngine(req);
+  const targetUserId = targetEngine ? targetEngine.getUserId() : 'admin';
+  res.json(logger.getLogs(targetUserId));
 });
 
 app.get('/api/trades', attachAuthIfPresent, async (req, res) => {
@@ -768,7 +770,7 @@ engineManager.onEngineConfig((userId, config) => {
 });
 
 logger.onLog((log) => {
-  broadcast('LOG', log);
+  broadcast('LOG', log, log.userId);
 });
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : (engine.getConfig().server?.port || 3005);

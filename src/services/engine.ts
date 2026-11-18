@@ -4,7 +4,7 @@ import { ActivePosition, BotConfig, BtcTrendStatus, ClosedTrade, EngineStatus, G
 import { binanceFutures } from './binance';
 import { SpikeScanner } from './scanner';
 import { SmartMoneyScanner } from './smartMoneyScanner';
-import { logger } from './logger';
+import { logger, userLogContext } from './logger';
 import { db } from './db';
 import { telegram } from './telegram';
 import { Candle } from './dataFetcher';
@@ -608,21 +608,29 @@ export class WickSniperEngine {
 
   private initListeners() {
     this.scanner.onSpike((alert: SpikeAlert) => {
-      this.handleSpikeAlert(alert);
+      userLogContext.run(this.userId, () => {
+        this.handleSpikeAlert(alert);
+      });
     });
 
     this.smartMoneyScanner.onSignal((signal: SmartMoneySignal) => {
-      this.handleSmartMoneySignal(signal);
+      userLogContext.run(this.userId, () => {
+        this.handleSmartMoneySignal(signal);
+      });
     });
 
     binanceFutures.onTickers((tickers: any[]) => {
-      this.smartMoneyScanner.setPrices(tickers);
-      this.onPriceTick(tickers);
+      userLogContext.run(this.userId, () => {
+        this.smartMoneyScanner.setPrices(tickers);
+        this.onPriceTick(tickers);
+      });
     });
 
     binanceFutures.onOrderTradeUpdate((order: any) => {
-      this.handleUserOrderTradeUpdate(order).catch((err: any) => {
-        logger.log('ERROR', `❌ [USER DATA STREAM HANDLER ERROR] ${err?.message || err}`);
+      userLogContext.run(this.userId, () => {
+        this.handleUserOrderTradeUpdate(order).catch((err: any) => {
+          logger.log('ERROR', `❌ [USER DATA STREAM HANDLER ERROR] ${err?.message || err}`);
+        });
       });
     });
   }
@@ -658,7 +666,8 @@ export class WickSniperEngine {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    await db.init();
+    return userLogContext.run(this.userId, async () => {
+      await db.init();
     if (db.isConnected) {
       if (this.userId === 'admin') {
         const dbCfg = await db.loadConfig();
@@ -791,7 +800,8 @@ export class WickSniperEngine {
       this.tickInterval = null;
     }
     let tickCount = 0;
-    this.tickInterval = setInterval(async () => {
+    this.tickInterval = setInterval(() => {
+      userLogContext.run(this.userId, async () => {
         this.checkDailyReset();
         await this.checkTimeLimitsAndTrailing();
         this.broadcastStatus();
@@ -896,23 +906,27 @@ export class WickSniperEngine {
           clearInterval(this.tickInterval);
           this.tickInterval = null;
         }
-      }, 1000);
+      });
+    }, 1000);
+    });
   }
 
   public stop() {
-    this.isRunning = false;
-    this.scanner.stop();
-    this.smartMoneyScanner.stop();
-    logger.log('WARN', '🛑 Wick Sniper Engine dinonaktifkan (Tidak akan membuka trade baru).');
-    if (this.activePositions.size > 0) {
-      logger.log('INFO', `🛡️ Masih terdapat ${this.activePositions.size} posisi aktif. Bot tetap mengawal TP/SL hingga semua posisi selesai ditutup.`);
-    } else {
-      if (this.tickInterval) {
-        clearInterval(this.tickInterval);
-        this.tickInterval = null;
+    userLogContext.run(this.userId, () => {
+      this.isRunning = false;
+      this.scanner.stop();
+      this.smartMoneyScanner.stop();
+      logger.log('WARN', '🛑 Wick Sniper Engine dinonaktifkan (Tidak akan membuka trade baru).');
+      if (this.activePositions.size > 0) {
+        logger.log('INFO', `🛡️ Masih terdapat ${this.activePositions.size} posisi aktif. Bot tetap mengawal TP/SL hingga semua posisi selesai ditutup.`);
+      } else {
+        if (this.tickInterval) {
+          clearInterval(this.tickInterval);
+          this.tickInterval = null;
+        }
       }
-    }
-    this.broadcastStatus();
+      this.broadcastStatus();
+    });
   }
 
   /**
