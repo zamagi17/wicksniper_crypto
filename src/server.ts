@@ -112,15 +112,17 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
 // Helper untuk meresolusi Engine target berdasarkan user context atau profileId (Multi-User R&D)
 function getTargetEngine(req: express.Request): WickSniperEngine {
   const user = (req as any).user as UserSession | undefined;
-  if (!user) return engine;
-  if (user.role === 'ADMIN') {
-    const requestedProfile = (req.query.profileId as string) || (req.headers['x-profile-id'] as string) || (req.body?.profileId as string);
-    if (requestedProfile && engineManager.hasEngine(requestedProfile)) {
-      return engineManager.getEngine(requestedProfile);
-    }
-    return engine;
+  const requestedProfile = (req.query.profileId as string) || (req.headers['x-profile-id'] as string) || (req.body?.profileId as string);
+
+  if (user && user.role !== 'ADMIN') {
+    return engineManager.getEngine(user.userId);
   }
-  return engineManager.getEngine(user.userId);
+
+  if (requestedProfile && engineManager.hasEngine(requestedProfile)) {
+    return engineManager.getEngine(requestedProfile);
+  }
+
+  return engine;
 }
 
 function getSafeConfig(config: any) {
