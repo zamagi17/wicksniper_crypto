@@ -634,11 +634,21 @@ export class DatabaseService {
     }
   }
 
-  public async getTradeDates(isPaper?: boolean): Promise<string[]> {
+  public async getTradeDates(isPaper?: boolean, userId?: string): Promise<string[]> {
     if (!this.isConnected || !this.pool) return [];
     try {
-      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $1' : '';
-      const params = isPaper !== undefined ? [isPaper] : [];
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let valIdx = 1;
+      if (isPaper !== undefined) {
+        conditions.push(`is_paper = $${valIdx++}`);
+        params.push(isPaper);
+      }
+      if (userId && userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        params.push(userId);
+      }
+      const whereMode = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const res = await this.pool.query(
         `SELECT DISTINCT to_char(to_timestamp(timestamp / 1000) AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD') AS trade_date
          FROM wicksniper_trades
@@ -653,12 +663,21 @@ export class DatabaseService {
     }
   }
 
-  public async getTradesBetween(startTs: number, endTs: number, isPaper?: boolean): Promise<ClosedTrade[]> {
+  public async getTradesBetween(startTs: number, endTs: number, isPaper?: boolean, userId?: string): Promise<ClosedTrade[]> {
     if (!this.isConnected || !this.pool) return [];
     try {
-      const whereMode = isPaper !== undefined ? 'AND is_paper = $3' : '';
+      const conditions: string[] = ['timestamp >= $1', 'timestamp <= $2'];
       const params: any[] = [startTs, endTs];
-      if (isPaper !== undefined) params.push(isPaper);
+      let valIdx = 3;
+      if (isPaper !== undefined) {
+        conditions.push(`is_paper = $${valIdx++}`);
+        params.push(isPaper);
+      }
+      if (userId && userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        params.push(userId);
+      }
+      const whereClause = `WHERE ${conditions.join(' AND ')}`;
       const res = await this.pool.query(
         `SELECT id, symbol, side, entry_price AS "entryPrice", exit_price AS "exitPrice",
                 qty, margin_used AS "marginUsed", realized_pnl AS "realizedPnl",
@@ -671,9 +690,10 @@ export class DatabaseService {
                 post_exit_30m AS "postExit30m",
                 highest_price AS "highestPrice", lowest_price AS "lowestPrice",
                 mfe_pct AS "mfePct", mae_pct AS "maePct",
-                price_change_24h_pct AS "priceChange24hPct"
+                price_change_24h_pct AS "priceChange24hPct",
+                user_id AS "userId"
          FROM wicksniper_trades
-         WHERE timestamp >= $1 AND timestamp <= $2 ${whereMode}
+         ${whereClause}
          ORDER BY timestamp ASC;`,
         params
       );
@@ -708,11 +728,21 @@ export class DatabaseService {
     }
   }
 
-  public async getCoinPerformance(isPaper?: boolean): Promise<CoinPerformanceRecord[]> {
+  public async getCoinPerformance(isPaper?: boolean, userId?: string): Promise<CoinPerformanceRecord[]> {
     if (!this.isConnected || !this.pool) return [];
     try {
-      const whereMode = isPaper !== undefined ? 'WHERE is_paper = $1' : '';
-      const params = isPaper !== undefined ? [isPaper] : [];
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let valIdx = 1;
+      if (isPaper !== undefined) {
+        conditions.push(`is_paper = $${valIdx++}`);
+        params.push(isPaper);
+      }
+      if (userId && userId !== 'ALL') {
+        conditions.push(`user_id = $${valIdx++}`);
+        params.push(userId);
+      }
+      const whereMode = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const res = await this.pool.query(
         `SELECT 
            symbol,
@@ -1241,7 +1271,7 @@ export class DatabaseService {
           strategy_breakdown = EXCLUDED.strategy_breakdown,
           details = EXCLUDED.details,
           timestamp = EXCLUDED.timestamp,
-          user_id = COALESCE(wicksniper_daily_snapshots.user_id, EXCLUDED.user_id);`,
+          user_id = EXCLUDED.user_id;`,
         [
           s.id,
           s.date,

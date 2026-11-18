@@ -710,11 +710,12 @@ app.get('/api/daily-snapshots', attachAuthIfPresent, async (req, res) => {
   return res.json({ success: true, snapshots: list.slice(0, limit) });
 });
 
-app.post('/api/daily-snapshots/trigger', requireAuth, async (req, res) => {
+app.post('/api/daily-snapshots/trigger', attachAuthIfPresent, async (req, res) => {
   try {
     const todayWib = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
     const targetDate = (req.body?.date as string) || todayWib;
-    const snapshot = await engine.takeDailySnapshot(targetDate, false);
+    const targetEngine = getTargetEngine(req);
+    const snapshot = await targetEngine.takeDailySnapshot(targetDate, false);
     return res.json({ success: true, snapshot, message: `Snapshot untuk tanggal ${targetDate} berhasil diambil.` });
   } catch (e: any) {
     return res.status(500).json({ success: false, message: e.message });
@@ -727,10 +728,11 @@ app.get('/api/ping', async (req, res) => {
   return res.json({ success: true, pingMs });
 });
 
-app.get('/api/coin-performance', async (req, res) => {
+app.get('/api/coin-performance', attachAuthIfPresent, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   try {
-    const records = await engine.getCoinPerformance();
+    const targetEngine = getTargetEngine(req);
+    const records = await targetEngine.getCoinPerformance();
     return res.json({ success: true, records });
   } catch (e: any) {
     return res.status(500).json({ success: false, message: e.message });

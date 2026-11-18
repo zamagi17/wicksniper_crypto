@@ -8233,7 +8233,7 @@ export class WickSniperEngine {
   public async getCoinPerformance(): Promise<CoinPerformanceRecord[]> {
     const isPaper = this.config.tradingMode === 'PAPER';
     if (db.isConnected) {
-      return db.getCoinPerformance(isPaper);
+      return db.getCoinPerformance(isPaper, this.userId);
     }
 
     const bySymbol = new Map<string, {
@@ -8326,14 +8326,15 @@ export class WickSniperEngine {
     if (!db.isConnected) return;
     try {
       const isPaper = this.config.tradingMode === 'PAPER';
-      const dates = await db.getTradeDates(isPaper);
+      const dates = await db.getTradeDates(isPaper, this.userId);
+      if (dates.length === 0) return;
       const todayWib = this.getTodayWibDate();
       const existingDates = new Set(this.dailySnapshots.map((s) => s.date));
 
       for (const d of dates) {
         // Jangan timpa snapshot hari ini saat backfill historis
         if (d !== todayWib && !existingDates.has(d)) {
-          logger.log('INFO', `⏳ [BACKFILL SNAPSHOT] Menghitung snapshot historis untuk tanggal ${d} WIB...`);
+          logger.log('INFO', `⏳ [BACKFILL SNAPSHOT] Menghitung snapshot historis untuk tanggal ${d} WIB (${this.userId})...`);
           await this.takeDailySnapshot(d, true);
         }
       }
@@ -8352,7 +8353,7 @@ export class WickSniperEngine {
 
     let dayTrades: ClosedTrade[] = [];
     if (db.isConnected) {
-      dayTrades = await db.getTradesBetween(startTs, endTs, isPaper);
+      dayTrades = await db.getTradesBetween(startTs, endTs, isPaper, this.userId);
     } else {
       dayTrades = this.closedTrades.filter(
         (t) => t.isPaper === isPaper && t.timestamp >= startTs && t.timestamp <= endTs
@@ -8425,11 +8426,11 @@ export class WickSniperEngine {
 
     let cumulativePnl = 0;
     if (db.isConnected) {
-      const pastTrades = await db.getTradesBetween(0, endTs, isPaper);
+      const pastTrades = await db.getTradesBetween(0, endTs, isPaper, this.userId);
       cumulativePnl = pastTrades.reduce((acc, t) => acc + (Number(t.realizedPnl) || 0), 0);
       if (targetDateStr !== todayWib) {
         const baseBalance = isPaper
-          ? (this.config.paperTrading?.initialVirtualBalance || 500)
+          ? (this.virtualBalance || this.config.paperTrading?.initialVirtualBalance || 500)
           : currentBalance;
         endingBalance = Math.round((baseBalance + cumulativePnl) * 100) / 100;
       }
