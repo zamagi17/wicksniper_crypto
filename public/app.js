@@ -1124,16 +1124,24 @@ function renderBtcFilter(btc) {
   const guardBadge = document.getElementById('btc-guard-status-badge');
   const guardLabel = document.getElementById('btc-guard-label');
 
+  const activeCfg = currentConfig || (() => {
+    try { return JSON.parse(localStorage.getItem('wicksniper_config') || '{}'); } catch (e) { return {}; }
+  })();
+  const isWickSniperFree = (activeCfg?.triggerStrategy === 'WICK_SNIPER' || !activeCfg?.triggerStrategy) && !activeCfg?.scanner?.btcTrendFilterEnabled;
+
   if (btc.isFlashDump) {
     if (summaryEl) summaryEl.innerHTML = `<b style="color: #ff3366;">⚠️ Flash Dump Pasar:</b> BTC anjlok cepat. Filter memblokir sinyal LONG agar terhindar dari pisau jatuh.`;
     if (guardBadge) guardBadge.className = 'btc-guard-badge danger';
     if (guardLabel) guardLabel.innerText = 'LONG Diblokir (Flash Dump) ⚠️';
   } else if (btc.isFlashSurge) {
-    if (summaryEl) summaryEl.innerHTML = `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa tiba-tiba. Filter memblokir sinyal SHORT agar terhindar dari squeeze.`;
+    if (summaryEl) {
+      summaryEl.innerHTML = isWickSniperFree
+        ? `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa mendadak. 🎯 <b>Wick Sniper tetap siaga</b> memburu sumbu atas (upper wick) saat kenaikan jenuh.`
+        : `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa tiba-tiba. Filter memblokir sinyal SHORT agar terhindar dari squeeze.`;
+    }
     if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
-    if (guardLabel) guardLabel.innerText = 'SHORT Diblokir (Flash Surge) ⚠️';
+    if (guardLabel) guardLabel.innerText = isWickSniperFree ? 'SURGE (Wick Sniper Siaga) 🚀' : 'SHORT Diblokir (Flash Surge) ⚠️';
   } else if (isBullish) {
-    const isWickSniperFree = currentBotConfig?.triggerStrategy === 'WICK_SNIPER' && !currentBotConfig?.scanner?.btcTrendFilterEnabled;
     const shortStatus = isWickSniperFree ? 'Wick Sniper SHORT Bebas Berburu' : (btc.canShort ? 'SHORT Aman' : 'SHORT Ditahan (Smart Money)');
     if (summaryEl) {
       summaryEl.innerHTML = isWickSniperFree
@@ -1152,20 +1160,28 @@ function renderBtcFilter(btc) {
     const deadbandStr = btc.deadbandPct !== undefined ? `±${btc.deadbandPct}%` : '±0.25%';
     const priorTrend = btc.priorTrend;
     if (btc.canLong && !btc.canShort) {
-      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) di atas EMA. 🛡️ Sinyal <b>LONG diizinkan</b>, <b>SHORT Ditahan</b>.`;
+      if (summaryEl) {
+        summaryEl.innerHTML = isWickSniperFree
+          ? `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) di atas EMA. 🎯 <b>Wick Sniper aktif memburu lonjakan SHORT</b> (Filter makro khusus Smart Money).`
+          : `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) di atas EMA. 🛡️ Sinyal <b>LONG diizinkan</b>, <b>SHORT Ditahan</b>.`;
+      }
       if (guardBadge) guardBadge.className = 'btc-guard-badge success';
-      if (guardLabel) guardLabel.innerText = `SIDEWAYS (Prior: ${priorTrend || 'BULL'} ➜ LONG Only) ✅`;
+      if (guardLabel) guardLabel.innerText = isWickSniperFree ? 'SIDEWAYS (Wick Sniper Siaga) ✅' : `SIDEWAYS (Prior: ${priorTrend || 'BULL'} ➜ LONG Only) ✅`;
     } else if (btc.canShort && !btc.canLong) {
       if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) di bawah EMA. 🛡️ Sinyal <b>SHORT diizinkan</b>, <b>LONG Ditahan</b>.`;
       if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
       if (guardLabel) guardLabel.innerText = `SIDEWAYS (Prior: ${priorTrend || 'BEAR'} ➜ SHORT Only) ⚠️`;
     } else if (!btc.canLong && !btc.canShort) {
       const posNote = diffPct < 0 ? 'di bawah EMA (waspada breakdown ke bearish)' : 'di atas EMA (waspada breakout ke bullish)';
-      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) ${posNote}. 🛡️ <b>LONG &amp; SHORT Ditahan</b> (menunggu konfirmasi arah).`;
-      if (guardBadge) guardBadge.className = 'btc-guard-badge danger';
-      if (guardLabel) guardLabel.innerText = 'SIDEWAYS (Wait / Tahan Posisi) ⛔';
+      if (summaryEl) {
+        summaryEl.innerHTML = isWickSniperFree
+          ? `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) ${posNote}. 🎯 <b>Wick Sniper aktif memburu lonjakan SHORT</b>.`
+          : `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%) ${posNote}. 🛡️ <b>LONG &amp; SHORT Ditahan</b> (menunggu konfirmasi arah).`;
+      }
+      if (guardBadge) guardBadge.className = isWickSniperFree ? 'btc-guard-badge success' : 'btc-guard-badge danger';
+      if (guardLabel) guardLabel.innerText = isWickSniperFree ? 'SIDEWAYS (Wick Sniper Siaga) ✅' : 'SIDEWAYS (Wait / Tahan Posisi) ⛔';
     } else {
-      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%). Pasar stabil sideways: sinyal Smart Money LONG &amp; SHORT diizinkan.`;
+      if (summaryEl) summaryEl.innerHTML = `BTC berkonsolidasi di <b style="color: #f59e0b;">zona netral EMA ${period}</b> (${deadbandStr}, Δ: ${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%). Pasar stabil sideways: sinyal ${isWickSniperFree ? 'Wick Sniper &amp; ' : ''}Smart Money diizinkan.`;
       if (guardBadge) guardBadge.className = 'btc-guard-badge neutral';
       if (guardLabel) guardLabel.innerText = 'SIDEWAYS / NETRAL 🟡';
     }
