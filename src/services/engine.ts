@@ -1375,7 +1375,7 @@ export class WickSniperEngine {
       const minRsi1m = this.config.scanner?.minRsi1m;
       const minVolRatio = this.config.scanner?.minVolRatio;
       const maxVolRatio = this.config.scanner?.maxVolRatio;
-      if (!isMomentumLongCandidate && (
+      if (!alert.isExhaustion && !isMomentumLongCandidate && (
         (minRsi1m !== undefined && minRsi1m > 0) ||
         (minVolRatio !== undefined && minVolRatio > 0) ||
         (maxVolRatio !== undefined && maxVolRatio > 0)
