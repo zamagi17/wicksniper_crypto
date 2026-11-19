@@ -1234,7 +1234,7 @@ export class WickSniperEngine {
       // Fetch indikator pasar (RSI 1m, Volume 1m, Funding Rate, OI) untuk evaluasi LONG & SHORT
       let indicators: any = null;
       try {
-        indicators = await this.fetchMarketIndicators(symbol);
+        indicators = await this.fetchMarketIndicators(symbol, alert.currentPrice);
       } catch (e: any) {
         logger.log('INFO', `[INDICATOR CHECK] Lewati cek indikator cepat ${symbol}: ${e.message}`);
       }
@@ -1381,7 +1381,7 @@ export class WickSniperEngine {
         (maxVolRatio !== undefined && maxVolRatio > 0)
       )) {
         try {
-          if (!indicators) indicators = await this.fetchMarketIndicators(symbol);
+          if (!indicators) indicators = await this.fetchMarketIndicators(symbol, alert.currentPrice);
 
           // Cek 1: Filter RSI 1m Minimum (Mencegah SHORT pada koin yang baru memantul dari oversold)
           if (minRsi1m !== undefined && minRsi1m > 0 && indicators.rsi1m !== undefined && indicators.rsi1m < minRsi1m) {
@@ -5383,7 +5383,7 @@ export class WickSniperEngine {
    * Dilengkapi single-flight request deduplication & shared cache (8 detik) agar sinkron antar Admin & RND serta hemat kuota API.
    * Menggunakan limit 25 klines sesuai sensitivitas parameter bot.
    */
-  public async fetchMarketIndicators(symbol: string): Promise<CachedMarketIndicators> {
+  public async fetchMarketIndicators(symbol: string, livePrice?: number): Promise<CachedMarketIndicators> {
     const now = Date.now();
 
     // 1. Bersihkan cache lama jika memori map melebihi 200 simbol
@@ -5441,9 +5441,22 @@ export class WickSniperEngine {
         const [klineRes, fundingRes, oiRes] = await Promise.all([klinePromise, fundingPromise, oiPromise]);
 
         let closes: number[] = [];
+        let peakPrice = 0;
         if (klineRes && Array.isArray(klineRes.data) && klineRes.data.length >= 15) {
           const klines = klineRes.data;
           closes = klines.map((k: any) => parseFloat(k[4]));
+
+          // Live Price Anchoring: Pastikan candle berjalan (live unclosed bar) menggunakan harga puncak
+          // lonjakan WebSocket terkini, mengeliminasi lag propagasi cluster REST API Binance (50-200ms)
+          peakPrice = Math.max(
+            livePrice || 0,
+            this.scanner?.getCurrentPrice(symbol) || 0,
+            closes[closes.length - 1] || 0
+          );
+          if (peakPrice > 0 && closes.length > 0) {
+            closes[closes.length - 1] = peakPrice;
+          }
+
           rsi1m = calculateRsi(closes, 14);
 
           const currentCandle = klines[klines.length - 1];
@@ -5472,7 +5485,7 @@ export class WickSniperEngine {
 
         if (oiRes && oiRes.data && oiRes.data.openInterest) {
           const oiQty = parseFloat(oiRes.data.openInterest);
-          const currentP = this.scanner?.getCurrentPrice(symbol) || (closes && closes.length > 0 ? closes[closes.length - 1] : 0);
+          const currentP = peakPrice || this.scanner?.getCurrentPrice(symbol) || (closes && closes.length > 0 ? closes[closes.length - 1] : 0);
           if (!isNaN(oiQty) && currentP > 0) {
             openInterestUsdt = Math.round(oiQty * currentP);
           }
@@ -5503,7 +5516,7 @@ export class WickSniperEngine {
    */
   private async enrichMarketSnapshot(pos: ActivePosition, surgePct: number, lookbackSeconds: number) {
     try {
-      const indicators = await this.fetchMarketIndicators(pos.symbol);
+      const indicators = await this.fetchMarketIndicators(pos.symbol, pos.avgEntryPrice);
       const tickerStats = this.scanner.getTickerStats(pos.symbol);
 
       const snapshot: MarketSnapshot = {
@@ -5554,7 +5567,7 @@ export class WickSniperEngine {
         layer.vol24hUsdt = tickerStats.vol24hUsdt;
       }
 
-      const indicators = await this.fetchMarketIndicators(symbol);
+      const indicators = await this.fetchMarketIndicators(symbol, layer.price);
       if (indicators.rsi1m !== undefined) layer.rsi = indicators.rsi1m;
       if (indicators.vol1mUsdt !== undefined) layer.marketVolume1mUsdt = indicators.vol1mUsdt;
 
