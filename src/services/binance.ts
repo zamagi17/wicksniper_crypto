@@ -1810,7 +1810,7 @@ export class BinanceFuturesClient {
     try {
       const client = await this.getHttpClient();
       const res = await client.get('/fapi/v1/klines', {
-        params: { symbol, interval, limit: 50 },
+        params: { symbol, interval, limit: 25 },
         timeout: 4000,
       });
       if (res && Array.isArray(res.data) && res.data.length >= 15) {

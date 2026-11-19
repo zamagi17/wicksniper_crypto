@@ -5381,7 +5381,7 @@ export class WickSniperEngine {
   /**
    * Mengambil indikator pasar real-time (RSI 14 periode 1m, volume 1m USDT, rasio volume, dan funding rate).
    * Dilengkapi single-flight request deduplication & shared cache (8 detik) agar sinkron antar Admin & RND serta hemat kuota API.
-   * Menggunakan limit 50 klines untuk smoothing Wilder RSI yang jauh lebih stabil dan akurat.
+   * Menggunakan limit 25 klines sesuai sensitivitas parameter bot.
    */
   public async fetchMarketIndicators(symbol: string): Promise<CachedMarketIndicators> {
     const now = Date.now();
@@ -5426,7 +5426,7 @@ export class WickSniperEngine {
       try {
         const client = await binanceFutures.getHttpClient();
         const klinePromise = client.get('/fapi/v1/klines', {
-          params: { symbol, interval: '1m', limit: 50 },
+          params: { symbol, interval: '1m', limit: 25 },
           timeout: 2500,
         });
         const fundingPromise = client.get('/fapi/v1/premiumIndex', {
