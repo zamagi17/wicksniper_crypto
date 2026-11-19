@@ -121,6 +121,20 @@ export function calculateLayerCumulativeDistancePct(
   return parseFloat(cumulative.toFixed(4));
 }
 
+export interface CachedMarketIndicators {
+  rsi1m?: number;
+  vol1mUsdt?: number;
+  avgVol1mUsdt?: number;
+  volRatio?: number;
+  fundingRatePct?: number;
+  openInterestUsdt?: number;
+  candle1m?: { open: number; openTime: number; fetchedAt: number };
+}
+
+// Single-Flight & Shared Market Indicators Cache (Sinkron antar Admin & RND, hemat kuota REST API Binance)
+const sharedMarketIndicatorCache = new Map<string, { timestamp: number; data: CachedMarketIndicators }>();
+const sharedMarketIndicatorInFlight = new Map<string, Promise<CachedMarketIndicators>>();
+
 export class WickSniperEngine {
   private config: BotConfig;
   private configPath: string;
@@ -164,7 +178,6 @@ export class WickSniperEngine {
   private lastAutoTuneAnalysisAt: number = Date.now();
   private lastQuotaWarnAt: number = 0;
   private candle1mCache: Map<string, { open: number; openTime: number; fetchedAt: number }> = new Map();
-  private indicatorCache: Map<string, { timestamp: number; data: any }> = new Map();
   private activeSimSpikes: Map<string, SpikeAlert> = new Map();
   private lastBtcTrendStatus: BtcTrendStatus | null = null;
   private pendingSignals: Map<string, PendingSignalWatchlistItem> = new Map();
@@ -5162,7 +5175,7 @@ export class WickSniperEngine {
     } finally {
       this.closingSymbols.delete(pos.symbol);
       this.candle1mCache.delete(pos.symbol);
-      this.indicatorCache.delete(pos.symbol);
+      sharedMarketIndicatorCache.delete(pos.symbol);
     }
   }
 
@@ -5367,90 +5380,122 @@ export class WickSniperEngine {
 
   /**
    * Mengambil indikator pasar real-time (RSI 14 periode 1m, volume 1m USDT, rasio volume, dan funding rate).
-   * Dilengkapi cache singkat (8 detik) agar tidak membebani kuota API.
+   * Dilengkapi single-flight request deduplication & shared cache (8 detik) agar sinkron antar Admin & RND serta hemat kuota API.
+   * Menggunakan limit 50 klines untuk smoothing Wilder RSI yang jauh lebih stabil dan akurat.
    */
-  public async fetchMarketIndicators(symbol: string): Promise<{
-    rsi1m?: number;
-    vol1mUsdt?: number;
-    avgVol1mUsdt?: number;
-    volRatio?: number;
-    fundingRatePct?: number;
-    openInterestUsdt?: number;
-  }> {
+  public async fetchMarketIndicators(symbol: string): Promise<CachedMarketIndicators> {
     const now = Date.now();
-    const cached = this.indicatorCache.get(symbol);
+
+    // 1. Bersihkan cache lama jika memori map melebihi 200 simbol
+    if (sharedMarketIndicatorCache.size > 200) {
+      const pruneCutoff = now - 30_000;
+      for (const [k, v] of sharedMarketIndicatorCache.entries()) {
+        if (v.timestamp < pruneCutoff) sharedMarketIndicatorCache.delete(k);
+      }
+    }
+
+    // 2. Ambil dari shared cache jika masih berlaku (TTL 8 detik)
+    const cached = sharedMarketIndicatorCache.get(symbol);
     if (cached && now - cached.timestamp < 8000) {
+      if (cached.data.candle1m) {
+        this.candle1mCache.set(symbol, cached.data.candle1m);
+      }
       return cached.data;
     }
 
-    let rsi1m: number | undefined;
-    let vol1mUsdt: number | undefined;
-    let avgVol1mUsdt: number | undefined;
-    let volRatio: number | undefined;
-    let fundingRatePct: number | undefined;
-    let openInterestUsdt: number | undefined;
+    // 3. Single-flight: Jika request ke Binance untuk simbol ini sedang berjalan (in-flight),
+    // tunggu request yang sama agar nilai RSI & Volume antar-profil 100% identik dan kuota API hemat.
+    const inFlight = sharedMarketIndicatorInFlight.get(symbol);
+    if (inFlight) {
+      const data = await inFlight;
+      if (data.candle1m) {
+        this.candle1mCache.set(symbol, data.candle1m);
+      }
+      return data;
+    }
 
-    try {
-      const client = await binanceFutures.getHttpClient();
-      const klinePromise = client.get('/fapi/v1/klines', {
-        params: { symbol, interval: '1m', limit: 25 },
-        timeout: 1500,
-      });
-      const fundingPromise = client.get('/fapi/v1/premiumIndex', {
-        params: { symbol },
-        timeout: 1500,
-      }).catch(() => null);
-      const oiPromise = client.get('/fapi/v1/openInterest', {
-        params: { symbol },
-        timeout: 1500,
-      }).catch(() => null);
+    const fetchPromise = (async (): Promise<CachedMarketIndicators> => {
+      let rsi1m: number | undefined;
+      let vol1mUsdt: number | undefined;
+      let avgVol1mUsdt: number | undefined;
+      let volRatio: number | undefined;
+      let fundingRatePct: number | undefined;
+      let openInterestUsdt: number | undefined;
+      let candle1m: { open: number; openTime: number; fetchedAt: number } | undefined;
 
-      const [klineRes, fundingRes, oiRes] = await Promise.all([klinePromise, fundingPromise, oiPromise]);
+      try {
+        const client = await binanceFutures.getHttpClient();
+        const klinePromise = client.get('/fapi/v1/klines', {
+          params: { symbol, interval: '1m', limit: 50 },
+          timeout: 2500,
+        });
+        const fundingPromise = client.get('/fapi/v1/premiumIndex', {
+          params: { symbol },
+          timeout: 2000,
+        }).catch(() => null);
+        const oiPromise = client.get('/fapi/v1/openInterest', {
+          params: { symbol },
+          timeout: 2000,
+        }).catch(() => null);
 
-      let closes: number[] = [];
-      if (klineRes && Array.isArray(klineRes.data) && klineRes.data.length >= 15) {
-        const klines = klineRes.data;
-        closes = klines.map((k: any) => parseFloat(k[4]));
-        rsi1m = calculateRsi(closes, 14);
+        const [klineRes, fundingRes, oiRes] = await Promise.all([klinePromise, fundingPromise, oiPromise]);
 
-        const currentCandle = klines[klines.length - 1];
-        vol1mUsdt = Math.round(parseFloat(currentCandle[7] || '0'));
+        let closes: number[] = [];
+        if (klineRes && Array.isArray(klineRes.data) && klineRes.data.length >= 15) {
+          const klines = klineRes.data;
+          closes = klines.map((k: any) => parseFloat(k[4]));
+          rsi1m = calculateRsi(closes, 14);
 
-        const prevCandles = klines.slice(0, -1);
-        if (prevCandles.length > 0) {
-          const totalVol = prevCandles.reduce((acc: number, k: any) => acc + parseFloat(k[7] || '0'), 0);
-          avgVol1mUsdt = Math.round(totalVol / prevCandles.length);
-          if (avgVol1mUsdt > 0 && vol1mUsdt > 0) {
-            volRatio = Math.round((vol1mUsdt / avgVol1mUsdt) * 10) / 10;
+          const currentCandle = klines[klines.length - 1];
+          vol1mUsdt = Math.round(parseFloat(currentCandle[7] || '0'));
+
+          const prevCandles = klines.slice(0, -1);
+          if (prevCandles.length > 0) {
+            const totalVol = prevCandles.reduce((acc: number, k: any) => acc + parseFloat(k[7] || '0'), 0);
+            avgVol1mUsdt = Math.round(totalVol / prevCandles.length);
+            if (avgVol1mUsdt > 0 && vol1mUsdt > 0) {
+              volRatio = Math.round((vol1mUsdt / avgVol1mUsdt) * 10) / 10;
+            }
+          }
+
+          const openTime = currentCandle[0];
+          const open = parseFloat(currentCandle[1]);
+          candle1m = { open, openTime, fetchedAt: Date.now() };
+        }
+
+        if (fundingRes && fundingRes.data && fundingRes.data.lastFundingRate) {
+          const fr = parseFloat(fundingRes.data.lastFundingRate);
+          if (!isNaN(fr)) {
+            fundingRatePct = Math.round(fr * 10000) / 100;
           }
         }
 
-        const openTime = currentCandle[0];
-        const open = parseFloat(currentCandle[1]);
-        this.candle1mCache.set(symbol, { open, openTime, fetchedAt: now });
+        if (oiRes && oiRes.data && oiRes.data.openInterest) {
+          const oiQty = parseFloat(oiRes.data.openInterest);
+          const currentP = this.scanner?.getCurrentPrice(symbol) || (closes && closes.length > 0 ? closes[closes.length - 1] : 0);
+          if (!isNaN(oiQty) && currentP > 0) {
+            openInterestUsdt = Math.round(oiQty * currentP);
+          }
+        }
+      } catch {
+        // Abaikan error non-kritis
       }
 
-      if (fundingRes && fundingRes.data && fundingRes.data.lastFundingRate) {
-        const fr = parseFloat(fundingRes.data.lastFundingRate);
-        if (!isNaN(fr)) {
-          fundingRatePct = Math.round(fr * 10000) / 100;
-        }
-      }
+      const data: CachedMarketIndicators = { rsi1m, vol1mUsdt, avgVol1mUsdt, volRatio, fundingRatePct, openInterestUsdt, candle1m };
+      sharedMarketIndicatorCache.set(symbol, { timestamp: Date.now(), data });
+      return data;
+    })();
 
-      if (oiRes && oiRes.data && oiRes.data.openInterest) {
-        const oiQty = parseFloat(oiRes.data.openInterest);
-        const currentP = this.scanner.getCurrentPrice(symbol) || (closes && closes.length > 0 ? closes[closes.length - 1] : 0);
-        if (!isNaN(oiQty) && currentP > 0) {
-          openInterestUsdt = Math.round(oiQty * currentP);
-        }
+    sharedMarketIndicatorInFlight.set(symbol, fetchPromise);
+    try {
+      const data = await fetchPromise;
+      if (data.candle1m) {
+        this.candle1mCache.set(symbol, data.candle1m);
       }
-    } catch {
-      // Abaikan error non-kritis
+      return data;
+    } finally {
+      sharedMarketIndicatorInFlight.delete(symbol);
     }
-
-    const data = { rsi1m, vol1mUsdt, avgVol1mUsdt, volRatio, fundingRatePct, openInterestUsdt };
-    this.indicatorCache.set(symbol, { timestamp: now, data });
-    return data;
   }
 
   /**
