@@ -968,6 +968,7 @@ function getPosEntryReason(pos) {
   if (pos.entryReason) return pos.entryReason;
   if (pos.paramsSnapshot?.entryReason) return pos.paramsSnapshot.entryReason;
   if (pos.paramsSnapshot?.signalReason) return pos.paramsSnapshot.signalReason;
+  if (pos.paramsSnapshot?.exhaustionDetail) return `🎯 Top Gainer Exhaustion (${pos.paramsSnapshot.exhaustionDetail})`;
 
   if (pos.strategyType === 'SMART_MONEY' || pos.paramsSnapshot?.strategy === 'SMART_MONEY' || pos.smartMoneyFlowStatus) {
     const snap = pos.paramsSnapshot || {};
@@ -2020,21 +2021,34 @@ function renderActivePositions(positions) {
       }
 
       let smEntryReasonBannerHtml = '';
-      if (isSm) {
-        const reasonText = getPosEntryReason(pos);
-        if (reasonText) {
-          smEntryReasonBannerHtml = `
-            <div class="sm-entry-reason-banner">
-              <span class="sm-reason-title">
-                🎯 <span>Alasan Entry:</span>
-              </span>
-              <div class="sm-reason-chips-wrap">
-                ${formatSmartMoneyReasonChips(reasonText)}
-              </div>
+      const reasonText = getPosEntryReason(pos);
+      const isExhaustion = pos.strategyType === 'EXHAUSTION_SNIPER' || pos.paramsSnapshot?.strategy === 'EXHAUSTION_SNIPER' || pos.paramsSnapshot?.isExhaustion || pos.isExhaustion || (reasonText && reasonText.includes('Exhaustion'));
+
+      if (isSm && reasonText) {
+        smEntryReasonBannerHtml = `
+          <div class="sm-entry-reason-banner">
+            <span class="sm-reason-title">
+              🎯 <span>Alasan Entry:</span>
+            </span>
+            <div class="sm-reason-chips-wrap">
+              ${formatSmartMoneyReasonChips(reasonText)}
             </div>
-          `;
-        }
+          </div>
+        `;
+      } else if (isExhaustion && reasonText) {
+        smEntryReasonBannerHtml = `
+          <div class="sm-entry-reason-banner" style="border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
+            <span class="sm-reason-title" style="color: #f59e0b;">
+              🎯 <span>Exhaustion Sniper (Bypass RSI):</span>
+            </span>
+            <div style="font-size: 11px; color: #f3f4f6; margin-top: 2px;">
+              ${escapeHtml(reasonText)}
+            </div>
+          </div>
+        `;
       }
+
+      const exhaustBadge = isExhaustion ? `<span class="badge-tag" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #f59e0b; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;" title="Top Gainer Exhaustion Sniper (Bypass RSI 1m)">🎯 EXHAUSTION</span>` : '';
 
       return `
         <div class="position-card">
@@ -2042,8 +2056,9 @@ function renderActivePositions(positions) {
             <div class="pos-symbol">
               ${pos.symbol}
               <span class="badge-side ${pos.side === 'LONG' ? 'long' : 'short'}">${pos.side || 'SHORT'} ${pos.leverage}x</span>
+              ${exhaustBadge}
               ${pos.marketSnapshot?.vol24hUsdt ? `<span class="badge-vol24h" style="font-size: 10px;" title="Volume 24 Jam (Turnover USDT)">🌐 Vol 24h: <b>$${formatShortUsdt(pos.marketSnapshot.vol24hUsdt)}</b></span>` : ''}
-              ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="RSI 1m saat Entry">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}</span>` : ''}
+              ${pos.marketSnapshot?.rsi1m !== undefined ? `<span class="badge-rsi ${pos.marketSnapshot.rsi1m >= 80 ? 'rsi-hot' : pos.marketSnapshot.rsi1m >= 70 ? 'rsi-warm' : ''}" style="font-size: 10px;" title="${isExhaustion ? 'RSI 1m saat Entry (Diabaikan oleh Exhaustion Sniper)' : 'RSI 1m saat Entry'}">📊 RSI ${Number(pos.marketSnapshot.rsi1m).toFixed(1)}${isExhaustion ? ' (Bypassed)' : ''}</span>` : ''}
               ${tpStatusBadge}
               ${isSmartTraderDriven ? smartTraderTag + smFlowBadgeHtml + modalPausTag + whaleHealthTag : smFlowBadgeHtml + modalPausTag + whaleHealthTag + smartTraderTag}
               ${chg24hTag}
@@ -2818,12 +2833,15 @@ function renderClosedTradesTable(trades) {
       const sign = isWin ? '+' : '';
       const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio;
       const tradeDriver = t.paramsSnapshot?.signalDriver || 'SMART_TRADER';
+      const isExhaustionTrade = t.strategyType === 'EXHAUSTION_SNIPER' || t.paramsSnapshot?.strategy === 'EXHAUSTION_SNIPER' || t.paramsSnapshot?.isExhaustion || t.isExhaustion || (t.entryReason && t.entryReason.includes('Exhaustion'));
       const stratBadge = isSmTrade
         ? (tradeDriver === 'SMART_TRADER'
             ? `<span class="badge-tag" style="background: rgba(192, 132, 252, 0.15); border: 1px solid rgba(192, 132, 252, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Smart Trader Flow">🧠 ST</span>`
             : tradeDriver === 'DUAL_CONFLUENCE'
             ? `<span class="badge-tag" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Dual Confluence">🎯 DC</span>`
             : `<span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Whale Flow">🐋 SM</span>`)
+        : isExhaustionTrade
+        ? `<span class="badge-tag" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #f59e0b; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Top Gainer Exhaustion Reversal (Bypass RSI)">🎯 EXHAUST</span>`
         : '';
       const layerBadge = t.layersFilled
         ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
@@ -3578,9 +3596,11 @@ function openTradeDetailModal(tradeId, tradeIndex) {
     }
 
     const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio || !!snap?.whaleLongRatio || !!snap?.whaleAvgEntry;
+    const isExhaustion = t.strategyType === 'EXHAUSTION_SNIPER' || snap?.strategy === 'EXHAUSTION_SNIPER' || snap?.isExhaustion || t.isExhaustion || (t.entryReason && t.entryReason.includes('Exhaustion'));
     const tradeDriver = snap?.signalDriver || 'SMART_TRADER';
     const stratName = isSm
       ? (tradeDriver === 'SMART_TRADER' ? '🧠 Smart Trader' : tradeDriver === 'DUAL_CONFLUENCE' ? '🎯 Dual Confluence' : '🐋 Whale Flow')
+      : isExhaustion ? '🎯 Exhaustion Sniper (Bypass RSI)'
       : t.strategyType === 'MOMENTUM_LONG' ? '🚀 Momentum Long' : '⚡ Wick Sniper';
 
     // Header Title & Badge
@@ -4102,7 +4122,7 @@ function openTradeDetailModal(tradeId, tradeIndex) {
               ${rsiVal !== null ? `
               <div class="td-kpi-card">
                 <div class="td-kpi-label">📊 RSI (14) 1m Saat Entry</div>
-                <div class="td-kpi-val ${rsiClass}"><b>${rsiVal.toFixed(1)}</b>${rsiTag}</div>
+                <div class="td-kpi-val ${rsiClass}"><b>${rsiVal.toFixed(1)}</b>${rsiTag} ${isExhaustion ? '<small style="font-size:10px; color:#f59e0b; font-weight:600;">(Diabaikan - Top Gainer)</small>' : ''}</div>
               </div>` : ''}
               ${mSnap.fundingRatePct !== undefined && mSnap.fundingRatePct !== null ? `
               <div class="td-kpi-card">
@@ -4279,6 +4299,26 @@ function openTradeDetailModal(tradeId, tradeIndex) {
                   <div class="sm-reason-chips-wrap">${formatSmartMoneyReasonChips(signalReason)}</div>
                 </div>
               </div>` : ''}
+            </div>
+          `;
+        })()}
+
+        <!-- EXHAUSTION TOP GAINER ENTRY -->
+        ${(() => {
+          if (!isExhaustion) return '';
+          const exhDetail = snap?.exhaustionDetail || t.entryReason || snap?.entryReason || 'Deviasi Pucuk MA(7) Top Gainer';
+          return `
+            <div class="td-section-title" style="margin-top: 14px; color: #f59e0b;">🎯 Exhaustion Sniper (Top Gainer Reversal - Bypass RSI)</div>
+            <div class="td-kpi-grid">
+              <div class="td-kpi-card" style="grid-column: span 2; border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08);">
+                <div class="td-kpi-label" style="color: #f59e0b;">🎯 Pemicu Pembalikan Pucuk</div>
+                <div class="td-kpi-val" style="font-size: 12px; color: #f3f4f6; margin-top: 4px;">
+                  ${escapeHtml(exhDetail)}
+                </div>
+                <div style="font-size: 10.5px; color: #fbbf24; margin-top: 6px;">
+                  ℹ️ <b>Keterangan:</b> Strategi Exhaustion Sniper secara sengaja mengabaikan batas minimum RSI 1m & rasio volume normal untuk mengeksekusi SHORT seketika saat terjadi lonjakan parabolic ekstrem / deviasi jauh dari moving average.
+                </div>
+              </div>
             </div>
           `;
         })()}

@@ -208,6 +208,14 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       if (entryReasonText) {
         triggerLine += `\n🎯 <b>Alasan Masuk:</b> <code>${entryReasonText}</code>`;
       }
+    } else if (pos.strategyType === 'EXHAUSTION_SNIPER' || pos.paramsSnapshot?.strategy === 'EXHAUSTION_SNIPER' || pos.paramsSnapshot?.isExhaustion || pos.isExhaustion) {
+      triggerLine = `🎯 <b>Strategi:</b> <b>Exhaustion Top Gainer Sniper (Bypass RSI)</b>\n⚡ <b>Deviasi Pucuk:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine ? `${rsiLine} (Bypassed)` : ''}`;
+      const entryReasonText = pos.entryReason || pos.paramsSnapshot?.entryReason || pos.paramsSnapshot?.signalReason || pos.paramsSnapshot?.exhaustionDetail;
+      if (entryReasonText) {
+        triggerLine += `\n📌 <b>Pemicu Pucuk:</b> <code>${entryReasonText}</code>`;
+      }
+    } else if (pos.strategyType === 'MOMENTUM_LONG') {
+      triggerLine = `🚀 <b>Strategi:</b> <b>Momentum Long Sniper</b>\n⚡ <b>Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     } else {
       triggerLine = `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     }
@@ -300,13 +308,18 @@ ${slLine}
       : '';
 
     const isSm = trade.strategyType === 'SMART_MONEY' || trade.paramsSnapshot?.strategy === 'SMART_MONEY';
+    const isExhaustion = trade.strategyType === 'EXHAUSTION_SNIPER' || trade.paramsSnapshot?.strategy === 'EXHAUSTION_SNIPER' || trade.paramsSnapshot?.isExhaustion || trade.isExhaustion || (trade.entryReason && trade.entryReason.includes('Exhaustion'));
     const stratLine = isSm
       ? (trade.paramsSnapshot?.signalDriver === 'SMART_TRADER'
           ? `\n🧠 <b>Strategi:</b> <b>Smart Trader Flow Tracker</b>`
           : trade.paramsSnapshot?.signalDriver === 'DUAL_CONFLUENCE'
           ? `\n🎯 <b>Strategi:</b> <b>Dual Confluence Tracker</b>`
           : `\n🐋 <b>Strategi:</b> <b>Whale Flow Tracker</b>`)
-      : '';
+      : isExhaustion
+      ? `\n🎯 <b>Strategi:</b> <b>Exhaustion Top Gainer Sniper (Bypass RSI)</b>`
+      : trade.strategyType === 'MOMENTUM_LONG'
+      ? `\n🚀 <b>Strategi:</b> <b>Momentum Long Sniper</b>`
+      : `\n⚡ <b>Strategi:</b> <b>Wick Sniper</b>`;
 
     const tradeChg24 = trade.priceChange24hPct ?? trade.paramsSnapshot?.priceChange24hPct ?? trade.marketSnapshot?.priceChange24hPct;
     const tradeChg24Line = (tradeChg24 !== undefined && tradeChg24 !== null)

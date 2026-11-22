@@ -545,7 +545,7 @@ export interface ActivePosition {
   userId?: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
-  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY';
+  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY' | 'EXHAUSTION_SNIPER';
   leverage: number;
   totalQty: number;
   avgEntryPrice: number;
@@ -608,6 +608,8 @@ export interface ActivePosition {
   entryTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   entryBtcPrice?: number;
   priceChange24hPct?: number; // Perubahan harga 24 jam saat entry (%)
+  isExhaustion?: boolean;
+  exhaustionDetail?: string;
 }
 
 export interface SmartMoneyFlowStatus {
@@ -699,7 +701,7 @@ export interface ClosedTrade {
   userId?: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
-  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY';
+  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY' | 'EXHAUSTION_SNIPER';
   entryPrice: number;
   exitPrice: number;
   qty: number;
@@ -754,6 +756,8 @@ export interface ClosedTrade {
   fundingRatePct?: number;
   rsi15m?: number;
   priceChange24hPct?: number; // Perubahan harga 24 jam saat entry (%)
+  isExhaustion?: boolean;
+  exhaustionDetail?: string;
 }
 
 export interface EngineStatus {

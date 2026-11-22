@@ -1372,19 +1372,30 @@ export class WickSniperEngine {
       }
 
       // Filter RSI 1m Minimum (Dilarang SHORT jika RSI 1m < batas aman) & Rasio Volume Breakout (Min / Maks)
+      // Catatan: Exhaustion Sniper secara sengaja mengabaikan filter RSI & Volume karena didesain khusus menangkap deviasi pucuk Top Gainer.
       const minRsi1m = this.config.scanner?.minRsi1m;
       const minVolRatio = this.config.scanner?.minVolRatio;
       const maxVolRatio = this.config.scanner?.maxVolRatio;
-      if (!alert.isExhaustion && !isMomentumLongCandidate && (
-        (minRsi1m !== undefined && minRsi1m > 0) ||
+      const shouldCheckRsi = !alert.isExhaustion && !isMomentumLongCandidate && minRsi1m !== undefined && minRsi1m > 0;
+      const shouldCheckVolRatio = !alert.isExhaustion && !isMomentumLongCandidate && (
         (minVolRatio !== undefined && minVolRatio > 0) ||
         (maxVolRatio !== undefined && maxVolRatio > 0)
-      )) {
+      );
+
+      if (alert.isExhaustion) {
+        logger.log(
+          'INFO',
+          `🎯 [EXHAUSTION SNIPER] ${symbol}: Lonjakan deviasi pucuk Top Gainer (+${alert.surgePct}%). Filter RSI 1m & Volume diabaikan sesuai desain strategi exhaustion.`,
+          symbol
+        );
+      }
+
+      if (shouldCheckRsi || shouldCheckVolRatio) {
         try {
           if (!indicators) indicators = await this.fetchMarketIndicators(symbol, alert.currentPrice);
 
-          // Cek 1: Filter RSI 1m Minimum (Mencegah SHORT pada koin yang baru memantul dari oversold)
-          if (minRsi1m !== undefined && minRsi1m > 0 && indicators.rsi1m !== undefined && indicators.rsi1m < minRsi1m) {
+          // Cek 1: Filter RSI 1m Minimum (Mencegah SHORT jika RSI 1m belum mencapai batas minimum / overbought)
+          if (shouldCheckRsi && indicators.rsi1m !== undefined && indicators.rsi1m < minRsi1m!) {
             const reason = `RSI 1m (${indicators.rsi1m.toFixed(1)}) di bawah batas aman (${minRsi1m}) untuk SHORT (rawan pantulan oversold)`;
             const rsiCooldown = this.config.scanner?.minRsiCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 10;
             this.scanner.setCooldown(symbol, rsiCooldown);
@@ -1398,7 +1409,7 @@ export class WickSniperEngine {
           }
 
           // Cek 2: Filter Minimal Rasio Volume (Mencegah SHORT pada lonjakan volume sepi/kering/illiquid)
-          if (minVolRatio !== undefined && minVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio < minVolRatio) {
+          if (shouldCheckVolRatio && minVolRatio !== undefined && minVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio < minVolRatio) {
             const reason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) di bawah batas aman min (${minVolRatio}x normal)`;
             const volCooldown = this.config.scanner?.minVolRatioCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 5;
             this.scanner.setCooldown(symbol, volCooldown);
@@ -1412,7 +1423,7 @@ export class WickSniperEngine {
           }
 
           // Cek 3: Filter Maksimal Rasio Volume Breakout (Mencegah menghadang breakout volume masif)
-          if (maxVolRatio !== undefined && maxVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio > maxVolRatio) {
+          if (shouldCheckVolRatio && maxVolRatio !== undefined && maxVolRatio > 0 && indicators.volRatio !== undefined && indicators.volRatio > maxVolRatio) {
             const reason = `Rasio volume 1m (${indicators.volRatio.toFixed(1)}x) melebihi batas breakout maks (${maxVolRatio}x normal)`;
             const volCooldown = this.config.scanner?.maxVolRatioCooldownMinutes ?? this.config.scanner?.cooldownMinutes ?? 10;
             this.scanner.setCooldown(symbol, volCooldown);
@@ -1550,14 +1561,28 @@ export class WickSniperEngine {
       }
 
       alert.status = 'EXECUTING';
-      alert.paramsSnapshot = {
-        ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
-        strategy: 'WICK_SNIPER',
-      };
-      logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
+      if (alert.isExhaustion) {
+        alert.paramsSnapshot = {
+          ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+          strategy: 'EXHAUSTION_SNIPER',
+          isExhaustion: true,
+          exhaustionDetail: alert.exhaustionDetail,
+        };
+        logger.log(
+          'SNIPER',
+          `🎯 [EXHAUSTION TOP GAINER] ${symbol} Deviasi Pucuk (+${alert.surgePct}%, ${alert.exhaustionDetail || 'MA7 Deviasi'})! Menembakkan Jaring SHORT bertingkat (Bypass RSI)...`,
+          symbol
+        );
+      } else {
+        alert.paramsSnapshot = {
+          ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+          strategy: 'WICK_SNIPER',
+        };
+        logger.log('SNIPER', `🚨 [SPONGE SPIKE DETECTED] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring SHORT bertingkat...`, symbol);
+      }
       db.saveSpike(alert).catch(() => { });
 
-      await this.deployGridLadder(symbol, confirmedEntryPrice, alert.surgePct, alert.lookbackSeconds);
+      await this.deployGridLadder(symbol, confirmedEntryPrice, alert.surgePct, alert.lookbackSeconds, alert, indicators);
     } finally {
       // Lepaskan kunci konkurensi (slot kini sudah resmi tercatat di this.activePositions atau dibatalkan)
       this.deployingSymbols.delete(symbol);
@@ -1712,7 +1737,9 @@ export class WickSniperEngine {
     symbol: string,
     currentPrice: number,
     surgePct: number = 0,
-    lookbackSeconds: number = 20
+    lookbackSeconds: number = 20,
+    alert?: SpikeAlert,
+    indicators?: any
   ) {
     const gridCfg = this.config.grid;
     const exitCfg = this.config.exit;
@@ -1806,11 +1833,20 @@ export class WickSniperEngine {
       totalPlannedMargin += layerActualMargin;
     }
 
+    const isExhaustion = alert?.isExhaustion || false;
+    const exhaustionDetail = alert?.exhaustionDetail;
+    const entryReason = isExhaustion
+      ? `🎯 Top Gainer Exhaustion Reversal (${exhaustionDetail || 'MA7 Deviasi Pucuk'}) [Abaikan RSI 1m]`
+      : `🚨 Wick Spike Lonjakan +${surgePct}% (${lookbackSeconds}s)`;
+
     const initialPos: ActivePosition = {
       id: `${symbol}_${Date.now()}`,
       symbol,
       side: 'SHORT',
-      strategyType: 'WICK_SNIPER',
+      strategyType: isExhaustion ? 'EXHAUSTION_SNIPER' : 'WICK_SNIPER',
+      isExhaustion,
+      exhaustionDetail,
+      entryReason,
       leverage,
       totalQty: layer0Qty,
       avgEntryPrice: currentPrice,
@@ -1833,6 +1869,11 @@ export class WickSniperEngine {
       priceChange24hPct: initial24hChange,
       paramsSnapshot: {
         ...this.captureParamsSnapshot(),
+        strategy: isExhaustion ? 'EXHAUSTION_SNIPER' : 'WICK_SNIPER',
+        isExhaustion,
+        exhaustionDetail,
+        entryReason,
+        signalReason: entryReason,
         priceChange24hPct: initial24hChange,
         isLowVolumeAdjusted: isLowVolume,
         vol24hUsdt: initial24hVol,
@@ -1850,6 +1891,9 @@ export class WickSniperEngine {
         surgePct,
         lookbackSeconds,
         capturedAt: Date.now(),
+        rsi1m: indicators?.rsi1m,
+        volRatio: indicators?.volRatio,
+        fundingRatePct: indicators?.fundingRatePct,
       },
     };
 
@@ -3272,7 +3316,7 @@ export class WickSniperEngine {
         }
       }
 
-      if (this.config.exit.atrDynamicSlTpEnabled && (!pos.strategyType || pos.strategyType === 'WICK_SNIPER')) {
+      if (this.config.exit.atrDynamicSlTpEnabled && (!pos.strategyType || pos.strategyType === 'WICK_SNIPER' || pos.strategyType === 'EXHAUSTION_SNIPER')) {
         void this.applyAtrTargetsToPosition(pos);
       }
 
@@ -5035,6 +5079,8 @@ export class WickSniperEngine {
         smartMoneyFlowStatus: pos.smartMoneyFlowStatus,
         slDescription: pos.slDescription,
         entryReason: pos.entryReason || pos.paramsSnapshot?.entryReason || pos.paramsSnapshot?.signalReason,
+        isExhaustion: pos.isExhaustion || pos.paramsSnapshot?.isExhaustion,
+        exhaustionDetail: pos.exhaustionDetail || pos.paramsSnapshot?.exhaustionDetail,
         highestPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, finalHighest)),
         lowestPrice: parseFloat(binanceFutures.formatPrice(pos.symbol, finalLowest)),
         mfePct,
@@ -5050,6 +5096,10 @@ export class WickSniperEngine {
           ...(pos.marketSnapshot ? { marketSnapshot: pos.marketSnapshot } : {}),
           side: pos.side,
           strategy: pos.strategyType || (pos.smartMoneyFlowStatus ? 'SMART_MONEY' : 'WICK_SNIPER'),
+          ...(pos.isExhaustion || pos.paramsSnapshot?.isExhaustion ? {
+            isExhaustion: true,
+            exhaustionDetail: pos.exhaustionDetail || pos.paramsSnapshot?.exhaustionDetail,
+          } : {}),
           targetTpPrice: pos.targetTpPrice,
           targetTp2Price: pos.targetTp2Price,
           hardSlPrice: pos.hardSlPrice,
@@ -5260,7 +5310,7 @@ export class WickSniperEngine {
   }
 
   private async applyAtrTargetsToPosition(pos: ActivePosition, entryPriceOverride?: number): Promise<void> {
-    if (!this.config.exit.atrDynamicSlTpEnabled || (pos.strategyType && pos.strategyType !== 'WICK_SNIPER')) return;
+    if (!this.config.exit.atrDynamicSlTpEnabled || (pos.strategyType && pos.strategyType !== 'WICK_SNIPER' && pos.strategyType !== 'EXHAUSTION_SNIPER')) return;
 
     const entryPrice = entryPriceOverride ?? pos.avgEntryPrice;
     if (!entryPrice || entryPrice <= 0) return;
