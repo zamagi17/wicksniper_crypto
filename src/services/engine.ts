@@ -6825,7 +6825,7 @@ export class WickSniperEngine {
         return true;
       }
 
-      // Cek apakah ada perubahan saldo manual di tabel wicksniper_state (hanya jika tidak ada posisi floating)
+      // Cek apakah ada perubahan saldo atau reset status manual di tabel wicksniper_state (hanya jika tidak ada posisi floating)
       if (this.activePositions.size === 0) {
         const dbState = await db.loadState(this.userId);
         if (dbState && typeof dbState.virtualBalance === 'number') {
@@ -6833,6 +6833,10 @@ export class WickSniperEngine {
             this.virtualBalance = dbState.virtualBalance;
             this.broadcastStatus();
           }
+        }
+        if (dbState && typeof dbState.spikesToday === 'number' && dbState.spikesToday !== this.spikesDetectedToday) {
+          this.spikesDetectedToday = dbState.spikesToday;
+          this.broadcastStatus();
         }
       }
     } catch (e: any) {
@@ -6848,7 +6852,7 @@ export class WickSniperEngine {
       const [recentTrades, dbStats, spikesCount] = await Promise.all([
         db.loadRecentTrades(50, isPaper, this.userId),
         db.getTradeStats(this.getStartOfDayWibTimestamp(), isPaper, this.userId),
-        db.getSpikesCount(),
+        db.getSpikesCount(this.userId),
       ]);
       if (recentTrades && recentTrades.length >= 0) {
         this.closedTrades = recentTrades;
@@ -6856,8 +6860,13 @@ export class WickSniperEngine {
       if (dbStats) {
         this.cachedDbStats = dbStats;
       }
-      if (typeof spikesCount === 'number' && spikesCount > 0) {
+      if (typeof spikesCount === 'number') {
         this.totalSpikesCount = spikesCount;
+        if (spikesCount === 0) {
+          this.scanner.setRecentSpikes([]);
+          this.activeSimSpikes.clear();
+          this.spikesDetectedToday = 0;
+        }
       }
     } catch (e: any) {
       // ignore
@@ -6870,6 +6879,10 @@ export class WickSniperEngine {
     this.cachedDbStats = null;
     this.activePositions.clear();
     this.pendingSignals.clear();
+    this.spikesDetectedToday = 0;
+    this.totalSpikesCount = 0;
+    this.scanner.setRecentSpikes([]);
+    this.activeSimSpikes.clear();
     db.clearAllTrades().catch(() => { });
     db.saveState(this.virtualBalance, [], 0, this.userId).catch(() => { });
     logger.log('INFO', '🧹 Saldo dan riwayat trade demo berhasil di-reset.');
