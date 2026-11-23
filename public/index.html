@@ -1644,10 +1644,14 @@
               <label>Min Layer Protect</label>
               <input type="number" id="cfg-atr-min-layers" min="0" max="25" step="1" class="form-control" placeholder="0">
             </div>
+            <div class="form-group">
+              <label>Buffer Emergency Luar Layer (%)</label>
+              <input type="number" id="cfg-grid-emergency-sl-buffer" min="0.5" max="20" step="0.1" class="form-control" placeholder="2.5">
+            </div>
             <div class="form-group" style="grid-column: span 2;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #ffb347;">
                 <input type="checkbox" id="cfg-atr-defer-hard-stop" checked style="width: 16px; height: 16px; accent-color: #ffb347;">
-                🛡️ Tunda Hard Stop sampai layer terakhir aman
+                🛡️ Tunda Hard Stop sampai layer terakhir aman (SL ditaruh di luar layer terakhir)
               </label>
             </div>
           </div>

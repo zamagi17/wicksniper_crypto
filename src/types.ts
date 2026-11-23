@@ -81,6 +81,7 @@ export interface BotConfig {
     atrTpMultiplier?: number;
     atrDeferHardStopBeforeLastLayer?: boolean;
     atrMinLayersToProtect?: number;
+    gridEmergencySlBufferPct?: number;
     trailingSlEnabled?: boolean;
     trailingSlMaxReturnRatio?: number;
     trailingSlTiers?: Array<{ filledLayerMin: number; percentOfBase: number }>;

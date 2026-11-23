@@ -4631,6 +4631,7 @@ function applySnapshotParamsToConfig() {
     setChecked('cfg-atr-defer-hard-stop', snap.atrDeferHardStopBeforeLastLayer !== false);
   }
   setVal('cfg-atr-min-layers', snap.atrMinLayersToProtect ?? 0);
+  setVal('cfg-grid-emergency-sl-buffer', snap.gridEmergencySlBufferPct ?? 2.5);
 
   if (snap.skipBottomRejectionEnabled !== undefined) {
     setChecked('cfg-bottom-rejection-enabled', snap.skipBottomRejectionEnabled);
@@ -5176,6 +5177,7 @@ function populateSettingsForm(cfg) {
     atrDeferCheckbox.checked = cfg.exit?.atrDeferHardStopBeforeLastLayer !== false;
   }
   setVal('cfg-atr-min-layers', cfg.exit?.atrMinLayersToProtect ?? 0);
+  setVal('cfg-grid-emergency-sl-buffer', cfg.exit?.gridEmergencySlBufferPct ?? 2.5);
 
   // Perpanjangan Waktu Hold saat Candle 1m Merah
   const erhCheckbox = document.getElementById('cfg-extend-hold-red-enabled');
@@ -5663,6 +5665,7 @@ function getSettingsFormData() {
       atrTpMultiplier: parseFloat(getVal('cfg-atr-tp-multiplier', '2.5')) || 2.5,
       atrDeferHardStopBeforeLastLayer: !!document.getElementById('cfg-atr-defer-hard-stop')?.checked,
       atrMinLayersToProtect: parseInt(getVal('cfg-atr-min-layers', '0'), 10) || 0,
+      gridEmergencySlBufferPct: parseFloat(getVal('cfg-grid-emergency-sl-buffer', '2.5')) || 2.5,
       earlyExitMomentumEnabled: !!document.getElementById('cfg-early-exit-momentum-enabled')?.checked,
       earlyExitMinLayersPct: parseFloat(getVal('cfg-early-exit-min-layers-pct', '60')) || 60,
       earlyExitMinLossSlPct: parseFloat(getVal('cfg-early-exit-min-loss-sl-pct', '60')) || 60,

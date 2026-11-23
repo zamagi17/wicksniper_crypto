@@ -416,6 +416,7 @@ export class WickSniperEngine {
         atrTpMultiplier: 1.0,
         atrDeferHardStopBeforeLastLayer: true,
         atrMinLayersToProtect: 0,
+        gridEmergencySlBufferPct: 2.5,
         trailingSlEnabled: false,
         trailingSlMaxReturnRatio: 2.5,
         trailingSlTiers: [
@@ -1839,6 +1840,25 @@ export class WickSniperEngine {
       ? `🎯 Top Gainer Exhaustion Reversal (${exhaustionDetail || 'MA7 Deviasi Pucuk'}) [Abaikan RSI 1m]`
       : `🚨 Wick Spike Lonjakan +${surgePct}% (${lookbackSeconds}s)`;
 
+    const totalPlannedLayers = layers.length;
+    const isMultiLayerGrid = totalPlannedLayers > 1;
+    const lastPlannedLayer = layers[totalPlannedLayers - 1];
+    const emergencyBuffer = exitCfg.gridEmergencySlBufferPct ?? 2.5;
+
+    let initialHardSl: number;
+    let initialSlDesc: string | undefined;
+
+    if (isMultiLayerGrid && exitCfg.atrDeferHardStopBeforeLastLayer !== false) {
+      initialHardSl = parseFloat(binanceFutures.formatPrice(
+        symbol,
+        lastPlannedLayer.price * (1 + emergencyBuffer / 100)
+      ));
+      initialSlDesc = `Grid Emergency SL (+${emergencyBuffer}% di luar Layer Terakhir #${totalPlannedLayers - 1} @ $${lastPlannedLayer.price})`;
+    } else {
+      initialHardSl = currentPrice * (1 + (exitCfg.hardStopLossPct * (isLowVolume ? lowVolSlMult : 1.0)) / 100);
+      initialSlDesc = `Hard SL (${exitCfg.hardStopLossPct}%)`;
+    }
+
     const initialPos: ActivePosition = {
       id: `${symbol}_${Date.now()}`,
       symbol,
@@ -1861,7 +1881,8 @@ export class WickSniperEngine {
       openedAt: Date.now(),
       targetTpPrice: currentPrice * (1 - (exitCfg.takeProfitPct * (exitCfg.ladderExitEnabled ? 0.5 : 1.0) * (isLowVolume ? lowVolTpMult : 1.0)) / 100),
       targetTp2Price: currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolTpMult : 1.0)) / 100),
-      hardSlPrice: currentPrice * (1 + (exitCfg.hardStopLossPct * (isLowVolume ? lowVolSlMult : 1.0)) / 100),
+      hardSlPrice: initialHardSl,
+      slDescription: initialSlDesc,
       status: 'SNIPING',
       entryTrend: (this.lastBtcTrendStatus?.trend || 'SIDEWAYS'),
       entryBtcPrice: this.lastBtcTrendStatus?.btcPrice || binanceFutures.getLastBtcTrendStatus()?.btcPrice || undefined,
@@ -1874,6 +1895,8 @@ export class WickSniperEngine {
         exhaustionDetail,
         entryReason,
         signalReason: entryReason,
+        hardSlPrice: initialHardSl,
+        slDescription: initialSlDesc,
         priceChange24hPct: initial24hChange,
         isLowVolumeAdjusted: isLowVolume,
         vol24hUsdt: initial24hVol,
@@ -2066,7 +2089,18 @@ export class WickSniperEngine {
         initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
         const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2;
         initialPos.targetTp2Price = realEntryPrice * (1 - tp2Pct / 100);
-        initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+
+        if (isMultiLayerGrid && exitCfg.atrDeferHardStopBeforeLastLayer !== false) {
+          const lastValidLayer = layers[layers.length - 1];
+          initialPos.hardSlPrice = parseFloat(binanceFutures.formatPrice(
+            symbol,
+            lastValidLayer.price * (1 + emergencyBuffer / 100)
+          ));
+          initialPos.slDescription = `Grid Emergency SL (+${emergencyBuffer}% di luar Layer Terakhir #${layers.length - 1} @ $${lastValidLayer.price})`;
+        } else {
+          initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+          initialPos.slDescription = `Hard SL (${exitCfg.hardStopLossPct}%)`;
+        }
         if (this.config.exit.atrDynamicSlTpEnabled) {
           await this.applyAtrTargetsToPosition(initialPos, realEntryPrice);
         }
@@ -3389,9 +3423,47 @@ export class WickSniperEngine {
           : pos.avgEntryPrice * (1 + fallbackSl / 100);
       }
     } else {
-      pos.hardSlPrice = pos.side === 'LONG'
-        ? pos.avgEntryPrice * (1 - this.config.exit.hardStopLossPct / 100)
-        : pos.avgEntryPrice * (1 + this.config.exit.hardStopLossPct / 100);
+      // Wick Sniper & Exhaustion Sniper
+      const exitCfg = this.config.exit;
+      const totalLayers = pos.layers?.length || 1;
+      const isMultiLayerGrid = totalLayers > 1;
+      const isLong = pos.side === 'LONG';
+      const normalSlPrice = isLong
+        ? pos.avgEntryPrice * (1 - exitCfg.hardStopLossPct / 100)
+        : pos.avgEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+
+      if (isMultiLayerGrid && pos.layers && pos.layers.length > 0) {
+        const lastLayer = pos.layers[pos.layers.length - 1];
+        const emergencyBuffer = exitCfg.gridEmergencySlBufferPct ?? 2.5;
+        const gridEmergencySl = isLong
+          ? parseFloat(binanceFutures.formatPrice(pos.symbol, lastLayer.price * (1 - emergencyBuffer / 100)))
+          : parseFloat(binanceFutures.formatPrice(pos.symbol, lastLayer.price * (1 + emergencyBuffer / 100)));
+
+        const filledLayers = pos.layers.filter((l) => l.status === 'FILLED').length;
+        const requiredLayers = exitCfg.atrMinLayersToProtect && exitCfg.atrMinLayersToProtect > 0
+          ? Math.min(exitCfg.atrMinLayersToProtect, totalLayers)
+          : totalLayers;
+        const shouldDefer = exitCfg.atrDeferHardStopBeforeLastLayer !== false && filledLayers < requiredLayers;
+
+        if (shouldDefer) {
+          // Selama jaring belum habis / belum mencapai target proteksi minimum,
+          // posisikan Hard SL di luar layer terakhir agar layer di atasnya tidak terpotong prematur
+          pos.hardSlPrice = gridEmergencySl;
+          pos.slDescription = `Grid Emergency SL (${isLong ? '-' : '+'}${emergencyBuffer}% di luar Layer Terakhir #${totalLayers - 1} @ $${lastLayer.price})`;
+          return;
+        } else {
+          // Ketika seluruh layer terisi penuh (modal 100% terserap),
+          // gunakan SL terluar antara persentase normal SL dari rata-rata vs emergency SL
+          pos.hardSlPrice = isLong
+            ? Math.min(normalSlPrice, gridEmergencySl)
+            : Math.max(normalSlPrice, gridEmergencySl);
+          pos.slDescription = `Hard SL (${exitCfg.hardStopLossPct}% dari Avg Entry $${formatCryptoPrice(pos.avgEntryPrice)})`;
+          return;
+        }
+      }
+
+      pos.hardSlPrice = normalSlPrice;
+      pos.slDescription = `Hard SL (${exitCfg.hardStopLossPct}%)`;
     }
   }
 
@@ -4454,6 +4526,7 @@ export class WickSniperEngine {
       atrTpMultiplier: this.config.exit?.atrTpMultiplier,
       atrDeferHardStopBeforeLastLayer: this.config.exit?.atrDeferHardStopBeforeLastLayer,
       atrMinLayersToProtect: this.config.exit?.atrMinLayersToProtect,
+      gridEmergencySlBufferPct: this.config.exit?.gridEmergencySlBufferPct ?? 2.5,
       maxHoldMinutes: this.config.exit?.maxHoldMinutes,
       partialTpEnabled: this.config.exit?.partialTpEnabled,
       partialTpRatio: this.config.exit?.partialTpRatio,
@@ -5267,7 +5340,7 @@ export class WickSniperEngine {
 
   private shouldDeferHardStopForGrid(pos: ActivePosition): boolean {
     const exitCfg = this.config.exit;
-    if (!exitCfg.atrDynamicSlTpEnabled || exitCfg.atrDeferHardStopBeforeLastLayer === false) {
+    if (exitCfg.atrDeferHardStopBeforeLastLayer === false) {
       return false;
     }
 
@@ -5333,8 +5406,17 @@ export class WickSniperEngine {
     pos.hardSlPrice = isLong ? entryPrice * (1 - slPct / 100) : entryPrice * (1 + slPct / 100);
 
     if (this.shouldDeferHardStopForGrid(pos)) {
-      pos.hardSlPrice = Number.POSITIVE_INFINITY;
-      logger.log('INFO', `🛡️ [ATR HARD SL DEFERRED] ${pos.symbol}: Posisi belum mencapai layer proteksi minimum, hard SL ditunda sampai layer terakhir penuh.`, pos.symbol);
+      if (pos.layers && pos.layers.length > 1) {
+        const lastLayer = pos.layers[pos.layers.length - 1];
+        const emergencyBuffer = this.config.exit?.gridEmergencySlBufferPct ?? 2.5;
+        pos.hardSlPrice = isLong
+          ? parseFloat(binanceFutures.formatPrice(pos.symbol, lastLayer.price * (1 - emergencyBuffer / 100)))
+          : parseFloat(binanceFutures.formatPrice(pos.symbol, lastLayer.price * (1 + emergencyBuffer / 100)));
+        pos.slDescription = `Grid Emergency SL (${isLong ? '-' : '+'}${emergencyBuffer}% di luar Layer Terakhir #${pos.layers.length - 1} @ $${lastLayer.price})`;
+      } else {
+        pos.hardSlPrice = Number.POSITIVE_INFINITY;
+      }
+      logger.log('INFO', `🛡️ [ATR HARD SL DEFERRED] ${pos.symbol}: Posisi belum mencapai layer proteksi minimum, hard SL diatur di luar layer terakhir ($${pos.hardSlPrice}).`, pos.symbol);
     }
   }
 
