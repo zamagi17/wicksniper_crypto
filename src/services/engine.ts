@@ -1395,6 +1395,26 @@ export class WickSniperEngine {
         try {
           if (!indicators) indicators = await this.fetchMarketIndicators(symbol, alert.currentPrice);
 
+          // Jika RSI 1m wajib diperiksa namun belum terhitung (misal API Binance timeout), lakukan retry cepat sekali
+          if (shouldCheckRsi && indicators.rsi1m === undefined) {
+            await new Promise((r) => setTimeout(r, 350));
+            indicators = await this.fetchMarketIndicators(symbol, alert.currentPrice);
+          }
+
+          // Fail-Safe Cek: Jika filter RSI 1m aktif (minRsi1m > 0) namun RSI 1m tetap undefined, tolak entry demi keselamatan
+          if (shouldCheckRsi && indicators.rsi1m === undefined) {
+            const reason = `RSI 1m tidak dapat dihitung/ditemukan dari Binance. Menghindari blind entry tanpa konfirmasi batas RSI aman (${minRsi1m})`;
+            const rsiCooldown = 3;
+            this.scanner.setCooldown(symbol, rsiCooldown);
+            logger.log(
+              'WARN',
+              `🛡️ [MIN RSI SKIP] ${symbol}: Lonjakan (+${alert.surgePct}%) dilewati karena RSI 1m tidak ditemukan dari Binance (proteksi blind entry aktif, cooldown ${rsiCooldown}m).`,
+              symbol
+            );
+            this.recordSkippedSpike(alert, reason, simulationSide);
+            return;
+          }
+
           // Cek 1: Filter RSI 1m Minimum (Mencegah SHORT jika RSI 1m belum mencapai batas minimum / overbought)
           if (shouldCheckRsi && indicators.rsi1m !== undefined && indicators.rsi1m < minRsi1m!) {
             const reason = `RSI 1m (${indicators.rsi1m.toFixed(1)}) di bawah batas aman (${minRsi1m}) untuk SHORT (rawan pantulan oversold)`;
@@ -1438,6 +1458,12 @@ export class WickSniperEngine {
           }
         } catch (e: any) {
           logger.log('INFO', `[INDICATOR FILTER] Lewati cek indikator ${symbol}: ${e.message}`);
+          if (shouldCheckRsi) {
+            const reason = `Gagal verifikasi RSI 1m: ${e.message}. Menghindari blind entry.`;
+            this.scanner.setCooldown(symbol, 3);
+            this.recordSkippedSpike(alert, reason, simulationSide);
+            return;
+          }
         }
       }
 
@@ -5111,6 +5137,15 @@ export class WickSniperEngine {
         ? parseFloat((((finalLowest - pos.avgEntryPrice) / pos.avgEntryPrice) * 100).toFixed(2))
         : parseFloat((((pos.avgEntryPrice - finalHighest) / pos.avgEntryPrice) * 100).toFixed(2));
 
+      // Fallback RSI jika marketSnapshot.rsi1m masih undefined saat trade ditutup
+      const finalMarketSnapshot: MarketSnapshot | undefined = pos.marketSnapshot ? { ...pos.marketSnapshot } : undefined;
+      if (finalMarketSnapshot && finalMarketSnapshot.rsi1m === undefined && pos.layers && pos.layers.length > 0) {
+        const fallbackLayerRsi = pos.layers.find((l) => l.rsi !== undefined)?.rsi;
+        if (fallbackLayerRsi !== undefined) {
+          finalMarketSnapshot.rsi1m = fallbackLayerRsi;
+        }
+      }
+
       const trade: ClosedTrade = {
         id: Math.random().toString(36).substring(2, 9),
         symbol: pos.symbol,
@@ -5166,7 +5201,7 @@ export class WickSniperEngine {
           maePct: pos.maxAdversePnlPct !== undefined ? pos.maxAdversePnlPct : maePct,
           ...(pos.smartMoneyFlowStatus ? { smartMoneyFlowStatus: pos.smartMoneyFlowStatus } : {}),
           ...(pos.slDescription ? { slDescription: pos.slDescription } : {}),
-          ...(pos.marketSnapshot ? { marketSnapshot: pos.marketSnapshot } : {}),
+          ...(finalMarketSnapshot ? { marketSnapshot: finalMarketSnapshot } : {}),
           side: pos.side,
           strategy: pos.strategyType || (pos.smartMoneyFlowStatus ? 'SMART_MONEY' : 'WICK_SNIPER'),
           ...(pos.isExhaustion || pos.paramsSnapshot?.isExhaustion ? {
@@ -5180,9 +5215,9 @@ export class WickSniperEngine {
           btcCondition: (pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())
             ? `${(pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.trend} (BTC $${Math.round((pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.btcPrice || 0).toLocaleString('en-US')} vs EMA50 $${Math.round((pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus())?.ema || 0).toLocaleString('en-US')} | TF 1h)`
             : 'TIDAK DIKETAHUI',
-          priceChange24hPct: pos.priceChange24hPct ?? pos.marketSnapshot?.priceChange24hPct ?? (pos.paramsSnapshot?.priceChange24hPct !== undefined ? parseFloat(pos.paramsSnapshot.priceChange24hPct) : undefined),
+          priceChange24hPct: pos.priceChange24hPct ?? finalMarketSnapshot?.priceChange24hPct ?? (pos.paramsSnapshot?.priceChange24hPct !== undefined ? parseFloat(pos.paramsSnapshot.priceChange24hPct) : undefined),
         },
-        marketSnapshot: pos.marketSnapshot,
+        marketSnapshot: finalMarketSnapshot,
         peakPnlPct: pos.peakPnlPct,
         targetTpPrice: pos.targetTpPrice,
         targetTp2Price: pos.targetTp2Price,
@@ -5191,7 +5226,7 @@ export class WickSniperEngine {
         btcTrendStatus: pos.btcTrendStatus || pos.paramsSnapshot?.btcTrendStatus || this.getBtcTrendStatus() || undefined,
         fundingRatePct: pos.fundingRatePct ?? pos.paramsSnapshot?.fundingRatePct,
         rsi15m: pos.rsi15m ?? pos.paramsSnapshot?.rsi15m,
-        priceChange24hPct: pos.priceChange24hPct ?? pos.marketSnapshot?.priceChange24hPct ?? (pos.paramsSnapshot?.priceChange24hPct !== undefined ? parseFloat(pos.paramsSnapshot.priceChange24hPct) : undefined),
+        priceChange24hPct: pos.priceChange24hPct ?? finalMarketSnapshot?.priceChange24hPct ?? (pos.paramsSnapshot?.priceChange24hPct !== undefined ? parseFloat(pos.paramsSnapshot.priceChange24hPct) : undefined),
       };
 
       this.closedTrades.unshift(trade);
@@ -5627,7 +5662,9 @@ export class WickSniperEngine {
       }
 
       const data: CachedMarketIndicators = { rsi1m, vol1mUsdt, avgVol1mUsdt, volRatio, fundingRatePct, openInterestUsdt, candle1m };
-      sharedMarketIndicatorCache.set(symbol, { timestamp: Date.now(), data });
+      if (rsi1m !== undefined) {
+        sharedMarketIndicatorCache.set(symbol, { timestamp: Date.now(), data });
+      }
       return data;
     })();
 
@@ -5648,7 +5685,12 @@ export class WickSniperEngine {
    */
   private async enrichMarketSnapshot(pos: ActivePosition, surgePct: number, lookbackSeconds: number) {
     try {
-      const indicators = await this.fetchMarketIndicators(pos.symbol, pos.avgEntryPrice);
+      let indicators = await this.fetchMarketIndicators(pos.symbol, pos.avgEntryPrice);
+      // Jika klines Binance sempat timeout saat lonjakan kencang, coba ulang sekali lagi
+      if (indicators.rsi1m === undefined) {
+        await new Promise((r) => setTimeout(r, 800));
+        indicators = await this.fetchMarketIndicators(pos.symbol, pos.avgEntryPrice);
+      }
       const tickerStats = this.scanner.getTickerStats(pos.symbol);
 
       const snapshot: MarketSnapshot = {
@@ -5686,6 +5728,10 @@ export class WickSniperEngine {
       if (tickerStats?.change24hPct !== undefined) {
         pos.priceChange24hPct = tickerStats.change24hPct;
       }
+
+      // Sinkronkan ke UI realtime dan simpan status ke persistence DB
+      this.broadcastStatus();
+      this.persistState();
     } catch {}
   }
 
@@ -5702,6 +5748,47 @@ export class WickSniperEngine {
       const indicators = await this.fetchMarketIndicators(symbol, layer.price);
       if (indicators.rsi1m !== undefined) layer.rsi = indicators.rsi1m;
       if (indicators.vol1mUsdt !== undefined) layer.marketVolume1mUsdt = indicators.vol1mUsdt;
+
+      // Backfill ke pos.marketSnapshot jika Layer 0 sebelumnya sempat kehilangan RSI 1m akibat lag Binance
+      const activePos = this.activePositions.get(symbol);
+      if (activePos && indicators.rsi1m !== undefined) {
+        let updated = false;
+        if (!activePos.marketSnapshot) {
+          activePos.marketSnapshot = {
+            rsi1m: indicators.rsi1m,
+            vol1mUsdt: indicators.vol1mUsdt,
+            avgVol1mUsdt: indicators.avgVol1mUsdt,
+            volRatio: indicators.volRatio,
+            vol24hUsdt: tickerStats?.vol24hUsdt,
+            priceChange24hPct: tickerStats?.change24hPct,
+            high24h: tickerStats?.high24h,
+            low24h: tickerStats?.low24h,
+            fundingRatePct: indicators.fundingRatePct,
+            openInterestUsdt: indicators.openInterestUsdt,
+            capturedAt: Date.now(),
+          };
+          updated = true;
+        } else if (activePos.marketSnapshot.rsi1m === undefined) {
+          activePos.marketSnapshot.rsi1m = indicators.rsi1m;
+          if (activePos.marketSnapshot.vol1mUsdt === undefined) activePos.marketSnapshot.vol1mUsdt = indicators.vol1mUsdt;
+          if (activePos.marketSnapshot.volRatio === undefined) activePos.marketSnapshot.volRatio = indicators.volRatio;
+          updated = true;
+        }
+
+        if (activePos.layers && activePos.layers[0] && activePos.layers[0].rsi === undefined) {
+          activePos.layers[0].rsi = indicators.rsi1m;
+          updated = true;
+        }
+        if (activePos.paramsSnapshot && activePos.paramsSnapshot.marketSnapshot) {
+          activePos.paramsSnapshot.marketSnapshot.rsi1m = activePos.marketSnapshot.rsi1m;
+          updated = true;
+        }
+
+        if (updated) {
+          this.broadcastStatus();
+          this.persistState();
+        }
+      }
 
       // Ambil status tren EMA koin saat layer terisi
       const smCfg = this.config.smartMoney;
