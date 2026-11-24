@@ -7104,7 +7104,7 @@ export class WickSniperEngine {
           startTime: exitTime,
           limit: 30,
         },
-        timeout: 3500,
+        timeout: 8000,  // Naik dari 3500ms ke 8000ms untuk handle network congestion
       });
 
       if (!Array.isArray(res.data) || res.data.length === 0) {
@@ -7364,7 +7364,7 @@ export class WickSniperEngine {
           startTime: spike.timestamp,
           limit: Math.min(100, Math.max(30, maxHoldMinutes)),
         },
-        timeout: 3500,
+        timeout: 8000,  // Naik dari 3500ms ke 8000ms untuk handle network congestion
       });
 
       if (!Array.isArray(res.data) || res.data.length === 0) {
