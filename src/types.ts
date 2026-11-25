@@ -143,7 +143,7 @@ export interface BotConfig {
     notifyOnReversal?: boolean;
     heartbeatIntervalHours?: number;
   };
-  triggerStrategy?: 'WICK_SNIPER' | 'SMART_MONEY' | 'HYBRID';
+  triggerStrategy?: 'WICK_SNIPER' | 'WICK_SNIPER_ANTI_MARTINGALE' | 'SMART_MONEY' | 'HYBRID';
   smartMoney?: SmartMoneyConfig;
   momentumLong?: MomentumLongConfig;
   schedule?: TradingScheduleConfig;
@@ -546,7 +546,7 @@ export interface ActivePosition {
   userId?: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
-  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY' | 'EXHAUSTION_SNIPER';
+  strategyType?: 'WICK_SNIPER' | 'WICK_SNIPER_ANTI_MARTINGALE' | 'MOMENTUM_LONG' | 'SMART_MONEY' | 'EXHAUSTION_SNIPER';
   leverage: number;
   totalQty: number;
   avgEntryPrice: number;
@@ -702,7 +702,7 @@ export interface ClosedTrade {
   userId?: string;
   symbol: string;
   side: 'SHORT' | 'LONG';
-  strategyType?: 'WICK_SNIPER' | 'MOMENTUM_LONG' | 'SMART_MONEY' | 'EXHAUSTION_SNIPER';
+  strategyType?: 'WICK_SNIPER' | 'WICK_SNIPER_ANTI_MARTINGALE' | 'MOMENTUM_LONG' | 'SMART_MONEY' | 'EXHAUSTION_SNIPER';
   entryPrice: number;
   exitPrice: number;
   qty: number;

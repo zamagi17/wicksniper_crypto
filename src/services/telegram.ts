@@ -214,14 +214,19 @@ Notifikasi pembukaan jaring, averaging layer, dan take profit akan langsung diki
       if (entryReasonText) {
         triggerLine += `\n📌 <b>Pemicu Pucuk:</b> <code>${entryReasonText}</code>`;
       }
+    } else if (pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || pos.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE') {
+      triggerLine = `🚀 <b>Strategi:</b> <b>Wick Sniper Anti-Martingale (Pyramiding LONG)</b>\n⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     } else if (pos.strategyType === 'MOMENTUM_LONG') {
       triggerLine = `🚀 <b>Strategi:</b> <b>Momentum Long Sniper</b>\n⚡ <b>Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     } else {
       triggerLine = `⚡ <b>Spike Lonjakan:</b> <b>+${surgePct}%</b> (${lookbackSeconds}s)${rsiLine}`;
     }
 
+    const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || pos.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
     const layersLine = isSmartMoney
       ? `🎯 <b>Model Entry:</b> ${pos.layers.length > 1 ? `${pos.layers.length} Layer (Jarak ${spacingPct}%)` : '1 Single Sniper Entry'}`
+      : isAntiMartingale
+      ? `🪜 <b>Jaring Terpasang (Naik):</b> ${pos.layers.length} Layer (Jarak +${spacingPct}%)`
       : `🕸️ <b>Jaring Terpasang:</b> ${pos.layers.length} Layer (Jarak ${spacingPct}%)`;
     const marginLine = `💰 <b>Modal Margin:</b> $${pos.totalMarginUsed.toFixed(2)} USDT (Vol Order: $${vol0Usdt.toFixed(2)} USDT @ ${pos.leverage}x)`;
     const slLine = pos.slDescription
@@ -317,6 +322,8 @@ ${slLine}
           : `\n🐋 <b>Strategi:</b> <b>Whale Flow Tracker</b>`)
       : isExhaustion
       ? `\n🎯 <b>Strategi:</b> <b>Exhaustion Top Gainer Sniper (Bypass RSI)</b>`
+      : trade.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || trade.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE'
+      ? `\n🚀 <b>Strategi:</b> <b>Wick Sniper Anti-Martingale (LONG)</b>`
       : trade.strategyType === 'MOMENTUM_LONG'
       ? `\n🚀 <b>Strategi:</b> <b>Momentum Long Sniper</b>`
       : `\n⚡ <b>Strategi:</b> <b>Wick Sniper</b>`;

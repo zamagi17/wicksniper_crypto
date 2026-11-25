@@ -1514,7 +1514,8 @@ function renderBtcFilter(btc) {
   const activeCfg = currentConfig || (() => {
     try { return JSON.parse(localStorage.getItem('wicksniper_config') || '{}'); } catch (e) { return {}; }
   })();
-  const isWickSniperFree = (activeCfg?.triggerStrategy === 'WICK_SNIPER' || !activeCfg?.triggerStrategy) && !activeCfg?.scanner?.btcTrendFilterEnabled;
+  const isAntiMartingaleStrat = activeCfg?.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE';
+  const isWickSniperFree = (activeCfg?.triggerStrategy === 'WICK_SNIPER' || isAntiMartingaleStrat || !activeCfg?.triggerStrategy) && !activeCfg?.scanner?.btcTrendFilterEnabled;
 
   if (btc.isFlashDump) {
     if (summaryEl) summaryEl.innerHTML = `<b style="color: #ff3366;">⚠️ Flash Dump Pasar:</b> BTC anjlok cepat. Filter memblokir sinyal LONG agar terhindar dari pisau jatuh.`;
@@ -1522,21 +1523,25 @@ function renderBtcFilter(btc) {
     if (guardLabel) guardLabel.innerText = 'LONG Diblokir (Flash Dump) ⚠️';
   } else if (btc.isFlashSurge) {
     if (summaryEl) {
-      summaryEl.innerHTML = isWickSniperFree
+      summaryEl.innerHTML = isAntiMartingaleStrat
+        ? `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa mendadak. 🎯 <b>Anti-Martingale LONG tetap siaga</b> mengikuti momentum lonjakan.`
+        : isWickSniperFree
         ? `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa mendadak. 🎯 <b>Wick Sniper tetap siaga</b> memburu sumbu atas (upper wick) saat kenaikan jenuh.`
         : `<b style="color: #00f0ff;">🚀 Flash Surge Pasar:</b> BTC pompa tiba-tiba. Filter memblokir sinyal SHORT agar terhindar dari squeeze.`;
     }
     if (guardBadge) guardBadge.className = 'btc-guard-badge warning';
-    if (guardLabel) guardLabel.innerText = isWickSniperFree ? 'SURGE (Wick Sniper Siaga) 🚀' : 'SHORT Diblokir (Flash Surge) ⚠️';
+    if (guardLabel) guardLabel.innerText = isAntiMartingaleStrat ? 'SURGE (Anti-Martingale LONG Siaga) 🚀' : isWickSniperFree ? 'SURGE (Wick Sniper Siaga) 🚀' : 'SHORT Diblokir (Flash Surge) ⚠️';
   } else if (isBullish) {
     const shortStatus = isWickSniperFree ? 'Wick Sniper SHORT Bebas Berburu' : (btc.canShort ? 'SHORT Aman' : 'SHORT Ditahan (Smart Money)');
     if (summaryEl) {
-      summaryEl.innerHTML = isWickSniperFree
+      summaryEl.innerHTML = isAntiMartingaleStrat
+        ? `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish makro terkonfirmasi. 🚀 <b>Anti-Martingale LONG siap berburu lonjakan naik</b>.`
+        : isWickSniperFree
         ? `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish makro terkonfirmasi. 🎯 <b>Wick Sniper tetap aktif memburu lonjakan SHORT</b> (Filter makro khusus Smart Money).`
         : `BTC berada di <b style="color: #00e676;">atas EMA ${period}</b> (+${diffPct.toFixed(2)}%). Tren Bullish terkonfirmasi, sinyal LONG aman (${shortStatus}).`;
     }
     if (guardBadge) guardBadge.className = 'btc-guard-badge success';
-    if (guardLabel) guardLabel.innerText = isWickSniperFree ? 'BULLISH (Wick Sniper Siaga) ✅' : 'BULLISH (LONG Aman) ✅';
+    if (guardLabel) guardLabel.innerText = isAntiMartingaleStrat ? 'BULLISH (Anti-Martingale LONG Siaga) ✅' : isWickSniperFree ? 'BULLISH (Wick Sniper Siaga) ✅' : 'BULLISH (LONG Aman) ✅';
   } else if (isBearish) {
     const longStatus = btc.canLong ? 'LONG Aman' : 'LONG Ditahan';
     if (summaryEl) summaryEl.innerHTML = `BTC berada di <b style="color: #ff3366;">bawah EMA ${period}</b> (${diffPct.toFixed(2)}%). Tren Bearish terkonfirmasi, sinyal SHORT diizinkan (${longStatus}).`;
@@ -1770,6 +1775,7 @@ function renderActivePositions(positions) {
       const pnlColor = isProfit ? 'text-green' : 'text-red';
       const pnlSign = isProfit ? '+' : '';
       const isSm = pos.strategyType === 'SMART_MONEY';
+      const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || pos.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
       const smMaxHours = Number(pos.paramsSnapshot?.maxHoldHours || currentConfig?.smartMoney?.maxHoldHours || 4);
       let remainingSeconds = Math.max(0, Number(pos.holdRemainingSeconds ?? 0));
       if (remainingSeconds === 0 && pos.openedAt) {
@@ -1808,13 +1814,15 @@ function renderActivePositions(positions) {
           const maxExt = currentConfig?.exit?.maxHoldExtensions || 6;
           holdAction = `🔄 Diperpanjang +${extSec * pos.extensionCount}s (${pos.extensionCount}/${maxExt})`;
         } else if (currentConfig?.exit?.extendHoldOnRedCandleEnabled && remainingSeconds <= (currentConfig?.exit?.extendHoldSeconds || 30)) {
-          holdAction = pos.candle1mStatus === 'RED' ? '📉 Candle 1m Merah (Siap perpanjang)' : '⏳ Pantau 30s terakhir';
+          holdAction = pos.side === 'LONG'
+            ? (pos.candle1mStatus === 'GREEN' ? '📈 Candle 1m Hijau (Siap perpanjang)' : '⏳ Pantau 30s terakhir')
+            : (pos.candle1mStatus === 'RED' ? '📉 Candle 1m Merah (Siap perpanjang)' : '⏳ Pantau 30s terakhir');
         }
         holdClass = pos.extensionCount && pos.extensionCount > 0
           ? 'text-green'
           : pos.holdAction === 'CLOSE_NOW' ? 'text-red' : remainingSeconds <= 300 ? 'text-yellow' : 'text-cyan';
       }
-      const isDualTp = !!currentConfig?.exit?.partialTpEnabled;
+      const isDualTp = !isAntiMartingale && !!currentConfig?.exit?.partialTpEnabled;
       const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.5) * 100);
       const tp2RatioPct = 100 - tp1RatioPct;
 
@@ -1826,6 +1834,8 @@ function renderActivePositions(positions) {
         const badgeBg = smDriver === 'SMART_TRADER' ? 'rgba(192, 132, 252, 0.15)' : smDriver === 'DUAL_CONFLUENCE' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(46, 213, 115, 0.15)';
         const badgeBorder = smDriver === 'SMART_TRADER' ? 'rgba(192, 132, 252, 0.4)' : smDriver === 'DUAL_CONFLUENCE' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(46, 213, 115, 0.4)';
         tpStatusBadge = `<span class="badge-tag badge-smart-money" style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">${badgeText}</span>`;
+      } else if (isAntiMartingale) {
+        tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span>`;
       }
       let tpBannerHtml = '';
       const isLong = pos.side === 'LONG';
@@ -1834,10 +1844,14 @@ function renderActivePositions(positions) {
 
       let slMetricLabel = isSm
         ? `Hard SL (${isLong ? '-' : '+'}${smSlPct}%)`
+        : isAntiMartingale
+        ? `Hard SL (-${currentConfig?.exit?.hardStopLossPct || 1.6}%)`
         : `Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)`;
       let slMetricHtml = `<span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>`;
       let tpMetricLabel = isSm
         ? `Target TP (${isLong ? '+' : '-'}${smTpPct}%)`
+        : isAntiMartingale
+        ? `Target TP (+${currentConfig?.exit?.takeProfitPct || 3.0}%)`
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
@@ -2441,7 +2455,8 @@ function openRadarSpikeDetail(spikeId) {
   const params = spike.paramsSnapshot || {};
   const market = params.marketSnapshot || {};
   const sim = spike.simResult;
-  const isLong = sim?.side === 'LONG' || params.strategy === 'MOMENTUM_LONG';
+  const isLong = sim?.side === 'LONG' || params.strategy === 'MOMENTUM_LONG' || params.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
+  const isAntiMartingale = params.strategy === 'WICK_SNIPER_ANTI_MARTINGALE' || (isLong && Array.isArray(sim?.plannedLayers) && sim.plannedLayers.length > 0);
   const sideLabel = isLong ? 'LONG' : 'SHORT';
   const statusLabels = {
     EXECUTING: 'Dieksekusi',
@@ -2455,26 +2470,32 @@ function openRadarSpikeDetail(spikeId) {
     TIMEOUT: 'Selesai tanpa TP/SL',
     TRACKING: 'Pemantauan berlangsung',
   };
-  const tpPct = isLong
+  const tpPct = (isLong && !isAntiMartingale)
     ? params.momentumLongTakeProfitPct ?? params.takeProfitPct
     : params.takeProfitPct;
-  const slPct = isLong
+  const slPct = (isLong && !isAntiMartingale)
     ? params.momentumLongStopLossPct ?? params.hardStopLossPct
     : params.hardStopLossPct;
   const configuredLayers = Number(params.totalLayers || 0);
   const hasConfiguredLayers = Number.isFinite(configuredLayers) && configuredLayers > 0;
   const minLayersForHardSl = Number(params.atrMinLayersToProtect || 0);
-  const layerProtectionSummary = isLong
+  const layerProtectionSummary = isAntiMartingale
+    ? `Anti-Martingale LONG jaring naik ke atas (${hasConfiguredLayers ? configuredLayers : '-'} layer)`
+    : isLong
     ? 'Momentum Long memakai 1 entry, tanpa grid'
     : !hasConfiguredLayers
       ? 'Tidak tercatat di snapshot'
       : params.atrDynamicSlTpEnabled && params.atrDeferHardStopBeforeLastLayer !== false
         ? `${minLayersForHardSl > 0 ? Math.min(minLayersForHardSl, configuredLayers) : configuredLayers} dari ${configuredLayers} layer harus terisi sebelum hard SL ATR aktif`
         : 'Tidak ada penundaan hard SL berdasarkan layer';
-  const layerSimulationSummary = isLong
+  const layerSimulationSummary = isAntiMartingale
+    ? 'Pyramiding LONG jaring naik ke atas disimulasikan sesuai config grid'
+    : isLong
     ? '1 entry hipotetis; tidak ada averaging grid'
     : '1 entry hipotetis; pengisian layer grid tidak disimulasikan';
-  const hardSlMovementSummary = isLong
+  const hardSlMovementSummary = isAntiMartingale
+    ? 'SL (-%) dan TP (+%) dihitung ulang dari average entry tiap layer atas terbeli'
+    : isLong
     ? 'SL memakai entry tunggal Momentum Long'
     : params.hardStopLossPct !== undefined
       ? `Basis SL ${params.atrDynamicSlTpEnabled ? 'ATR/dinamis' : 'persentase tetap'} dihitung ulang dari average entry setiap layer terisi; level dapat melebar saat average entry naik`
@@ -2593,7 +2614,7 @@ function openRadarSpikeDetail(spikeId) {
     </div>
     <div class="td-section-title">Konfigurasi Layer & Cakupan Simulasi</div>
     <div class="td-post-exit-grid">
-      ${renderStat('Rencana layer strategi', isLong ? '1 layer Momentum Long' : hasConfiguredLayers ? `${configuredLayers} layer grid` : '-')}
+      ${renderStat('Rencana layer strategi', isAntiMartingale ? `${configuredLayers || '-'} layer pyramiding LONG` : isLong ? '1 layer Momentum Long' : hasConfiguredLayers ? `${configuredLayers} layer grid` : '-')}
       ${renderStat('Syarat layer sebelum hard SL', layerProtectionSummary)}
       ${renderStat('Pergerakan hard SL', hardSlMovementSummary)}
       ${renderStat('Trailing SL per layer', trailingSlSummary)}
@@ -2623,7 +2644,7 @@ function openSpikeSimModal(spikeId) {
 
   const sim = s.simResult;
   const params = s.paramsSnapshot || {};
-  const isLong = sim.side === 'LONG' || params.strategy === 'MOMENTUM_LONG';
+  const isLong = sim.side === 'LONG' || params.strategy === 'MOMENTUM_LONG' || params.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
   const sideLabel = isLong ? 'LONG' : 'SHORT';
   const modal = document.getElementById('spike-sim-modal');
   const titleEl = document.getElementById('spike-sim-title');
@@ -2834,6 +2855,7 @@ function renderClosedTradesTable(trades) {
       const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio;
       const tradeDriver = t.paramsSnapshot?.signalDriver || 'SMART_TRADER';
       const isExhaustionTrade = t.strategyType === 'EXHAUSTION_SNIPER' || t.paramsSnapshot?.strategy === 'EXHAUSTION_SNIPER' || t.paramsSnapshot?.isExhaustion || t.isExhaustion || (t.entryReason && t.entryReason.includes('Exhaustion'));
+      const isAntiMartingaleTrade = t.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || t.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
       const stratBadge = isSmTrade
         ? (tradeDriver === 'SMART_TRADER'
             ? `<span class="badge-tag" style="background: rgba(192, 132, 252, 0.15); border: 1px solid rgba(192, 132, 252, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Smart Trader Flow">🧠 ST</span>`
@@ -2842,6 +2864,8 @@ function renderClosedTradesTable(trades) {
             : `<span class="badge-tag" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Strategi Whale Flow">🐋 SM</span>`)
         : isExhaustionTrade
         ? `<span class="badge-tag" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #f59e0b; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Top Gainer Exhaustion Reversal (Bypass RSI)">🎯 EXHAUST</span>`
+        : isAntiMartingaleTrade
+        ? `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.15); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; font-size: 9.5px; padding: 1px 5px; margin-left: 4px; font-weight: 600;" title="Wick Sniper Anti-Martingale (Pyramiding LONG)">🚀 ANTI-M</span>`
         : '';
       const layerBadge = t.layersFilled
         ? `<span class="tag-counter" style="font-size: 9.5px; padding: 1px 5px; margin-left: 4px;" title="Layer yang terserap">L#${t.layersFilled}</span>`
@@ -3597,10 +3621,12 @@ function openTradeDetailModal(tradeId, tradeIndex) {
 
     const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio || !!snap?.whaleLongRatio || !!snap?.whaleAvgEntry;
     const isExhaustion = t.strategyType === 'EXHAUSTION_SNIPER' || snap?.strategy === 'EXHAUSTION_SNIPER' || snap?.isExhaustion || t.isExhaustion || (t.entryReason && t.entryReason.includes('Exhaustion'));
+    const isAntiMartingale = t.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || snap?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
     const tradeDriver = snap?.signalDriver || 'SMART_TRADER';
     const stratName = isSm
       ? (tradeDriver === 'SMART_TRADER' ? '🧠 Smart Trader' : tradeDriver === 'DUAL_CONFLUENCE' ? '🎯 Dual Confluence' : '🐋 Whale Flow')
       : isExhaustion ? '🎯 Exhaustion Sniper (Bypass RSI)'
+      : isAntiMartingale ? '🚀 Wick Sniper Anti-Martingale'
       : t.strategyType === 'MOMENTUM_LONG' ? '🚀 Momentum Long' : '⚡ Wick Sniper';
 
     // Header Title & Badge
@@ -5804,7 +5830,7 @@ async function openSettingsModal(skipReload = false) {
   }
   const activeStrat = currentConfig?.triggerStrategy || 'SMART_MONEY';
   if (typeof switchSettingsTab === 'function') {
-    switchSettingsTab(activeStrat === 'WICK_SNIPER' ? 'wick-sniper' : 'smart-money');
+    switchSettingsTab((activeStrat === 'WICK_SNIPER' || activeStrat === 'WICK_SNIPER_ANTI_MARTINGALE') ? 'wick-sniper' : 'smart-money');
   }
 
   if (skipReload) return;
@@ -6385,9 +6411,13 @@ window.updateDashboardStrategyLayout = updateDashboardStrategyLayout;
 function toggleStrategySettingsView() {
   const select = document.getElementById('cfg-trigger-strategy');
   const panel = document.getElementById('smart-money-panel');
+  const antiMartingaleBanner = document.getElementById('anti-martingale-mode-banner');
+  const val = select ? select.value : 'SMART_MONEY';
   if (panel) {
-    const val = select ? select.value : 'SMART_MONEY';
     panel.style.display = (val === 'SMART_MONEY' || val === 'HYBRID') ? 'grid' : 'none';
+  }
+  if (antiMartingaleBanner) {
+    antiMartingaleBanner.style.display = val === 'WICK_SNIPER_ANTI_MARTINGALE' ? 'block' : 'none';
   }
   if (typeof updateDashboardStrategyLayout === 'function') {
     updateDashboardStrategyLayout();

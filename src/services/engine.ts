@@ -148,6 +148,7 @@ export class WickSniperEngine {
   private priceMomentum: Map<string, { price: number; time: number }[]> = new Map();
   private closingSymbols: Set<string> = new Set();
   private syncingTpSymbols: Set<string> = new Set();
+  private pyramidingSymbols: Set<string> = new Set();
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
   private dailySnapshots: DailySnapshot[] = [];
@@ -665,7 +666,7 @@ export class WickSniperEngine {
     logger.log('INFO', `🧾 [ORDER AUDIT] ${symbol} | ${event} | ${compactSummary || 'status=OK'}`, symbol);
   }
 
-  private auditTradeLifecycle(symbol: string, phase: 'OPEN_SHORT_REQUESTED' | 'OPEN_SHORT_CONFIRMED' | 'GRID_LAYER_PLACED' | 'TP_LIMIT_PLACED' | 'PARTIAL_CLOSE_REQUESTED' | 'PARTIAL_CLOSE_CONFIRMED' | 'FULL_CLOSE_REQUESTED' | 'FULL_CLOSE_CONFIRMED' | 'DB_TRADE_FINALIZED' | 'TRAILING_SL_UPDATED', details: Record<string, any> = {}) {
+  private auditTradeLifecycle(symbol: string, phase: 'OPEN_SHORT_REQUESTED' | 'OPEN_SHORT_CONFIRMED' | 'OPEN_LONG_REQUESTED' | 'OPEN_LONG_CONFIRMED' | 'GRID_LAYER_PLACED' | 'TP_LIMIT_PLACED' | 'PARTIAL_CLOSE_REQUESTED' | 'PARTIAL_CLOSE_CONFIRMED' | 'FULL_CLOSE_REQUESTED' | 'FULL_CLOSE_CONFIRMED' | 'DB_TRADE_FINALIZED' | 'TRAILING_SL_UPDATED', details: Record<string, any> = {}) {
     this.auditOrderEvent(symbol, phase, details);
   }
 
@@ -773,7 +774,7 @@ export class WickSniperEngine {
                 ? (this.config.exit.bepCooldownMinutes || 15)
                 : isSmTrade
                   ? (this.config.smartMoney?.cooldownMinutes || 30)
-                  : t.side === 'LONG'
+                  : t.strategyType === 'MOMENTUM_LONG'
                     ? (this.config.momentumLong?.cooldownMinutes || 15)
                     : (this.config.scanner.cooldownMinutes || 10);
         const expiry = t.timestamp + cooldownMins * 60 * 1000;
@@ -936,14 +937,15 @@ export class WickSniperEngine {
     alert.status = 'SKIPPED';
     alert.skipReason = reason;
     const isLong = side === 'LONG';
+    const isAntiMartingale = isLong && this.config.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE';
     alert.paramsSnapshot = {
       ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
-      strategy: isLong ? 'MOMENTUM_LONG' : 'WICK_SNIPER',
+      strategy: isAntiMartingale ? 'WICK_SNIPER_ANTI_MARTINGALE' : isLong ? 'MOMENTUM_LONG' : 'WICK_SNIPER',
     };
-    const tpPct = isLong
+    const tpPct = (isLong && !isAntiMartingale)
       ? this.config.momentumLong?.takeProfitPct ?? 6
       : this.config.exit?.takeProfitPct ?? 1.6;
-    const slPct = isLong
+    const slPct = (isLong && !isAntiMartingale)
       ? this.config.momentumLong?.stopLossPct ?? 2.5
       : this.config.exit?.hardStopLossPct ?? 3.5;
     const entryPrice = alert.currentPrice || 0;
@@ -953,7 +955,7 @@ export class WickSniperEngine {
       let initialMargin = 5.0;
       const lev = this.config.leverage || 3;
 
-      if (!isLong) {
+      if (!isLong || isAntiMartingale) {
         const gridCfg = this.config.grid;
         const totalLayers = Math.max(1, gridCfg?.totalLayers || 7);
         const spacingPct = gridCfg?.layerSpacingPct || 1.3;
@@ -1037,11 +1039,16 @@ export class WickSniperEngine {
     if (this.config.triggerStrategy === 'SMART_MONEY') {
       return; // Mode Smart Money murni aktif; jangan tembak lonjakan wick
     }
+    const isAntiMartingaleLong = this.config.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE';
+    if (isAntiMartingaleLong && alert.isExhaustion) {
+      return; // Anti-Martingale wajib LONG; abaikan sinyal Exhaustion Reversal SHORT
+    }
+    const defaultSide: 'SHORT' | 'LONG' = isAntiMartingaleLong ? 'LONG' : 'SHORT';
     if (!alert.isExhaustion && this.config.triggerStrategy === 'HYBRID') {
       const sm = await binanceFutures.getSmartMoneyMetrics(alert.symbol, this.config.smartMoney?.period || '5m');
       if (sm && sm.whaleShortRatio < (this.config.smartMoney?.thresholdShortRatio || 0.55)) {
         logger.log('INFO', `🛡️ [HYBRID SKIP] ${alert.symbol}: Lonjakan dibatalkan karena Smart Money tidak Short (${(sm.whaleShortRatio * 100).toFixed(1)}%).`, alert.symbol);
-        this.recordSkippedSpike(alert, `Hybrid Filter: Whale Short hanya ${(sm.whaleShortRatio * 100).toFixed(1)}%`);
+        this.recordSkippedSpike(alert, `Hybrid Filter: Whale Short hanya ${(sm.whaleShortRatio * 100).toFixed(1)}%`, defaultSide);
         return;
       }
     }
@@ -1060,7 +1067,7 @@ export class WickSniperEngine {
         `⏳ [JADWAL SKIP] Lonjakan pada ${symbol} diabaikan: ${scheduleCheck.currentDayWib} ${scheduleCheck.currentWibTime} di luar prime time (${scheduleCheck.reason}). Next: ${scheduleCheck.nextSessionText || '-'}.`,
         symbol
       );
-      this.recordSkippedSpike(alert, reason);
+      this.recordSkippedSpike(alert, reason, defaultSide);
       return;
     }
 
@@ -1068,7 +1075,7 @@ export class WickSniperEngine {
     if (this.scanner.isCoolingDown(symbol)) {
       const reason = `Koin ${symbol} masih dalam masa jeda cooldown antar trade`;
       logger.log('INFO', `⏳ [COOLDOWN SKIP] Lonjakan pada ${symbol} diabaikan karena masih dalam masa cooldown.`, symbol);
-      this.recordSkippedSpike(alert, reason);
+      this.recordSkippedSpike(alert, reason, defaultSide);
       return;
     }
 
@@ -1084,7 +1091,7 @@ export class WickSniperEngine {
         `🛡️ [MAX 24H SKIP] ${symbol} (+${alert.surgePct.toFixed(2)}% dalam ${alert.lookbackSeconds}s): Dilewati karena ${reason}. Menghindari monster pump parabolik (cooldown ${cooldownMins}m).`,
         symbol
       );
-      this.recordSkippedSpike(alert, reason);
+      this.recordSkippedSpike(alert, reason, defaultSide);
       return;
     }
 
@@ -1108,7 +1115,7 @@ export class WickSniperEngine {
           `Akumulasi kerugian hari ini mencapai $${currentDailyPnl.toFixed(2)} USDT (Batas Maksimal: -$${maxDailyLoss} USDT).\n\nBot otomatis menghentikan penembakan koin baru sampai 00:00 WIB demi mengamankan sisa modal Anda.`,
           symbol
         );
-        this.recordSkippedSpike(alert, reason);
+        this.recordSkippedSpike(alert, reason, defaultSide);
         return;
       }
     }
@@ -1128,7 +1135,7 @@ export class WickSniperEngine {
         `Saldo ${this.config.tradingMode === 'LIVE' ? 'bebas' : 'virtual'} saat ini $${currentBalance.toFixed(2)} USDT kurang dari batas aman ($${minSafetyBalance} USDT).\n\nPenembakan spike dibatalkan agar tidak membuka posisi tanpa jaring pengaman.`,
         symbol
       );
-      this.recordSkippedSpike(alert, reason);
+      this.recordSkippedSpike(alert, reason, defaultSide);
       return;
     }
 
@@ -1139,14 +1146,14 @@ export class WickSniperEngine {
     if (currentActiveAndDeploying >= maxCoins) {
       const reason = `Maksimal posisi aktif (${maxCoins}) tercapai`;
       logger.log('WARN', `⚡ Spike terdeteksi pada ${symbol} (+${alert.surgePct}%), namun dilewati: Kuota koin penuh (${currentActiveAndDeploying}/${maxCoins}).`);
-      this.recordSkippedSpike(alert, reason);
+      this.recordSkippedSpike(alert, reason, defaultSide);
       return;
     }
 
     // Cek apakah koin ini sudah aktif atau sedang dalam proses penembakan
     if (this.activePositions.has(symbol) || this.deployingSymbols.has(symbol)) {
       const reason = `Sudah ada posisi aktif atau order sedang diproses pada ${symbol}`;
-      this.recordSkippedSpike(alert, reason);
+      this.recordSkippedSpike(alert, reason, defaultSide);
       return;
     }
 
@@ -1163,7 +1170,7 @@ export class WickSniperEngine {
           if (effectiveLiveCount >= maxCoins) {
             const reason = `Maksimal posisi aktif di Binance (${maxCoins}) tercapai`;
             logger.log('WARN', `⚡ Spike pada ${symbol} dilewati: Kuota Binance aktual penuh (${effectiveLiveCount}/${maxCoins}).`);
-            this.recordSkippedSpike(alert, reason);
+            this.recordSkippedSpike(alert, reason, defaultSide);
             return;
           }
 
@@ -1171,7 +1178,7 @@ export class WickSniperEngine {
           if (livePos && Math.abs(livePos.positionAmt) > 0) {
             const reason = `Posisi aktif sudah ada di Binance pada ${symbol} (Qty: ${Math.abs(livePos.positionAmt)})`;
             logger.log('WARN', `⚠️ [SKIP ORDER BARU] ${symbol} sudah punya posisi aktif di Binance.`);
-            this.recordSkippedSpike(alert, reason);
+            this.recordSkippedSpike(alert, reason, defaultSide);
             return;
           }
         } catch (e: any) {
@@ -1179,8 +1186,8 @@ export class WickSniperEngine {
         }
       }
 
-      // Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) secepat kilat (Non-blocking fail-open)
-      if (!alert.isExhaustion && this.config.scanner?.skipBottomRejectionEnabled) {
+      // Filter Penolakan Bawah Ekstrem (Bottom Rejection / Sweep) khusus SHORT (dilewati pada mode Anti-Martingale LONG)
+      if (!alert.isExhaustion && !isAntiMartingaleLong && this.config.scanner?.skipBottomRejectionEnabled) {
         try {
           const client = await binanceFutures.getHttpClient();
           const klineRes = await client.get('/fapi/v1/klines', {
@@ -1260,6 +1267,7 @@ export class WickSniperEngine {
       const btcTrend = this.getBtcTrendStatus();
       const btcAllowsLong = !btcTrend || btcTrend.canLong;
       const isMomentumLongCandidate = !alert.isExhaustion
+        && !isAntiMartingaleLong
         && !!longCfg?.enabled
         && btcAllowsLong
         && alert.surgePct >= longMinSurge
@@ -1271,7 +1279,7 @@ export class WickSniperEngine {
         && longCfg?.maxRsiFilterEnabled === true
         && indicators?.rsi1m !== undefined
         && indicators.rsi1m > maxRsi1m;
-      const simulationSide: 'SHORT' | 'LONG' = isMomentumLongCandidate ? 'LONG' : 'SHORT';
+      const simulationSide: 'SHORT' | 'LONG' = (isMomentumLongCandidate || isAntiMartingaleLong) ? 'LONG' : 'SHORT';
 
       // Proteksi Cooldown Pasca Macro Cut-Loss (Hanya aktif jika scanner.btcTrendFilterEnabled diaktifkan)
       const scannerBtcFilterOn = this.config.scanner?.btcTrendFilterEnabled === true;
@@ -1283,16 +1291,15 @@ export class WickSniperEngine {
         return;
       }
 
-      // Filter Makro BTC (HANYA memblokir SHORT jika scanner.btcTrendFilterEnabled diaktifkan secara eksplisit).
-      // Secara default, Wick Sniper memburu lonjakan sumbu atas (upper wick) terlepas dari apakah BTC sedang Bullish.
-      if (scannerBtcFilterOn && !alert.isExhaustion && btcTrend && !btcTrend.canShort && !isMomentumLongCandidate) {
+      // Filter Makro BTC (HANYA memblokir jika scanner.btcTrendFilterEnabled diaktifkan secara eksplisit).
+      if (scannerBtcFilterOn && !alert.isExhaustion && btcTrend && !isMomentumLongCandidate && (isAntiMartingaleLong ? !btcTrend.canLong : !btcTrend.canShort)) {
         const cooldownMins = this.config.scanner.cooldownMinutes || 10;
         this.scanner.setCooldown(symbol, cooldownMins);
-        this.recordSkippedSpike(alert, `BTC sedang ${btcTrend.trend} (Short dilarang oleh BTC Macro Guard)`, 'SHORT');
+        this.recordSkippedSpike(alert, `BTC sedang ${btcTrend.trend} (${simulationSide} dilarang oleh BTC Macro Guard)`, simulationSide);
         return;
       }
 
-      if (!alert.isExhaustion && this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0 && !isMomentumLongCandidate) {
+      if (!alert.isExhaustion && !isAntiMartingaleLong && this.config.scanner.emaTrendFilterEnabled && alert.surgePct > 0 && !isMomentumLongCandidate) {
         const emaTrend = await this.evaluateEmaTrend(symbol, alert.currentPrice);
         if (!emaTrend.allowed) {
           const reason = `EMA Trend filter aktif: ${emaTrend.reason}`;
@@ -1467,9 +1474,9 @@ export class WickSniperEngine {
         }
       }
 
-      // Filter Konfirmasi Ekor Atas / Pullback Mikro (Mencegah Monster Pump Runaway)
+      // Filter Konfirmasi Ekor Atas / Pullback Mikro (Mencegah Monster Pump Runaway untuk SHORT; dilewati pada Anti-Martingale LONG)
       let confirmedEntryPrice = alert.currentPrice;
-      if (!alert.isExhaustion && this.config.scanner?.upperWickPullbackEnabled) {
+      if (!alert.isExhaustion && !isAntiMartingaleLong && this.config.scanner?.upperWickPullbackEnabled) {
         const minPullbackPct = this.config.scanner.upperWickPullbackMinPct ?? 0.3;
         const maxWaitSec = this.config.scanner.upperWickPullbackMaxWaitSeconds ?? 5;
         const waitStartTime = Date.now();
@@ -1600,6 +1607,12 @@ export class WickSniperEngine {
           `🎯 [EXHAUSTION TOP GAINER] ${symbol} Deviasi Pucuk (+${alert.surgePct}%, ${alert.exhaustionDetail || 'MA7 Deviasi'})! Menembakkan Jaring SHORT bertingkat (Bypass RSI)...`,
           symbol
         );
+      } else if (isAntiMartingaleLong) {
+        alert.paramsSnapshot = {
+          ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
+          strategy: 'WICK_SNIPER_ANTI_MARTINGALE',
+        };
+        logger.log('SNIPER', `🚀 [ANTI-MARTINGALE SPIKE] ${symbol} melonjak +${alert.surgePct}% dalam ${alert.lookbackSeconds}s! Menembakkan Jaring Pyramiding LONG ke atas...`, symbol);
       } else {
         alert.paramsSnapshot = {
           ...(alert.paramsSnapshot || this.captureParamsSnapshot()),
@@ -1861,10 +1874,20 @@ export class WickSniperEngine {
     }
 
     const isExhaustion = alert?.isExhaustion || false;
+    const isAntiMartingaleLong = !isExhaustion && this.config.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE';
+    const posSide: 'LONG' | 'SHORT' = isAntiMartingaleLong ? 'LONG' : 'SHORT';
+    const entryOrderSide: 'BUY' | 'SELL' = isAntiMartingaleLong ? 'BUY' : 'SELL';
+    const strategyType: ActivePosition['strategyType'] = isExhaustion
+      ? 'EXHAUSTION_SNIPER'
+      : isAntiMartingaleLong
+        ? 'WICK_SNIPER_ANTI_MARTINGALE'
+        : 'WICK_SNIPER';
     const exhaustionDetail = alert?.exhaustionDetail;
     const entryReason = isExhaustion
       ? `🎯 Top Gainer Exhaustion Reversal (${exhaustionDetail || 'MA7 Deviasi Pucuk'}) [Abaikan RSI 1m]`
-      : `🚨 Wick Spike Lonjakan +${surgePct}% (${lookbackSeconds}s)`;
+      : isAntiMartingaleLong
+        ? `🚀 Anti-Martingale Pyramiding LONG (+${surgePct}% dlm ${lookbackSeconds}s)`
+        : `🚨 Wick Spike Lonjakan +${surgePct}% (${lookbackSeconds}s)`;
 
     const totalPlannedLayers = layers.length;
     const isMultiLayerGrid = totalPlannedLayers > 1;
@@ -1874,7 +1897,11 @@ export class WickSniperEngine {
     let initialHardSl: number;
     let initialSlDesc: string | undefined;
 
-    if (isMultiLayerGrid && exitCfg.atrDeferHardStopBeforeLastLayer !== false) {
+    if (isAntiMartingaleLong) {
+      const effSlPct = exitCfg.hardStopLossPct * (isLowVolume ? lowVolSlMult : 1.0);
+      initialHardSl = parseFloat(binanceFutures.formatPrice(symbol, currentPrice * (1 - effSlPct / 100)));
+      initialSlDesc = `Anti-Martingale Hard SL (-${effSlPct.toFixed(2)}%)`;
+    } else if (isMultiLayerGrid && exitCfg.atrDeferHardStopBeforeLastLayer !== false) {
       initialHardSl = parseFloat(binanceFutures.formatPrice(
         symbol,
         lastPlannedLayer.price * (1 + emergencyBuffer / 100)
@@ -1885,11 +1912,19 @@ export class WickSniperEngine {
       initialSlDesc = `Hard SL (${exitCfg.hardStopLossPct}%)`;
     }
 
+    const effTpPct = exitCfg.takeProfitPct * (isLowVolume ? lowVolTpMult : 1.0);
+    const initialTargetTp = isAntiMartingaleLong
+      ? currentPrice * (1 + effTpPct / 100)
+      : currentPrice * (1 - (exitCfg.takeProfitPct * (exitCfg.ladderExitEnabled ? 0.5 : 1.0) * (isLowVolume ? lowVolTpMult : 1.0)) / 100);
+    const initialTargetTp2 = isAntiMartingaleLong
+      ? initialTargetTp
+      : currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolTpMult : 1.0)) / 100);
+
     const initialPos: ActivePosition = {
       id: `${symbol}_${Date.now()}`,
       symbol,
-      side: 'SHORT',
-      strategyType: isExhaustion ? 'EXHAUSTION_SNIPER' : 'WICK_SNIPER',
+      side: posSide,
+      strategyType,
       isExhaustion,
       exhaustionDetail,
       entryReason,
@@ -1905,8 +1940,8 @@ export class WickSniperEngine {
       totalMarginUsed: layers[0].marginUsdt,
       layers,
       openedAt: Date.now(),
-      targetTpPrice: currentPrice * (1 - (exitCfg.takeProfitPct * (exitCfg.ladderExitEnabled ? 0.5 : 1.0) * (isLowVolume ? lowVolTpMult : 1.0)) / 100),
-      targetTp2Price: currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolTpMult : 1.0)) / 100),
+      targetTpPrice: initialTargetTp,
+      targetTp2Price: initialTargetTp2,
       hardSlPrice: initialHardSl,
       slDescription: initialSlDesc,
       status: 'SNIPING',
@@ -1916,7 +1951,7 @@ export class WickSniperEngine {
       priceChange24hPct: initial24hChange,
       paramsSnapshot: {
         ...this.captureParamsSnapshot(),
-        strategy: isExhaustion ? 'EXHAUSTION_SNIPER' : 'WICK_SNIPER',
+        strategy: strategyType,
         isExhaustion,
         exhaustionDetail,
         entryReason,
@@ -1976,21 +2011,21 @@ export class WickSniperEngine {
       } catch { }
 
       // 1. Eksekusi market order untuk layer 0 (Mendukung One-Way & Hedge Mode)
-      this.auditTradeLifecycle(symbol, 'OPEN_SHORT_REQUESTED', {
-        side: 'SELL',
+      this.auditTradeLifecycle(symbol, `OPEN_${posSide}_REQUESTED`, {
+        side: entryOrderSide,
         qty: layer0Qty,
         price: currentPrice,
         status: 'SENT',
       });
 
       const orderStartTime = Date.now();
-      const res0 = await binanceFutures.openMarketOrder(symbol, 'SELL', layer0Qty);
+      const res0 = await binanceFutures.openMarketOrder(symbol, entryOrderSide, layer0Qty);
       const orderLatencyMs = Date.now() - orderStartTime;
       if (!res0?.orderId) {
         const errMsg = binanceFutures.lastOrderError || 'Cek saldo USDT atau izin Futures API Key.';
         logger.log(
           'ERROR',
-          `❌ [ORDER GAGAL] Gagal membuka Layer 0 SHORT untuk ${symbol} di Binance (${orderLatencyMs}ms)! Membatalkan penempatan jaring. Alasan: ${errMsg}`,
+          `❌ [ORDER GAGAL] Gagal membuka Layer 0 ${posSide} untuk ${symbol} di Binance (${orderLatencyMs}ms)! Membatalkan penempatan jaring. Alasan: ${errMsg}`,
           symbol
         );
         telegram.notifyMarginInsufficient(symbol, 'Membuka Posisi Awal (Layer #0)', {
@@ -2039,8 +2074,8 @@ export class WickSniperEngine {
           if (!realEntryPrice || realEntryPrice <= 0) {
             const recentTrades = await binanceFutures.getUserTrades(symbol, 5);
             const entryTrade = recentTrades.find(
-              (t: any) => t.side === 'SELL' && (!res0.orderId || String(t.orderId) === String(res0.orderId))
-            ) || recentTrades.find((t: any) => t.side === 'SELL');
+              (t: any) => t.side === entryOrderSide && (!res0.orderId || String(t.orderId) === String(res0.orderId))
+            ) || recentTrades.find((t: any) => t.side === entryOrderSide);
             if (entryTrade && parseFloat(entryTrade.price) > 0) {
               realEntryPrice = parseFloat(entryTrade.price);
               executedQty = parseFloat(entryTrade.qty || '0');
@@ -2055,8 +2090,8 @@ export class WickSniperEngine {
         layers[0].price = realEntryPrice;
         initialPos.avgEntryPrice = realEntryPrice;
         initialPos.currentPrice = realEntryPrice;
-        this.auditTradeLifecycle(symbol, 'OPEN_SHORT_CONFIRMED', {
-          side: 'SELL',
+        this.auditTradeLifecycle(symbol, `OPEN_${posSide}_CONFIRMED`, {
+          side: entryOrderSide,
           qty: executedQty || layer0Qty,
           entryPrice: realEntryPrice,
           status: 'CONFIRMED',
@@ -2112,40 +2147,49 @@ export class WickSniperEngine {
         initialPos.layers = layers;
 
         // Hitung ulang target TP dan SL berdasarkan harga eksekusi riil Binance
-        initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-        const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2;
-        initialPos.targetTp2Price = realEntryPrice * (1 - tp2Pct / 100);
-
-        if (isMultiLayerGrid && exitCfg.atrDeferHardStopBeforeLastLayer !== false) {
-          const lastValidLayer = layers[layers.length - 1];
-          initialPos.hardSlPrice = parseFloat(binanceFutures.formatPrice(
-            symbol,
-            lastValidLayer.price * (1 + emergencyBuffer / 100)
-          ));
-          initialPos.slDescription = `Grid Emergency SL (+${emergencyBuffer}% di luar Layer Terakhir #${layers.length - 1} @ $${lastValidLayer.price})`;
+        if (isAntiMartingaleLong) {
+          const effSlPct = exitCfg.hardStopLossPct * (isLowVolume ? lowVolSlMult : 1.0);
+          initialPos.targetTpPrice = realEntryPrice * (1 + effTpPct / 100);
+          initialPos.targetTp2Price = initialPos.targetTpPrice;
+          initialPos.hardSlPrice = parseFloat(binanceFutures.formatPrice(symbol, realEntryPrice * (1 - effSlPct / 100)));
+          initialPos.slDescription = `Anti-Martingale Hard SL (-${effSlPct.toFixed(2)}% dari Avg Entry $${formatCryptoPrice(realEntryPrice)})`;
         } else {
-          initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
-          initialPos.slDescription = `Hard SL (${exitCfg.hardStopLossPct}%)`;
+          initialPos.targetTpPrice = realEntryPrice * (1 - exitCfg.takeProfitPct / 100);
+          const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2;
+          initialPos.targetTp2Price = realEntryPrice * (1 - tp2Pct / 100);
+
+          if (isMultiLayerGrid && exitCfg.atrDeferHardStopBeforeLastLayer !== false) {
+            const lastValidLayer = layers[layers.length - 1];
+            initialPos.hardSlPrice = parseFloat(binanceFutures.formatPrice(
+              symbol,
+              lastValidLayer.price * (1 + emergencyBuffer / 100)
+            ));
+            initialPos.slDescription = `Grid Emergency SL (+${emergencyBuffer}% di luar Layer Terakhir #${layers.length - 1} @ $${lastValidLayer.price})`;
+          } else {
+            initialPos.hardSlPrice = realEntryPrice * (1 + exitCfg.hardStopLossPct / 100);
+            initialPos.slDescription = `Hard SL (${exitCfg.hardStopLossPct}%)`;
+          }
         }
         if (this.config.exit.atrDynamicSlTpEnabled) {
           await this.applyAtrTargetsToPosition(initialPos, realEntryPrice);
         }
         const ratio = exitCfg.partialTpRatio || 0.7;
-        const tpLogInfo = exitCfg.partialTpEnabled
+        const tpLogInfo = !isAntiMartingaleLong && exitCfg.partialTpEnabled
           ? `Dual TP: TP1 (${Math.round(ratio * 100)}% @ $${initialPos.targetTpPrice.toFixed(6)}) | TP2 (${100 - Math.round(ratio * 100)}% @ $${initialPos.targetTp2Price.toFixed(6)})`
-          : `Target TP: $${initialPos.targetTpPrice.toFixed(6)}`;
+          : `Target TP: $${initialPos.targetTpPrice.toFixed(6)} (${isAntiMartingaleLong ? '+' : '-'}${effTpPct.toFixed(2)}%)`;
         logger.log(
           'SUCCESS',
-          `⚡ [EXEC SPEED] ${symbol} Layer #0 terisi riil di Binance dalam ${orderLatencyMs}ms @ $${realEntryPrice.toFixed(6)} (Qty: ${executedQty || layer0Qty}) | ${tpLogInfo}`,
+          `⚡ [EXEC SPEED] ${symbol} Layer #0 (${posSide}) terisi riil di Binance dalam ${orderLatencyMs}ms @ $${realEntryPrice.toFixed(6)} (Qty: ${executedQty || layer0Qty}) | ${tpLogInfo}`,
           symbol
         );
       }
 
-      // SMART GRID QUEUE: Hanya pasang maksimal 2 layer teratas di Binance (QUEUE_DEPTH = 2),
-      // kecuali mode pasang semua layer sekaligus aktif (Leader Mode).
+      // SMART GRID QUEUE: Untuk SHORT, pasang Limit Order jaring atas ke Binance.
+      // Untuk Anti-Martingale LONG, beli tambahan berada DI ATAS harga pasar (tidak bisa Limit Buy biasa karena langsung match);
+      // jaring atas dipantau real-time oleh monitorPositions untuk memicu Market Buy seketika saat harga tembus naik!
       const QUEUE_DEPTH = gridCfg.deployAllLayersAtOnce ? layers.length : 2;
-      const initialActiveLayers = layers.slice(1, 1 + QUEUE_DEPTH);
-      const queuedLayers = layers.slice(1 + QUEUE_DEPTH);
+      const initialActiveLayers = isAntiMartingaleLong ? [] : layers.slice(1, 1 + QUEUE_DEPTH);
+      const queuedLayers = isAntiMartingaleLong ? [] : layers.slice(1 + QUEUE_DEPTH);
 
       const batchPayload = initialActiveLayers.map((l) => ({
         symbol,
@@ -2161,6 +2205,14 @@ export class WickSniperEngine {
       // PRIORITAS UTAMA: Pasang Limit Take Profit SEKETIKA secara paralel (tanpa menunggu batch order selesai)
       // Ini memangkas 200-300ms delay agar order Limit TP langsung siap menangkap pullback wick
       const tpPromise = this.syncLiveTakeProfitOrder(initialPos).catch(() => { });
+
+      if (isAntiMartingaleLong && layers.length > 1) {
+        logger.log(
+          'INFO',
+          `🪜 [ANTI-MARTINGALE PYRAMID SIAGA] ${symbol} LONG: ${layers.length - 1} jaring beli atas (${layers.slice(1).map((l) => `#${l.layerIndex} @ $${formatCryptoPrice(l.price)}`).join(', ')}) siap ditembak Market Buy saat harga naik.`,
+          symbol
+        );
+      }
 
       if (batchPayload.length > 0) {
         for (const layer of initialActiveLayers) {
@@ -2250,16 +2302,18 @@ export class WickSniperEngine {
       exitCfg.hardStopLossPct
     );
 
-    const paperRatio = exitCfg.partialTpRatio || 0.7;
-    const paperTpLog = exitCfg.partialTpEnabled
-      ? `Dual TP: TP1 (${Math.round(paperRatio * 100)}% @ $${initialPos.targetTpPrice.toFixed(6)}) | TP2 (${100 - Math.round(paperRatio * 100)}% @ $${(initialPos.targetTp2Price || initialPos.avgEntryPrice * (1 - (exitCfg.takeProfit2Pct || exitCfg.takeProfitPct * 2) / 100)).toFixed(6)})`
-      : `Target TP: $${initialPos.targetTpPrice.toFixed(6)} (-${exitCfg.takeProfitPct}%)`;
+    if (this.config.tradingMode !== 'LIVE') {
+      const paperRatio = exitCfg.partialTpRatio || 0.7;
+      const paperTpLog = !isAntiMartingaleLong && exitCfg.partialTpEnabled
+        ? `Dual TP: TP1 (${Math.round(paperRatio * 100)}% @ $${initialPos.targetTpPrice.toFixed(6)}) | TP2 (${100 - Math.round(paperRatio * 100)}% @ $${(initialPos.targetTp2Price || initialPos.avgEntryPrice * (1 - (exitCfg.takeProfit2Pct || exitCfg.takeProfitPct * 2) / 100)).toFixed(6)})`
+        : `Target TP: $${initialPos.targetTpPrice.toFixed(6)} (${isAntiMartingaleLong ? '+' : '-'}${effTpPct.toFixed(2)}%)`;
 
-    logger.log(
-      'SUCCESS',
-      `⚡ [EXEC SPEED] ${symbol} Layer #0 Paper Order terisi instan (12ms) @ $${initialPos.avgEntryPrice.toFixed(6)} | ${paperTpLog}`,
-      symbol
-    );
+      logger.log(
+        'SUCCESS',
+        `⚡ [EXEC SPEED] ${symbol} Layer #0 (${posSide}) Paper Order terisi instan (12ms) @ $${initialPos.avgEntryPrice.toFixed(6)} | ${paperTpLog}`,
+        symbol
+      );
+    }
 
     // Asinkron perkaya snapshot indikator pasar saat Entry (0ms delay pada eksekusi order)
     this.enrichMarketSnapshot(initialPos, surgePct, lookbackSeconds).catch(() => {});
@@ -2516,12 +2570,17 @@ export class WickSniperEngine {
       const recentSamples = samples.filter((sample) => Date.now() - sample.time <= 90_000).slice(-8);
       this.priceMomentum.set(symbol, recentSamples);
 
-      // 1. Cek layer fill (hanya untuk mode PAPER: simulasi pengisian jaring)
-      // Pada mode LIVE, layer diisi langsung oleh matching engine Binance dan disinkronkan di syncLivePositions
+      // 1. Cek layer fill:
+      // - Mode PAPER: simulasi pengisian jaring pada tick pasar
+      // - Mode LIVE: SHORT memakai Limit Order di Binance (syncLivePositions), sedangkan Anti-Martingale LONG
+      //   dipicu Market Buy seketika oleh bot saat harga menembus jaring atas (pyramiding breakout)
+      const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE';
       if (this.config.tradingMode === 'PAPER') {
         let layersChanged = false;
         for (const layer of pos.layers) {
-          const isHit = pos.side === 'LONG' ? (currentPrice <= layer.price) : (currentPrice >= layer.price);
+          const isHit = isAntiMartingale
+            ? (currentPrice >= layer.price)
+            : (pos.side === 'LONG' ? (currentPrice <= layer.price) : (currentPrice >= layer.price));
           if (layer.status === 'PENDING' && isHit) {
             layer.status = 'FILLED';
             layer.filledAt = Date.now();
@@ -2531,7 +2590,9 @@ export class WickSniperEngine {
             const emaTag = layer.emaDesc ? ` • ${layer.emaDesc}` : '';
             logger.log(
               'SNIPER',
-              `🕸️ [LAYER TERISI PAPER] ${symbol} Layer #${layer.layerIndex} terisi @ ${layer.price} (Qty: ${layer.qty}, Margin: ${layer.marginUsdt.toFixed(2)})${emaTag}`,
+              isAntiMartingale
+                ? `🪜 [ANTI-MARTINGALE PAPER] ${symbol} Layer #${layer.layerIndex} terbeli naik @ ${layer.price} (Qty: ${layer.qty}, Margin: $${layer.marginUsdt.toFixed(2)})${emaTag}`
+                : `🕸️ [LAYER TERISI PAPER] ${symbol} Layer #${layer.layerIndex} terisi @ ${layer.price} (Qty: ${layer.qty}, Margin: ${layer.marginUsdt.toFixed(2)})${emaTag}`,
               symbol
             );
             telegram.notifyLayerFill(
@@ -2555,6 +2616,11 @@ export class WickSniperEngine {
           pos.highestPrice = currentPrice;
           pos.lowestPrice = currentPrice;
           this.persistState();
+        }
+      } else if (isAntiMartingale && pos.status === 'SNIPING' && !this.pyramidingSymbols.has(symbol) && !this.closingSymbols.has(symbol)) {
+        const nextUpperLayer = pos.layers.find((l) => l.status === 'PENDING' && l.layerIndex > 0 && currentPrice >= l.price);
+        if (nextUpperLayer) {
+          void this.executeAntiMartingaleLayerLive(pos, nextUpperLayer);
         }
       }
 
@@ -2755,14 +2821,17 @@ export class WickSniperEngine {
 
         // B. Evaluasi Take Profit & Trailing TP untuk LONG
         const isSmLong = pos.strategyType === 'SMART_MONEY';
+        const isAntiMartingaleLong = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE';
         const longCfg = this.config.momentumLong;
         const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
         const trailingEnabled = isSmLong
           ? (smCfg.trailingTpEnabled !== false)
-          : (longCfg?.trailingTpEnabled !== false);
+          : isAntiMartingaleLong
+            ? !!this.config.exit.trailingTpEnabled
+            : (longCfg?.trailingTpEnabled !== false);
         const profitPct = ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
         const isLadderSmLong = isSmLong && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1));
-        const isLadderWickLong = !isSmLong && !!this.config.exit?.ladderExitEnabled;
+        const isLadderWickLong = !isSmLong && !isAntiMartingaleLong && !!this.config.exit?.ladderExitEnabled;
         const isLadderLong = isLadderSmLong || isLadderWickLong;
 
         if (isLadderLong) {
@@ -2786,7 +2855,7 @@ export class WickSniperEngine {
               if (executed) continue;
             }
           }
-        } else {
+        } else if (!isAntiMartingaleLong) {
           // 1. Dual Stage TP: Eksekusi TP 1 (Tutup Partial 50% & Kunci BEP) saat menyentuh target TP awal
           if (this.config.exit.partialTpEnabled && !pos.partialTpDone && currentPrice >= pos.targetTpPrice && currentPrice > pos.avgEntryPrice && slAgeMs >= 3000) {
             const executed = await this.executeStage1PartialTp(pos, currentPrice);
@@ -2808,12 +2877,16 @@ export class WickSniperEngine {
         if (trailingEnabled) {
           const activationPct = isSmLong
             ? (this.config.smartMoney?.takeProfitPct ?? 1.5)
-            : (longCfg?.trailingActivationPct ?? 1.5);
+            : isAntiMartingaleLong
+              ? (this.config.exit.takeProfitPct ?? 3.0)
+              : (longCfg?.trailingActivationPct ?? 1.5);
           const callbackPct = isSmLong
             ? (this.config.smartMoney?.trailingCallbackPct ?? 0.3)
-            : (longCfg?.trailingCallbackPct ?? 0.8);
+            : isAntiMartingaleLong
+              ? (this.config.exit.trailingCallbackPct || 0.4)
+              : (longCfg?.trailingCallbackPct ?? 0.8);
 
-          if (!pos.trailingTpActive && (profitPct >= activationPct || currentPrice >= pos.targetTpPrice)) {
+          if (!pos.trailingTpActive && slAgeMs >= 3000 && (profitPct >= activationPct || currentPrice >= pos.targetTpPrice)) {
             pos.trailingTpActive = true;
             pos.trailingRunnerPrice = currentPrice;
             logger.log(
@@ -2826,8 +2899,9 @@ export class WickSniperEngine {
           if (pos.trailingTpActive) {
             pos.trailingRunnerPrice = Math.max(pos.trailingRunnerPrice || currentPrice, currentPrice);
             const dropPct = ((pos.trailingRunnerPrice - currentPrice) / pos.trailingRunnerPrice) * 100;
-            // Gembok profit: Wajib minimal +0.3% di atas entry (menutupi fee)
-            const minSecurePrice = pos.avgEntryPrice * 1.003;
+            // Gembok profit: Wajib minimal menutupi fee roundtrip (+0.3% atau 1.5x callback)
+            const minSecureMult = isAntiMartingaleLong ? (1 + Math.max(0.4, callbackPct * 1.5) / 100) : 1.003;
+            const minSecurePrice = pos.avgEntryPrice * minSecureMult;
 
             if (dropPct >= callbackPct && currentPrice >= minSecurePrice) {
               logger.log(
@@ -2847,8 +2921,8 @@ export class WickSniperEngine {
           }
         }
 
-        // C. Batas Waktu Hold Maksimum untuk LONG (Hanya untuk MOMENTUM_LONG, bukan SMART_MONEY)
-        if (!isSmLong) {
+        // C. Batas Waktu Hold Maksimum untuk LONG (Hanya untuk MOMENTUM_LONG; Anti-Martingale memakai checkTimeLimitsAndTrailing)
+        if (!isSmLong && !isAntiMartingaleLong) {
           const maxHoldMin = longCfg?.maxHoldMinutes ?? 60;
           if (Date.now() - pos.openedAt >= maxHoldMin * 60 * 1000) {
             logger.log(
@@ -3202,7 +3276,9 @@ export class WickSniperEngine {
     let isBep = false;
     let reason = '';
 
-    if (pos.strategyType !== 'SMART_MONEY' && bepDefenseActive && !pos.partialTpDone) {
+    const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE';
+
+    if (pos.strategyType !== 'SMART_MONEY' && !isAntiMartingale && bepDefenseActive && !pos.partialTpDone) {
       // Kondisi 1 (Prioritas Utama): Proteksi Layer Terakhir / Jaring Habis (Tanpa Jaring Pengaman Tersisa)
       const isFinalLayer = totalLayersCount > 1 && (filledLayersCount >= totalLayersCount || (pendingLayersCount === 0 && filledLayersCount > 0));
       if (finalLayerDefenseActive && isFinalLayer) {
@@ -3291,6 +3367,12 @@ export class WickSniperEngine {
       return { targetTpPrice: smTp1, targetTp2Price: smTp2, isBepActive: false };
     }
 
+    if (isAntiMartingale) {
+      const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
+      const singleTp = pos.avgEntryPrice * (1 + (exitCfg.takeProfitPct * tpMult) / 100);
+      return { targetTpPrice: singleTp, targetTp2Price: singleTp, isBepActive: false };
+    }
+
     if (exitCfg.ladderExitEnabled) {
       const totalSteps = Math.max(2, Math.min(6, exitCfg.ladderSteps || 3));
       const currentStep = Math.min(totalSteps, (pos.ladderStepIndex || 0) + 1);
@@ -3298,11 +3380,17 @@ export class WickSniperEngine {
       return { targetTpPrice: ladderTarget, targetTp2Price: ladderTarget, isBepActive: false };
     }
 
-    const normalTp1 = pos.avgEntryPrice * (1 - exitCfg.takeProfitPct / 100);
-    const tp2Pct = exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0
+    const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
+    const isLong = pos.side === 'LONG';
+    const normalTp1 = isLong
+      ? pos.avgEntryPrice * (1 + (exitCfg.takeProfitPct * tpMult) / 100)
+      : pos.avgEntryPrice * (1 - (exitCfg.takeProfitPct * tpMult) / 100);
+    const tp2Pct = (exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0
       ? exitCfg.takeProfit2Pct
-      : exitCfg.takeProfitPct * 2;
-    const normalTp2 = pos.avgEntryPrice * (1 - tp2Pct / 100);
+      : exitCfg.takeProfitPct * 2) * tpMult;
+    const normalTp2 = isLong
+      ? pos.avgEntryPrice * (1 + tp2Pct / 100)
+      : pos.avgEntryPrice * (1 - tp2Pct / 100);
 
     if (exitCfg.partialTpEnabled && pos.partialTpDone) {
       return { targetTpPrice: normalTp2, targetTp2Price: normalTp2, isBepActive: false };
@@ -3376,11 +3464,11 @@ export class WickSniperEngine {
         }
       }
 
-      if (this.config.exit.atrDynamicSlTpEnabled && (!pos.strategyType || pos.strategyType === 'WICK_SNIPER' || pos.strategyType === 'EXHAUSTION_SNIPER')) {
+      if (this.config.exit.atrDynamicSlTpEnabled && (!pos.strategyType || pos.strategyType === 'WICK_SNIPER' || pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || pos.strategyType === 'EXHAUSTION_SNIPER')) {
         void this.applyAtrTargetsToPosition(pos);
       }
 
-      const recalculateTpLog = (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive)
+      const recalculateTpLog = (pos.strategyType !== 'WICK_SNIPER_ANTI_MARTINGALE' && exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive)
         ? `TP1: $${formatCryptoPrice(pos.targetTpPrice)} | TP2: $${formatCryptoPrice(pos.targetTp2Price || 0)}`
         : `TP: $${formatCryptoPrice(pos.targetTpPrice)} ${pos.isBepDefenseActive ? '(MODE BEP DEFENSE)' : ''}`;
 
@@ -3448,6 +3536,14 @@ export class WickSniperEngine {
           ? pos.avgEntryPrice * (1 - fallbackSl / 100)
           : pos.avgEntryPrice * (1 + fallbackSl / 100);
       }
+    } else if (pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE') {
+      // Anti-Martingale Pyramiding LONG: Hard SL selalu dihitung ulang ke BAWAH dari Avg Entry baru
+      const exitCfg = this.config.exit;
+      const slMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeSlMultiplier || pos.paramsSnapshot.lowVolumeSlTpMultiplier || 2.0) : 1.0;
+      const effSlPct = exitCfg.hardStopLossPct * slMult;
+      pos.hardSlPrice = parseFloat(binanceFutures.formatPrice(pos.symbol, pos.avgEntryPrice * (1 - effSlPct / 100)));
+      pos.slDescription = `Anti-Martingale Hard SL (-${effSlPct.toFixed(2)}% dari Avg Entry $${formatCryptoPrice(pos.avgEntryPrice)})`;
+      return;
     } else {
       // Wick Sniper & Exhaustion Sniper
       const exitCfg = this.config.exit;
@@ -3938,10 +4034,115 @@ export class WickSniperEngine {
   }
 
   /**
+   * Eksekusi layer pyramiding ke atas secara Market Order (Mode LIVE untuk Anti-Martingale LONG)
+   */
+  private async executeAntiMartingaleLayerLive(pos: ActivePosition, layer: GridLayer): Promise<void> {
+    if (this.config.tradingMode !== 'LIVE' || this.pyramidingSymbols.has(pos.symbol) || this.closingSymbols.has(pos.symbol)) {
+      return;
+    }
+    if (pos.status !== 'SNIPING' || layer.status !== 'PENDING') return;
+
+    this.pyramidingSymbols.add(pos.symbol);
+    try {
+      const symbol = pos.symbol;
+      this.auditTradeLifecycle(symbol, 'GRID_LAYER_PLACED', {
+        layerIndex: layer.layerIndex,
+        side: 'BUY',
+        price: layer.price,
+        qty: layer.qty,
+        status: 'MARKET_PYRAMID_SENT',
+      });
+
+      const res = await binanceFutures.openMarketOrder(symbol, 'BUY', layer.qty);
+      if (!res?.orderId) {
+        const errMsg = binanceFutures.lastOrderError || 'Cek saldo margin atau limit Binance.';
+        layer.status = 'CANCELLED';
+        logger.log(
+          'WARN',
+          `⚠️ [ANTI-MARTINGALE LIVE GAGAL] ${symbol} Layer #${layer.layerIndex} ditolak Binance @ $${formatCryptoPrice(layer.price)}: ${errMsg}`,
+          symbol
+        );
+        telegram.notifyMarginInsufficient(symbol, `Pyramiding Anti-Martingale Layer #${layer.layerIndex}`, {
+          reason: errMsg,
+          availableBalance: this.liveAvailableBalance > 0 ? this.liveAvailableBalance : undefined,
+          requiredAmount: layer.marginUsdt,
+        });
+        this.persistState();
+        return;
+      }
+
+      layer.orderId = String(res.orderId);
+      layer.status = 'FILLED';
+      layer.filledAt = Date.now();
+
+      let fillQty = parseFloat(res.executedQty || '0');
+      let cumQuote = parseFloat(res.cumQuote || '0');
+      let fillPrice = parseFloat(res.avgPrice || '0');
+      if ((!fillPrice || fillPrice <= 0) && fillQty > 0 && cumQuote > 0) {
+        fillPrice = cumQuote / fillQty;
+      }
+      if (!fillPrice || fillPrice <= 0) {
+        await new Promise((r) => setTimeout(r, 250));
+        const ord = await binanceFutures.getOrder(symbol, res.orderId).catch(() => null);
+        if (ord && parseFloat(ord.avgPrice || '0') > 0) {
+          fillPrice = parseFloat(ord.avgPrice);
+          fillQty = parseFloat(ord.executedQty || '0') || fillQty;
+        }
+      }
+      if (fillPrice > 0) layer.price = fillPrice;
+      if (fillQty > 0) layer.qty = fillQty;
+      layer.volumeUsdt = parseFloat((layer.qty * layer.price).toFixed(2));
+      layer.marginUsdt = (layer.qty * layer.price) / (pos.leverage || this.config.leverage || 5);
+
+      const realPos = await binanceFutures.getOpenPosition(symbol).catch(() => null);
+      if (realPos && Math.abs(realPos.positionAmt) > 0) {
+        pos.totalQty = Math.abs(realPos.positionAmt);
+        if (realPos.entryPrice > 0) pos.avgEntryPrice = realPos.entryPrice;
+        if (realPos.breakEvenPrice && realPos.breakEvenPrice > 0) pos.breakEvenPrice = realPos.breakEvenPrice;
+        pos.totalMarginUsed = (pos.totalQty * pos.avgEntryPrice) / (pos.leverage || this.config.leverage || 5);
+        const tpCalc = this.calculatePositionTpPrices(pos);
+        pos.targetTpPrice = tpCalc.targetTpPrice;
+        pos.targetTp2Price = tpCalc.targetTp2Price;
+        pos.isBepDefenseActive = false;
+        this.recalculatePositionSl(pos);
+        if (this.config.exit.atrDynamicSlTpEnabled) {
+          void this.applyAtrTargetsToPosition(pos);
+        }
+        pos.trailingTpActive = false;
+        pos.trailingRunnerPrice = undefined;
+        pos.peakPnlPct = 0;
+        pos.highestPrice = pos.currentPrice || pos.avgEntryPrice;
+        pos.lowestPrice = pos.currentPrice || pos.avgEntryPrice;
+        await this.syncLiveTakeProfitOrder(pos);
+      } else {
+        this.recalculatePositionAverage(pos);
+      }
+
+      this.enrichLayerMarketData(symbol, layer).catch(() => {});
+      logger.log(
+        'SNIPER',
+        `🪜 [ANTI-MARTINGALE LIVE] ${symbol} Layer #${layer.layerIndex} terbeli naik @ $${formatCryptoPrice(layer.price)} (Total Qty: ${pos.totalQty} | Avg: $${formatCryptoPrice(pos.avgEntryPrice)} | New TP: $${formatCryptoPrice(pos.targetTpPrice)} | New SL: $${formatCryptoPrice(pos.hardSlPrice)})`,
+        symbol
+      );
+      telegram.notifyLayerFill(
+        pos,
+        layer,
+        pos.layers.filter((l) => l.status === 'FILLED').length,
+        pos.layers.length
+      );
+      this.persistState();
+      this.broadcastStatus();
+    } finally {
+      this.pyramidingSymbols.delete(pos.symbol);
+    }
+  }
+
+  /**
    * Smart Grid Queue: Menempatkan layer berikutnya dari antrean jika order limit SELL di Binance < QUEUE_DEPTH
    */
   private async deployNextGridLayerInQueue(pos: ActivePosition) {
     if (this.config.tradingMode !== 'LIVE' || !pos.layers) return;
+    if (pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE') return;
     if (pos.status === 'CLOSING' || pos.status === 'CLOSED') return;
 
     const QUEUE_DEPTH = this.config.grid.deployAllLayersAtOnce ? 999 : 2;
@@ -4079,8 +4280,11 @@ export class WickSniperEngine {
       }
     }
 
-    // 2. ORDER SELL TERISI: GRID LAYER TERISI
+    // 2. ORDER ENTRY/GRID TERISI
     if (side === gridSide && status === 'FILLED') {
+      if (pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' && this.pyramidingSymbols.has(symbol)) {
+        return; // Sedang disinkronkan langsung oleh executeAntiMartingaleLayerLive
+      }
       let layer = pos.layers.find((l) => l.orderId && String(l.orderId) === orderId);
       if (!layer) {
         layer = pos.layers.find((l) => l.status === 'PENDING' && fillPrice > 0 && Math.abs(l.price - fillPrice) / fillPrice < 0.005);
@@ -4222,9 +4426,10 @@ export class WickSniperEngine {
       }
 
       const isSm = pos.strategyType === 'SMART_MONEY';
+      const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE';
       const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
       const isLadderActive = (isSm && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1)))
-        || (!isSm && !!this.config.exit?.ladderExitEnabled);
+        || (!isSm && !isAntiMartingale && !!this.config.exit?.ladderExitEnabled);
 
       if (isLadderActive) {
         const totalSteps = isSm
@@ -4243,7 +4448,7 @@ export class WickSniperEngine {
       const closeSide = tpClosingSide;
 
       // KASUS A: Partial TP Aktif dan Tahap 1 belum selesai -> Pasang DUAL LIMIT ORDER (TP1 50% & TP2 50%)
-      if (exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive) {
+      if (!isAntiMartingale && exitCfg.partialTpEnabled && !pos.partialTpDone && !pos.isBepDefenseActive) {
         const ratio = exitCfg.partialTpRatio || 0.5;
         const plannedTp1Qty = pos.totalQty * ratio;
         const tp1Qty = parseFloat(binanceFutures.formatQty(pos.symbol, plannedTp1Qty));
@@ -4348,7 +4553,7 @@ export class WickSniperEngine {
       }
 
       // KASUS B: Partial TP Aktif dan Tahap 1 sudah selesai -> Pasang Limit Order TP2 untuk sisa volume
-      if (exitCfg.partialTpEnabled && pos.partialTpDone) {
+      if (!isAntiMartingale && exitCfg.partialTpEnabled && pos.partialTpDone) {
         if (exitCfg.trailingTpEnabled) {
           pos.trailingTpActive = true;
           if (isLong) {
@@ -4407,9 +4612,10 @@ export class WickSniperEngine {
         );
         return;
       }
+      const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
       const effectiveTpPct = pos.strategyType === 'SMART_MONEY'
         ? (this.config.smartMoney?.takeProfitPct || 1.5)
-        : exitCfg.takeProfitPct;
+        : exitCfg.takeProfitPct * tpMult;
       const tpOrderPrice = atrMode && pos.targetTpPrice
         ? pos.targetTpPrice
         : (isLong
@@ -4464,7 +4670,7 @@ export class WickSniperEngine {
    * Only tighten (lower), never relax (raise)
    */
   private updateTrailingSL(pos: ActivePosition) {
-    if (!this.config.exit.trailingSlEnabled || !pos.layers || pos.partialTpDone) return;
+    if (!this.config.exit.trailingSlEnabled || !pos.layers || pos.partialTpDone || pos.side === 'LONG' || pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE') return;
 
     const exitCfg = this.config.exit;
     const leverage = pos.leverage || this.config.leverage || 5;
@@ -5263,7 +5469,7 @@ export class WickSniperEngine {
         cooldownMinutes = this.config.exit.bepCooldownMinutes || 15;
       } else if (isSmTrade) {
         cooldownMinutes = this.config.smartMoney?.cooldownMinutes || 30;
-      } else if (pos.strategyType === 'MOMENTUM_LONG' || (pos.side === 'LONG' && !isSmTrade)) {
+      } else if (pos.strategyType === 'MOMENTUM_LONG' || (pos.side === 'LONG' && !isSmTrade && pos.strategyType !== 'WICK_SNIPER_ANTI_MARTINGALE')) {
         cooldownMinutes = this.config.momentumLong?.cooldownMinutes || 15;
       } else {
         cooldownMinutes = this.config.scanner.cooldownMinutes || 10;
@@ -5374,6 +5580,9 @@ export class WickSniperEngine {
   }
 
   private shouldDeferHardStopForGrid(pos: ActivePosition): boolean {
+    if (pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE') {
+      return false;
+    }
     const exitCfg = this.config.exit;
     if (exitCfg.atrDeferHardStopBeforeLastLayer === false) {
       return false;
@@ -5418,7 +5627,7 @@ export class WickSniperEngine {
   }
 
   private async applyAtrTargetsToPosition(pos: ActivePosition, entryPriceOverride?: number): Promise<void> {
-    if (!this.config.exit.atrDynamicSlTpEnabled || (pos.strategyType && pos.strategyType !== 'WICK_SNIPER' && pos.strategyType !== 'EXHAUSTION_SNIPER')) return;
+    if (!this.config.exit.atrDynamicSlTpEnabled || (pos.strategyType && pos.strategyType !== 'WICK_SNIPER' && pos.strategyType !== 'WICK_SNIPER_ANTI_MARTINGALE' && pos.strategyType !== 'EXHAUSTION_SNIPER')) return;
 
     const entryPrice = entryPriceOverride ?? pos.avgEntryPrice;
     if (!entryPrice || entryPrice <= 0) return;
@@ -5846,14 +6055,16 @@ export class WickSniperEngine {
       pos.holdRemainingSeconds = Math.ceil(holdRemainingMs / 1000);
 
       // Evaluasi perpanjangan jika sisa waktu <= extendSec (misal 30 detik) dan limit perpanjangan belum habis
+      const isLongPos = pos.side === 'LONG';
       if (extendEnabled && pos.holdRemainingSeconds <= extendSec && (pos.extensionCount || 0) < maxExtensions) {
         // Guard rolling window: hanya evaluasi 1 kali per siklus perpanjangan
         const minGapMs = Math.max(10_000, (extendSec - 5) * 1000);
         if (!pos.lastExtensionAt || now - pos.lastExtensionAt >= minGapMs) {
           const isBearish = await this.isCurrent1mCandleBearish(pos.symbol, pos.currentPrice);
           pos.candle1mStatus = isBearish ? 'RED' : 'GREEN';
+          const isFavorableCandle = isLongPos ? !isBearish : isBearish;
 
-          if (isBearish) {
+          if (isFavorableCandle) {
             pos.extendedHoldMs = (pos.extendedHoldMs || 0) + extendSec * 1000;
             pos.extensionCount = (pos.extensionCount || 0) + 1;
             pos.lastExtensionAt = now;
@@ -5864,7 +6075,7 @@ export class WickSniperEngine {
 
             logger.log(
               'INFO',
-              `⏳ [HOLD EXTENDED] ${pos.symbol}: Candle 1m MERAH (Harga $${formatCryptoPrice(pos.currentPrice)} sedang turun). Menambah waktu hold +${extendSec}s (Perpanjangan ke-${pos.extensionCount}/${maxExtensions}). Sisa waktu baru: ${pos.holdRemainingSeconds}s`,
+              `⏳ [HOLD EXTENDED] ${pos.symbol}: Candle 1m ${pos.candle1mStatus === 'RED' ? 'MERAH' : 'HIJAU'} (Harga $${formatCryptoPrice(pos.currentPrice)} searah ${pos.side}). Menambah waktu hold +${extendSec}s (Perpanjangan ke-${pos.extensionCount}/${maxExtensions}). Sisa waktu baru: ${pos.holdRemainingSeconds}s`,
               pos.symbol
             );
           }
@@ -5872,10 +6083,12 @@ export class WickSniperEngine {
       }
 
       // Tentukan status holdAction untuk visualisasi dashboard
+      const isInLossZone = isLongPos ? pos.currentPrice <= pos.avgEntryPrice : pos.currentPrice >= pos.avgEntryPrice;
+      const favStatus = isLongPos ? 'GREEN' : 'RED';
       if (pos.extensionCount && pos.extensionCount > 0) {
-        pos.holdAction = pos.candle1mStatus === 'RED' ? 'WATCH' : (pos.currentPrice >= pos.avgEntryPrice ? 'CLOSE_NOW' : 'WATCH');
+        pos.holdAction = pos.candle1mStatus === favStatus ? 'WATCH' : (isInLossZone ? 'CLOSE_NOW' : 'WATCH');
       } else {
-        pos.holdAction = pos.currentPrice >= pos.avgEntryPrice ? 'CLOSE_NOW' : 'WATCH';
+        pos.holdAction = isInLossZone ? 'CLOSE_NOW' : 'WATCH';
       }
 
       // Jika waktu benar-benar telah habis
@@ -5969,7 +6182,7 @@ export class WickSniperEngine {
             }
 
             const liveQty = Math.abs(realPos.positionAmt);
-            if (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6) {
+            if (!this.pyramidingSymbols.has(symbol) && (Math.abs(pos.totalQty - liveQty) > 1e-6 || Math.abs(pos.avgEntryPrice - realPos.entryPrice) > 1e-6)) {
               const oldQty = pos.totalQty;
               if (pos.strategyType !== 'SMART_MONEY' && this.config.exit.partialTpEnabled && !pos.partialTpDone && liveQty < oldQty) {
                 // TP1 terisi di Binance oleh matching engine (100% MAKER)!
@@ -6063,7 +6276,7 @@ export class WickSniperEngine {
               // Best practice: Jangan pasang order Limit TP kaku jika Trailing Runner sedang aktif
               const isTrailingRunnerActive = pos.strategyType === 'SMART_MONEY'
                 ? (pos.trailingTpActive || (this.config.smartMoney?.trailingTpEnabled !== false))
-                : (pos.trailingTpActive || (this.config.exit.trailingTpEnabled && (pos.partialTpDone || !this.config.exit.partialTpEnabled)));
+                : (pos.trailingTpActive || (this.config.exit.trailingTpEnabled && (pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || pos.partialTpDone || !this.config.exit.partialTpEnabled)));
               if (!isTrailingRunnerActive) {
                 const isLong = pos.side === 'LONG';
                 const tpSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
@@ -6095,9 +6308,9 @@ export class WickSniperEngine {
           Math.abs(livePos.positionAmt) > 0
         ) {
           const isLiveLong = livePos.positionSide === 'LONG' || (livePos.positionSide === 'BOTH' && livePos.positionAmt > 0);
-          const allowLong = this.config.triggerStrategy === 'SMART_MONEY' || this.config.triggerStrategy === 'HYBRID' || !!this.config.smartMoney?.enabled;
+          const allowLong = this.config.triggerStrategy === 'SMART_MONEY' || this.config.triggerStrategy === 'HYBRID' || this.config.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE' || !!this.config.smartMoney?.enabled;
           if (isLiveLong && !allowLong) {
-            // Wick Sniper murni bot SHORT spike reversal. Jangan mengadopsi posisi LONG di Binance jika mode Paus tidak aktif!
+            // Wick Sniper murni bot SHORT spike reversal. Jangan mengadopsi posisi LONG di Binance jika mode Paus/Anti-Martingale tidak aktif!
             continue;
           }
 
@@ -6112,7 +6325,8 @@ export class WickSniperEngine {
           const leverage = livePos.leverage || this.config.leverage || 10;
           const totalQty = Math.abs(livePos.positionAmt);
           const entryPrice = livePos.entryPrice;
-          const isSm = this.config.triggerStrategy === 'SMART_MONEY' || isLiveLong;
+          const isAntiM = this.config.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE' && isLiveLong;
+          const isSm = !isAntiM && (this.config.triggerStrategy === 'SMART_MONEY' || isLiveLong);
           const tpPct = isSm ? (smCfg?.takeProfitPct || 1.5) : exitCfg.takeProfitPct;
           const slPct = isSm ? (smCfg?.stopLossPct || 1.2) : exitCfg.hardStopLossPct;
           const targetTpPrice = isLiveLong
@@ -6126,7 +6340,7 @@ export class WickSniperEngine {
             id: `adopt_${livePos.symbol}_${Date.now()}`,
             symbol: livePos.symbol,
             side: isLiveLong ? 'LONG' : 'SHORT',
-            strategyType: isSm ? 'SMART_MONEY' : 'WICK_SNIPER',
+            strategyType: isAntiM ? 'WICK_SNIPER_ANTI_MARTINGALE' : isSm ? 'SMART_MONEY' : 'WICK_SNIPER',
             leverage,
             totalQty,
             avgEntryPrice: entryPrice,
@@ -7168,6 +7382,64 @@ export class WickSniperEngine {
   }
 
   /**
+   * Helper bersama: memajukan simulasi pengisian jaring atas & hitung ulang rata-rata TP/SL (SHORT WickSniper & LONG Anti-Martingale)
+   */
+  private advanceSimPlannedLayers(
+    sim: SpikeSimResult,
+    triggerHighPrice: number,
+    isAntiMartingale: boolean,
+    tpPct: number,
+    slPct: number
+  ): void {
+    if (!sim.plannedLayers || sim.plannedLayers.length === 0 || isNaN(triggerHighPrice)) return;
+    let layersChanged = false;
+    const currentFilled = sim.layersFilled || 1;
+    for (let k = currentFilled; k < sim.plannedLayers.length; k++) {
+      const lay = sim.plannedLayers[k];
+      if (triggerHighPrice >= lay.price) {
+        lay.filled = true;
+        sim.layersFilled = k + 1;
+        layersChanged = true;
+      } else {
+        break;
+      }
+    }
+
+    if (layersChanged || !sim.avgEntryPrice) {
+      let totalQty = 0;
+      let totalCost = 0;
+      let totalMargin = 0;
+      const count = sim.layersFilled || 1;
+      for (let k = 0; k < count; k++) {
+        const lay = sim.plannedLayers[k];
+        totalQty += lay.qty;
+        totalCost += lay.price * lay.qty;
+        totalMargin += lay.marginUsdt;
+      }
+      if (totalQty > 0) {
+        sim.avgEntryPrice = parseFloat((totalCost / totalQty).toFixed(8));
+        sim.simulatedMarginUsed = parseFloat(totalMargin.toFixed(2));
+        if (isAntiMartingale) {
+          sim.isBepTriggered = false;
+          sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 + tpPct / 100)).toFixed(8));
+          sim.hardSlPrice = parseFloat((sim.avgEntryPrice * (1 - slPct / 100)).toFixed(8));
+        } else {
+          const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
+          const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
+          sim.isBepTriggered = isBep;
+          if (isBep) {
+            const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
+            sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
+          } else {
+            sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - tpPct / 100)).toFixed(8));
+          }
+          sim.hardSlPrice = parseFloat((sim.avgEntryPrice * (1 + slPct / 100)).toFixed(8));
+        }
+      }
+    }
+  }
+
+  /**
    * Mengupdate simulasi pergerakan harga untuk koin-koin yang ditolak (Shadow Trading) secara real-time
    */
   private updateActiveSimSpikes(): void {
@@ -7210,58 +7482,19 @@ export class WickSniperEngine {
       }
 
       const isLong = sim.side === 'LONG';
+      const isAntiMartingaleSim = isLong && (alert.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE' || (!!sim.plannedLayers && sim.plannedLayers.length > 0));
       const lev = sim.leverage || this.config.leverage || 5;
       sim.leverage = lev;
-      const tpPct = isLong
+      const tpPct = (isLong && !isAntiMartingaleSim)
         ? this.config.momentumLong?.takeProfitPct ?? 6
         : this.config.exit?.takeProfitPct ?? 1.6;
-      const slPct = isLong
+      const slPct = (isLong && !isAntiMartingaleSim)
         ? this.config.momentumLong?.stopLossPct ?? 2.5
         : this.config.exit?.hardStopLossPct ?? 3.5;
 
-      // Update grid layers fill secara dinamis jika harga naik ke layer-layer berikutnya (SHORT)
-      if (!isLong && sim.plannedLayers && sim.plannedLayers.length > 0) {
-        let layersChanged = false;
-        const currentFilled = sim.layersFilled || 1;
-        for (let i = currentFilled; i < sim.plannedLayers.length; i++) {
-          const l = sim.plannedLayers[i];
-          if (livePrice >= l.price) {
-            l.filled = true;
-            sim.layersFilled = i + 1;
-            layersChanged = true;
-          } else {
-            break;
-          }
-        }
-
-        if (layersChanged || !sim.avgEntryPrice) {
-          let totalQty = 0;
-          let totalCost = 0;
-          let totalMargin = 0;
-          const count = sim.layersFilled || 1;
-          for (let i = 0; i < count; i++) {
-            const l = sim.plannedLayers[i];
-            totalQty += l.qty;
-            totalCost += l.price * l.qty;
-            totalMargin += l.marginUsdt;
-          }
-          if (totalQty > 0) {
-            sim.avgEntryPrice = parseFloat((totalCost / totalQty).toFixed(8));
-            sim.simulatedMarginUsed = parseFloat(totalMargin.toFixed(2));
-
-            // BEP Defense jika terisi >= bepMaxLayersTrigger (default 5)
-            const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
-            const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
-            sim.isBepTriggered = isBep;
-            if (isBep) {
-              const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
-              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
-            } else {
-              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - tpPct / 100)).toFixed(8));
-            }
-            sim.hardSlPrice = parseFloat((sim.avgEntryPrice * (1 + slPct / 100)).toFixed(8));
-          }
-        }
+      // Update grid layers fill secara dinamis jika harga naik ke layer-layer berikutnya (SHORT averaging & LONG pyramiding)
+      if (!isLong || isAntiMartingaleSim) {
+        this.advanceSimPlannedLayers(sim, livePrice, isAntiMartingaleSim, tpPct, slPct);
       }
 
       const effectiveEntry = sim.avgEntryPrice || sim.hypotheticalEntryPrice;
@@ -7378,12 +7611,13 @@ export class WickSniperEngine {
       let hitMinute = res.data.length;
 
       const isLong = sim.side === 'LONG';
+      const isAntiMartingaleSim = isLong && (spike.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE' || (!!sim.plannedLayers && sim.plannedLayers.length > 0));
       const lev = sim.leverage || this.config.leverage || 5;
       sim.leverage = lev;
-      const tpPct = isLong
+      const tpPct = (isLong && !isAntiMartingaleSim)
         ? this.config.momentumLong?.takeProfitPct ?? 6
         : this.config.exit?.takeProfitPct ?? 1.6;
-      const slPct = isLong
+      const slPct = (isLong && !isAntiMartingaleSim)
         ? this.config.momentumLong?.stopLossPct ?? 2.5
         : this.config.exit?.hardStopLossPct ?? 3.5;
 
@@ -7394,43 +7628,9 @@ export class WickSniperEngine {
         if (!isNaN(h) && h > highest) highest = h;
         if (!isNaN(l) && l > 0 && l < lowest) lowest = l;
 
-        // Dynamic grid fill check pada candle ini (SHORT)
-        if (!isLong && sim.plannedLayers && sim.plannedLayers.length > 0) {
-          const currentFilled = sim.layersFilled || 1;
-          for (let k = currentFilled; k < sim.plannedLayers.length; k++) {
-            const lay = sim.plannedLayers[k];
-            if (!isNaN(h) && h >= lay.price) {
-              lay.filled = true;
-              sim.layersFilled = k + 1;
-            } else {
-              break;
-            }
-          }
-
-          let totalQty = 0;
-          let totalCost = 0;
-          let totalMargin = 0;
-          const count = sim.layersFilled || 1;
-          for (let k = 0; k < count; k++) {
-            const lay = sim.plannedLayers[k];
-            totalQty += lay.qty;
-            totalCost += lay.price * lay.qty;
-            totalMargin += lay.marginUsdt;
-          }
-          if (totalQty > 0) {
-            sim.avgEntryPrice = parseFloat((totalCost / totalQty).toFixed(8));
-            sim.simulatedMarginUsed = parseFloat(totalMargin.toFixed(2));
-            const bepTrigger = this.config.exit?.bepMaxLayersTrigger || 5;
-            const isBep = this.config.exit?.bepDefenseEnabled && count >= bepTrigger;
-            sim.isBepTriggered = isBep;
-            if (isBep) {
-              const bepBuffer = this.config.exit?.bepBufferPct || 0.2;
-              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - bepBuffer / 100)).toFixed(8));
-            } else {
-              sim.targetTpPrice = parseFloat((sim.avgEntryPrice * (1 - tpPct / 100)).toFixed(8));
-            }
-            sim.hardSlPrice = parseFloat((sim.avgEntryPrice * (1 + slPct / 100)).toFixed(8));
-          }
+        // Dynamic grid fill check pada candle ini (SHORT averaging & LONG pyramiding)
+        if (!isLong || isAntiMartingaleSim) {
+          this.advanceSimPlannedLayers(sim, h, isAntiMartingaleSim, tpPct, slPct);
         }
 
         const effectiveEntry = sim.avgEntryPrice || sim.hypotheticalEntryPrice;
@@ -7515,7 +7715,7 @@ export class WickSniperEngine {
 
   private async handleSmartMoneySignal(signal: SmartMoneySignal) {
     if (!this.isRunning) return;
-    if (this.config.triggerStrategy === 'WICK_SNIPER') return;
+    if (this.config.triggerStrategy === 'WICK_SNIPER' || this.config.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE') return;
     if (this.config.smartMoney?.enabled === false) return;
 
     const symbol = signal.symbol;
