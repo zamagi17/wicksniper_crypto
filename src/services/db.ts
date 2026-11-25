@@ -947,11 +947,11 @@ export class DatabaseService {
       }
 
       if (options.strategy === 'SMART_MONEY') {
-        conditions.push(`(params_snapshot->>'strategy' = 'SMART_MONEY' OR params_snapshot->>'whaleAvgEntry' IS NOT NULL OR params_snapshot->>'whaleShortRatio' IS NOT NULL OR params_snapshot->>'whaleLongRatio' IS NOT NULL OR params_snapshot->'smartMoneyFlowStatus' IS NOT NULL)`);
+        conditions.push(`(params_snapshot->>'strategy' = 'SMART_MONEY' OR (params_snapshot->>'strategy' IS NULL AND (params_snapshot->>'whaleAvgEntry' IS NOT NULL OR params_snapshot->>'whaleShortRatio' IS NOT NULL OR params_snapshot->>'whaleLongRatio' IS NOT NULL OR params_snapshot->'smartMoneyFlowStatus' IS NOT NULL)))`);
       } else if (options.strategy === 'WICK_SNIPER_ANTI_MARTINGALE') {
         conditions.push(`params_snapshot->>'strategy' = 'WICK_SNIPER_ANTI_MARTINGALE'`);
       } else if (options.strategy === 'WICK_SNIPER') {
-        conditions.push(`((params_snapshot->>'strategy' IS NULL OR (params_snapshot->>'strategy' != 'SMART_MONEY' AND params_snapshot->>'strategy' != 'WICK_SNIPER_ANTI_MARTINGALE')) AND params_snapshot->>'whaleAvgEntry' IS NULL AND params_snapshot->>'whaleShortRatio' IS NULL AND params_snapshot->>'whaleLongRatio' IS NULL AND params_snapshot->'smartMoneyFlowStatus' IS NULL)`);
+        conditions.push(`((params_snapshot->>'strategy' IN ('WICK_SNIPER', 'EXHAUSTION_SNIPER')) OR (params_snapshot->>'strategy' IS NULL AND params_snapshot->>'whaleAvgEntry' IS NULL AND params_snapshot->>'whaleShortRatio' IS NULL AND params_snapshot->>'whaleLongRatio' IS NULL AND params_snapshot->'smartMoneyFlowStatus' IS NULL))`);
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

@@ -530,7 +530,7 @@ export class BinanceFuturesClient {
   /**
    * Mengambil posisi aktual koin tertentu langsung dari Binance matching engine
    */
-  public async getOpenPosition(symbol: string): Promise<{
+  public async getOpenPosition(symbol: string, expectedSide?: 'LONG' | 'SHORT'): Promise<{
     symbol: string;
     positionAmt: number;
     entryPrice: number;
@@ -550,12 +550,27 @@ export class BinanceFuturesClient {
           this.isDualSidePosition = true;
         }
 
-        // Prioritas 1: Cari posisi yang MEMILIKI ukuran aktif (positionAmt != 0)
-        let item = res.data.find(
-          (p: any) => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt || '0')) > 1e-8
-        );
+        // Prioritas 1: Cari posisi aktif yang cocok dengan arah yang diharapkan (Hedge Mode) atau non-zero (One-Way Mode)
+        let item = expectedSide
+          ? res.data.find(
+              (p: any) =>
+                p.symbol === symbol &&
+                Math.abs(parseFloat(p.positionAmt || '0')) > 1e-8 &&
+                (p.positionSide === expectedSide || p.positionSide === 'BOTH')
+            )
+          : undefined;
+        if (!item) {
+          item = res.data.find(
+            (p: any) => p.symbol === symbol && Math.abs(parseFloat(p.positionAmt || '0')) > 1e-8
+          );
+        }
 
-        // Prioritas 2: Jika posisi 0, cari posisi SHORT (untuk Hedge Mode)
+        // Prioritas 2: Jika posisi 0, cari posisi sesuai expectedSide atau SHORT (untuk Hedge Mode)
+        if (!item && expectedSide) {
+          item = res.data.find(
+            (p: any) => p.symbol === symbol && p.positionSide === expectedSide
+          );
+        }
         if (!item) {
           item = res.data.find(
             (p: any) => p.symbol === symbol && p.positionSide === 'SHORT'
@@ -809,10 +824,34 @@ export class BinanceFuturesClient {
 
       const data = this.signParams(params);
       const res = await client.post('/fapi/v1/order', data);
+      this.positionCacheTime = 0;
       return res?.data;
     } catch (err: any) {
       const errData = err.response?.data;
+      const errCode = errData?.code;
       const errMsg = errData?.msg || errData?.message || err.message;
+      // Auto-Recovery -4061: Sinkronkan otomatis mode Hedge / One-Way jika berubah di akun Binance
+      if (errCode === -4061) {
+        try {
+          this.isDualSidePosition = !this.isDualSidePosition;
+          const client = await this.getHttpClient();
+          const retryParams: Record<string, any> = {
+            symbol,
+            side,
+            type: 'MARKET',
+            quantity: this.formatQty(symbol, qty),
+            positionSide: this.isDualSidePosition ? (side === 'SELL' ? 'SHORT' : 'LONG') : 'BOTH',
+          };
+          const retryData = this.signParams(retryParams);
+          const retryRes = await client.post('/fapi/v1/order', retryData);
+          this.positionCacheTime = 0;
+          return retryRes?.data;
+        } catch (retryErr: any) {
+          const rMsg = retryErr.response?.data?.msg || retryErr.message;
+          this.lastOrderError = rMsg;
+          return null;
+        }
+      }
       this.lastOrderError = errMsg;
       console.error(`Gagal membuka posisi market ${symbol}:`, errData || err.message);
       return null;
@@ -845,6 +884,7 @@ export class BinanceFuturesClient {
 
       const data = this.signParams(params);
       const res = await client.post('/fapi/v1/order', data);
+      this.positionCacheTime = 0;
       return res?.data;
     } catch (err: any) {
       const errCode = err.response?.data?.code;
@@ -879,6 +919,7 @@ export class BinanceFuturesClient {
             }
             const retryData = this.signParams(retryParams);
             const retryRes = await client.post('/fapi/v1/order', retryData);
+            this.positionCacheTime = 0;
             return retryRes?.data;
           } else {
             console.log(`✅ Posisi ${symbol} ternyata sudah tertutup di Binance.`);

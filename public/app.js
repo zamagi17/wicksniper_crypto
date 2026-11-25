@@ -1845,13 +1845,13 @@ function renderActivePositions(positions) {
       let slMetricLabel = isSm
         ? `Hard SL (${isLong ? '-' : '+'}${smSlPct}%)`
         : isAntiMartingale
-        ? `Hard SL (-${currentConfig?.exit?.hardStopLossPct || 1.6}%)`
+        ? `Hard SL (-${pos.paramsSnapshot?.hardStopLossPct ?? currentConfig?.exit?.hardStopLossPct ?? 1.6}%)`
         : `Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)`;
       let slMetricHtml = `<span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>`;
       let tpMetricLabel = isSm
         ? `Target TP (${isLong ? '+' : '-'}${smTpPct}%)`
         : isAntiMartingale
-        ? `Target TP (+${currentConfig?.exit?.takeProfitPct || 3.0}%)`
+        ? `Target TP (+${pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0}%)`
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
@@ -2721,10 +2721,11 @@ function openSpikeSimModal(spikeId) {
   const highSign = highDiff >= 0 ? '+' : '';
   const lowSign = lowDiff >= 0 ? '+' : '';
 
-  const tpParam = isLong
+  const isAntiMartingaleSim = params.strategy === 'WICK_SNIPER_ANTI_MARTINGALE' || (isLong && Array.isArray(sim?.plannedLayers) && sim.plannedLayers.length > 0);
+  const tpParam = (isLong && !isAntiMartingaleSim)
     ? params.momentumLongTakeProfitPct ?? params.takeProfitPct ?? '-'
     : params.takeProfitPct ?? '-';
-  const slParam = isLong
+  const slParam = (isLong && !isAntiMartingaleSim)
     ? params.momentumLongStopLossPct ?? params.hardStopLossPct ?? '-'
     : params.hardStopLossPct ?? '-';
 
@@ -2852,7 +2853,8 @@ function renderClosedTradesTable(trades) {
       const isWin = realizedPnl >= 0;
       const pnlColor = isWin ? 'text-green' : 'text-red';
       const sign = isWin ? '+' : '';
-      const isSmTrade = t.strategyType === 'SMART_MONEY' || t.paramsSnapshot?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio;
+      const explicitTradeStrat = t.strategyType || t.paramsSnapshot?.strategy;
+      const isSmTrade = explicitTradeStrat === 'SMART_MONEY' || (!explicitTradeStrat && (!!t.smartMoneyFlowStatus || !!t.paramsSnapshot?.whaleAvgEntry || !!t.paramsSnapshot?.whaleShortRatio || !!t.paramsSnapshot?.whaleLongRatio));
       const tradeDriver = t.paramsSnapshot?.signalDriver || 'SMART_TRADER';
       const isExhaustionTrade = t.strategyType === 'EXHAUSTION_SNIPER' || t.paramsSnapshot?.strategy === 'EXHAUSTION_SNIPER' || t.paramsSnapshot?.isExhaustion || t.isExhaustion || (t.entryReason && t.entryReason.includes('Exhaustion'));
       const isAntiMartingaleTrade = t.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || t.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
@@ -3619,7 +3621,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       try { snap = JSON.parse(snap); } catch (_) { snap = null; }
     }
 
-    const isSm = t.strategyType === 'SMART_MONEY' || snap?.strategy === 'SMART_MONEY' || !!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio || !!snap?.whaleLongRatio || !!snap?.whaleAvgEntry;
+    const explicitStrat = t.strategyType || snap?.strategy;
+    const isSm = explicitStrat === 'SMART_MONEY' || (!explicitStrat && (!!t.smartMoneyFlowStatus || !!snap?.smartMoneyFlowStatus || !!snap?.whaleShortRatio || !!snap?.whaleLongRatio || !!snap?.whaleAvgEntry));
     const isExhaustion = t.strategyType === 'EXHAUSTION_SNIPER' || snap?.strategy === 'EXHAUSTION_SNIPER' || snap?.isExhaustion || t.isExhaustion || (t.entryReason && t.entryReason.includes('Exhaustion'));
     const isAntiMartingale = t.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE' || snap?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE';
     const tradeDriver = snap?.signalDriver || 'SMART_TRADER';

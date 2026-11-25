@@ -30,6 +30,8 @@ export class SpikeScanner {
   private blacklistSaveTimer: NodeJS.Timeout | null = null;
   private exhaustionCheckThrottle: Map<string, number> = new Map();
   private userId: string;
+  private tickerListenerAttached: boolean = false;
+  private suppressExhaustion: boolean = false;
 
   constructor(config: BotConfig['scanner'], userId: string = 'admin') {
     this.config = config;
@@ -263,11 +265,18 @@ export class SpikeScanner {
     };
   }
 
+  public setSuppressExhaustion(suppress: boolean) {
+    this.suppressExhaustion = suppress;
+  }
+
   public start() {
     this.config.enabled = true;
-    binanceFutures.onTickers((tickers: any[]) => {
-      this.processTickers(tickers);
-    });
+    if (!this.tickerListenerAttached) {
+      this.tickerListenerAttached = true;
+      binanceFutures.onTickers((tickers: any[]) => {
+        this.processTickers(tickers);
+      });
+    }
   }
 
   public stop() {
@@ -344,6 +353,7 @@ export class SpikeScanner {
       const minExhChange = this.config.exhaustionMin24hChangePct ?? 30;
       const minExhVol = this.config.exhaustionMin24hVolumeUsdt ?? 30_000_000;
       if (
+        !this.suppressExhaustion &&
         this.config.exhaustionModeEnabled &&
         change24hPct >= minExhChange &&
         quoteVol24h >= minExhVol &&
