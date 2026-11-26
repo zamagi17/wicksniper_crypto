@@ -1932,12 +1932,31 @@ export class WickSniperEngine {
     }
 
     const effTpPct = exitCfg.takeProfitPct * (isLowVolume ? lowVolTpMult : 1.0);
-    const initialTargetTp = isAntiMartingaleLong
-      ? currentPrice * (1 + effTpPct / 100)
-      : currentPrice * (1 - (exitCfg.takeProfitPct * (exitCfg.ladderExitEnabled ? 0.5 : 1.0) * (isLowVolume ? lowVolTpMult : 1.0)) / 100);
-    const initialTargetTp2 = isAntiMartingaleLong
-      ? initialTargetTp
-      : currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolTpMult : 1.0)) / 100);
+    const isAntiMartingaleLadder = isAntiMartingaleLong && !!exitCfg.antiMartingaleAutoLadderEnabled && this.isAntiMartingaleLadderActive();
+    const isLadderActiveInit = isAntiMartingaleLong
+      ? isAntiMartingaleLadder
+      : (!isExhaustion && !!exitCfg.ladderExitEnabled);
+    const totalLadderStepsInit = isAntiMartingaleLong
+      ? Math.max(2, Math.min(6, exitCfg.antiMartingaleLadderSteps || 2))
+      : Math.max(2, Math.min(6, exitCfg.ladderSteps || 3));
+
+    let initialTargetTp: number;
+    let initialTargetTp2: number;
+
+    if (isAntiMartingaleLong) {
+      if (isAntiMartingaleLadder) {
+        const tp1Pct = exitCfg.takeProfitPct ?? 1.6;
+        initialTargetTp = currentPrice * (1 + tp1Pct / 100);
+        const tp2Pct = (exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0) ? exitCfg.takeProfit2Pct : (tp1Pct * 1.8);
+        initialTargetTp2 = currentPrice * (1 + tp2Pct / 100);
+      } else {
+        initialTargetTp = currentPrice * (1 + effTpPct / 100);
+        initialTargetTp2 = initialTargetTp;
+      }
+    } else {
+      initialTargetTp = currentPrice * (1 - (exitCfg.takeProfitPct * (exitCfg.ladderExitEnabled ? 0.5 : 1.0) * (isLowVolume ? lowVolTpMult : 1.0)) / 100);
+      initialTargetTp2 = currentPrice * (1 - ((exitCfg.takeProfit2Pct && exitCfg.takeProfit2Pct > 0 ? exitCfg.takeProfit2Pct : exitCfg.takeProfitPct * 2) * (isLowVolume ? lowVolTpMult : 1.0)) / 100);
+    }
 
     const initialPos: ActivePosition = {
       id: `${symbol}_${Date.now()}`,
@@ -1961,6 +1980,8 @@ export class WickSniperEngine {
       openedAt: Date.now(),
       targetTpPrice: initialTargetTp,
       targetTp2Price: initialTargetTp2,
+      isLadderActive: isLadderActiveInit,
+      totalLadderSteps: isLadderActiveInit ? totalLadderStepsInit : undefined,
       hardSlPrice: initialHardSl,
       slDescription: initialSlDesc,
       status: 'SNIPING',
@@ -2866,6 +2887,7 @@ export class WickSniperEngine {
         const isLadderAntiMartingaleLong = isAntiMartingaleLong && !!this.config.exit?.antiMartingaleAutoLadderEnabled && this.isAntiMartingaleLadderActive();
         const isLadderWickLong = !isSmLong && !isAntiMartingaleLong && !!this.config.exit?.ladderExitEnabled;
         const isLadderLong = isLadderSmLong || isLadderAntiMartingaleLong || isLadderWickLong;
+        pos.isLadderActive = isLadderLong;
 
         if (isLadderLong) {
           const totalSteps = isSmLong
@@ -2873,6 +2895,7 @@ export class WickSniperEngine {
             : isAntiMartingaleLong
               ? Math.max(2, Math.min(6, this.config.exit?.antiMartingaleLadderSteps || 2))
               : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 3));
+          pos.totalLadderSteps = totalSteps;
           const currentStep = (pos.ladderStepIndex || 0) + 1;
           const stepTargetPrice = this.getLadderTargetPrice(pos, currentStep, totalSteps);
           pos.targetTpPrice = stepTargetPrice;
@@ -3068,11 +3091,13 @@ export class WickSniperEngine {
         const isLadderSmShort = isSmPos && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1));
         const isLadderWickShort = !isSmPos && !!this.config.exit?.ladderExitEnabled;
         const isLadderShort = isLadderSmShort || isLadderWickShort;
+        pos.isLadderActive = isLadderShort;
 
         if (isLadderShort) {
           const totalSteps = isSmPos
             ? Math.max(2, Math.min(6, smCfg.ladderSteps || 4))
             : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 3));
+          pos.totalLadderSteps = totalSteps;
           const currentStep = (pos.ladderStepIndex || 0) + 1;
           const stepTargetPrice = this.getLadderTargetPrice(pos, currentStep, totalSteps);
           pos.targetTpPrice = stepTargetPrice;

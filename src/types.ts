@@ -580,6 +580,8 @@ export interface ActivePosition {
   isBepDefenseActive?: boolean;
   bepDefenseReason?: string;
   trailingTpActive?: boolean;
+  isLadderActive?: boolean;    // Mode Ladder Unwinding aktif untuk posisi ini
+  totalLadderSteps?: number;   // Jumlah total tangga ladder
   ladderStepIndex?: number;    // Tangga cicil keluar terakhir yang berhasil dieksekusi (0 = belum, 1 = tangga 1, dst.)
   ladderInitialQty?: number;   // Kuantitas posisi saat ladder unwinding pertama kali dimulai
   lastLadderStepAt?: number;   // Timestamp eksekusi tangga terakhir

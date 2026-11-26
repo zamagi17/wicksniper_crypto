@@ -1401,6 +1401,36 @@ function renderStatus(status) {
     }
   }
 
+  const headerLadderTag = document.getElementById('am-auto-ladder-header-tag');
+  if (headerLadderTag) {
+    const isAmStrat = (currentConfig?.triggerStrategy === 'WICK_SNIPER_ANTI_MARTINGALE');
+    if (isAmStrat && status.antiMartingaleAutoLadder) {
+      const am = status.antiMartingaleAutoLadder;
+      headerLadderTag.style.display = 'inline-block';
+      if (!am.enabled) {
+        headerLadderTag.innerHTML = `🪜 Auto-Ladder: OFF`;
+        headerLadderTag.style.background = 'rgba(148, 163, 184, 0.15)';
+        headerLadderTag.style.color = '#94a3b8';
+        headerLadderTag.style.border = '1px solid rgba(148, 163, 184, 0.3)';
+        headerLadderTag.title = `Toggle Auto-Ladder dinonaktifkan di pengaturan`;
+      } else if (am.active) {
+        headerLadderTag.innerHTML = `🪜 Ladder: AKTIF (${am.winRate.toFixed(0)}% WR)`;
+        headerLadderTag.style.background = 'rgba(48, 209, 88, 0.15)';
+        headerLadderTag.style.color = '#30d158';
+        headerLadderTag.style.border = '1px solid rgba(48, 209, 88, 0.4)';
+        headerLadderTag.title = `Auto-Ladder AKTIF karena WR 20 trade (${am.winRate.toFixed(1)}% [${am.totalSample} trade]) < ${am.lowThreshold}% (Tangga 1 de-risking 50% & kunci BEP)`;
+      } else {
+        headerLadderTag.innerHTML = `🎯 Flat TP (${am.winRate.toFixed(0)}% WR)`;
+        headerLadderTag.style.background = 'rgba(0, 240, 255, 0.12)';
+        headerLadderTag.style.color = '#00f0ff';
+        headerLadderTag.style.border = '1px solid rgba(0, 240, 255, 0.3)';
+        headerLadderTag.title = `Auto-Ladder NONAKTIF (Flat TP) karena WR 20 trade (${am.winRate.toFixed(1)}% [${am.totalSample} trade]) > ${am.highThreshold}% (Menahan 100% volume ke target TP penuh)`;
+      }
+    } else {
+      headerLadderTag.style.display = 'none';
+    }
+  }
+
   // 5. Render Pending Signals (2-Stage Execution) & Active Positions
   renderPendingSignals(status.pendingSignals || []);
   renderActivePositions(status.activePositions || []);
@@ -1848,6 +1878,10 @@ function renderActivePositions(positions) {
       const tp1RatioPct = Math.round((currentConfig?.exit?.partialTpRatio || 0.5) * 100);
       const tp2RatioPct = 100 - tp1RatioPct;
 
+      const amStatus = currentStatus?.antiMartingaleAutoLadder;
+      const isLadderActivePos = !!pos.isLadderActive || (isAntiMartingale && !!currentConfig?.exit?.antiMartingaleAutoLadderEnabled && !!amStatus?.active);
+      const totalLadderSteps = pos.totalLadderSteps ?? (isSm ? (currentConfig?.smartMoney?.ladderSteps || 4) : isAntiMartingale ? (currentConfig?.exit?.antiMartingaleLadderSteps || 2) : (currentConfig?.exit?.ladderSteps || 3));
+
       let tpStatusBadge = '';
       if (isSm) {
         const smDriver = pos.paramsSnapshot?.signalDriver || currentConfig?.smartMoney?.signalDriver || 'SMART_TRADER';
@@ -1857,7 +1891,13 @@ function renderActivePositions(positions) {
         const badgeBorder = smDriver === 'SMART_TRADER' ? 'rgba(192, 132, 252, 0.4)' : smDriver === 'DUAL_CONFLUENCE' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(46, 213, 115, 0.4)';
         tpStatusBadge = `<span class="badge-tag badge-smart-money" style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">${badgeText}</span>`;
       } else if (isAntiMartingale) {
-        tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span>`;
+        if (isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0)) {
+          tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span> <span class="badge-tag" style="background: rgba(0, 240, 255, 0.15); border: 1px solid rgba(0, 240, 255, 0.4); color: #00f0ff; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 AUTO-LADDER SIAGA (2 Tangga @ 50%)</span>`;
+        } else if (!isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0)) {
+          tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span> <span class="badge-tag" style="background: rgba(46, 213, 115, 0.15); border: 1px solid rgba(46, 213, 115, 0.35); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🎯 FLAT TP TUNGGAL</span>`;
+        } else {
+          tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span>`;
+        }
       }
       let tpBannerHtml = '';
       const isLong = pos.side === 'LONG';
@@ -1871,20 +1911,20 @@ function renderActivePositions(positions) {
         : `Hard SL (+${currentConfig?.exit?.hardStopLossPct || 4.5}%)`;
       let slMetricHtml = `<span class="text-red">$${formatCryptoPrice(pos.hardSlPrice)}</span>`;
       let tpMetricLabel = isSm
-        ? `Target TP (${isLong ? '+' : '-'}${smTpPct}%)`
+        ? `Target TP (${isLong ? '-' : '+'}${smTpPct}%)`
         : isAntiMartingale
-        ? `Target TP (+${pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0}%)`
+        ? (isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0) ? `🎯 Target Tangga 1 (Jual 50% + BEP)` : `Target TP (+${pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0}%)`)
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
       if (pos.ladderStepIndex && pos.ladderStepIndex > 0) {
-        const totalLadderSteps = pos.paramsSnapshot?.ladderSteps ?? (isSm ? currentConfig?.smartMoney?.ladderSteps : currentConfig?.exit?.ladderSteps) ?? 4;
+        const totalStepsCount = pos.paramsSnapshot?.ladderSteps ?? (isSm ? currentConfig?.smartMoney?.ladderSteps : currentConfig?.exit?.ladderSteps) ?? 4;
         const currentStep = pos.ladderStepIndex;
-        tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 TANGGA ${currentStep}/${totalLadderSteps} HIT • 🛡️ AUTO BEP AKTIF</span>`;
+        tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 TANGGA ${currentStep}/${totalStepsCount} HIT • 🛡️ AUTO BEP AKTIF</span>`;
         tpBannerHtml = `
           <div style="background: linear-gradient(90deg, rgba(48, 209, 88, 0.12), rgba(0, 240, 255, 0.08)); border: 1px dashed rgba(48, 209, 88, 0.35); border-radius: 6px; padding: 7px 12px; margin: 10px 0 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11.5px;">
             <span style="color: #30d158; font-weight: 600;">
-              🪜 <b>LADDER UNWINDING (Tangga ${currentStep}/${totalLadderSteps}):</b> Cuan terealisasi <b>+${(pos.partialRealizedPnl || 0).toFixed(2)} USDT</b> aman di dompet!
+              🪜 <b>LADDER UNWINDING (Tangga ${currentStep}/${totalStepsCount}):</b> Cuan terealisasi <b>+${(pos.partialRealizedPnl || 0).toFixed(2)} USDT</b> aman di dompet!
             </span>
             <span style="color: #00f0ff; font-weight: 600;">
               🛡️ Sisa <b>${pos.totalQty} koin</b> memburu Tangga ${currentStep + 1} dengan <b>Auto BEP @ ${formatCryptoPrice(pos.hardSlPrice)}</b>
@@ -1926,6 +1966,32 @@ function renderActivePositions(positions) {
         slMetricHtml = `<span style="color: #00f0ff; font-weight: 600;">$${formatCryptoPrice(pos.hardSlPrice)} <small style="color: #30d158;">(Zero Risk)</small></span>`;
         tpMetricLabel = `🎯 Target TP 2 (Sisa ${tp2RatioPct}%)`;
         tpMetricHtml = `<span class="text-green"><b>$${formatCryptoPrice(pos.targetTpPrice)}</b></span>`;
+      } else if (isAntiMartingale && isLadderActivePos) {
+        const tp1Price = pos.targetTpPrice;
+        const tp2Price = pos.targetTp2Price || (pos.avgEntryPrice * (1 + (currentConfig?.exit?.takeProfit2Pct || 3.0) / 100));
+        const wrInfo = amStatus?.winRate !== undefined ? ` (WR 20 Trade: ${amStatus.winRate.toFixed(1)}% &lt; ${amStatus.lowThreshold ?? 52}%)` : '';
+        tpBannerHtml = `
+          <div style="background: linear-gradient(90deg, rgba(0, 240, 255, 0.10), rgba(48, 209, 88, 0.08)); border: 1px dashed rgba(0, 240, 255, 0.4); border-radius: 6px; padding: 8px 12px; margin: 10px 0 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11.5px;">
+            <span style="color: #00f0ff; font-weight: 600;">
+              🪜 <b>AUTO-LADDER SIAGA (2 Tangga @ 50%)${wrInfo}:</b> De-risking defensif aktif.
+            </span>
+            <span style="color: #30d158; font-weight: 600;">
+              🎯 Tangga 1: <b>$${formatCryptoPrice(tp1Price)}</b> (Cairkan 50% &amp; SL geser BEP) ➜ Tangga 2: <b>$${formatCryptoPrice(tp2Price)}</b>
+            </span>
+          </div>
+        `;
+      } else if (isAntiMartingale && !isLadderActivePos) {
+        const wrText = amStatus?.enabled && amStatus?.winRate !== undefined ? ` (WR 20 Trade: ${amStatus.winRate.toFixed(1)}% &gt; ${amStatus.highThreshold ?? 60}%)` : '';
+        tpBannerHtml = `
+          <div style="background: rgba(46, 213, 115, 0.05); border: 1px solid rgba(46, 213, 115, 0.25); border-radius: 6px; padding: 6px 12px; margin: 10px 0 12px; font-size: 11.5px; color: #cbd5e1; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <span style="color: #2ed573; font-weight: 600;">
+              🎯 <b>MODE FLAT TP TUNGGAL (100% Volume)${wrText}:</b> Menahan posisi hingga target puncak.
+            </span>
+            <span style="color: #00f0ff; font-weight: 600;">
+              Target TP: <b>$${formatCryptoPrice(pos.targetTpPrice)}</b> (+${pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0}%)
+            </span>
+          </div>
+        `;
       } else if (isDualTp) {
         tpStatusBadge = `<span class="badge-tp-stage-dual" style="background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: #00f0ff; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🎯 Dual TP: ${tp1RatioPct}% / ${tp2RatioPct}%</span>`;
         tpMetricLabel = `🎯 Target TP 1 (${tp1RatioPct}%)`;
