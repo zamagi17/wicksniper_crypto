@@ -152,6 +152,7 @@ export class WickSniperEngine {
   private lastPyramidingAt: Map<string, number> = new Map();
   private orderAudit: Map<string, { lastEvent: string; lastTs: number; status: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
+  private antiMartingaleLadderState: boolean = false;
   private dailySnapshots: DailySnapshot[] = [];
   private cachedDbStats: {
     totalTrades: number;
@@ -557,6 +558,7 @@ export class WickSniperEngine {
       this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
     }
     this.syncScannerLifecycle();
+    this.updateAntiMartingaleLadderState();
     if (this.userId === 'admin') {
       if (this.config.telegram) {
         telegram.updateConfig(this.config.telegram);
@@ -729,6 +731,7 @@ export class WickSniperEngine {
             this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
           }
           this.syncScannerLifecycle();
+    this.updateAntiMartingaleLadderState();
           this.lastSyncedConfigJson = JSON.stringify(userRec.config);
         }
       }
@@ -769,6 +772,7 @@ export class WickSniperEngine {
       this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
     }
     this.syncScannerLifecycle();
+    this.updateAntiMartingaleLadderState();
 
     // Pulihkan status cooldown koin dari riwayat trade terakhir di database agar tidak hilang saat restart
     try {
@@ -2859,13 +2863,16 @@ export class WickSniperEngine {
             : (longCfg?.trailingTpEnabled !== false);
         const profitPct = ((currentPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 100;
         const isLadderSmLong = isSmLong && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1));
+        const isLadderAntiMartingaleLong = isAntiMartingaleLong && !!this.config.exit?.antiMartingaleAutoLadderEnabled && this.isAntiMartingaleLadderActive();
         const isLadderWickLong = !isSmLong && !isAntiMartingaleLong && !!this.config.exit?.ladderExitEnabled;
-        const isLadderLong = isLadderSmLong || isLadderWickLong;
+        const isLadderLong = isLadderSmLong || isLadderAntiMartingaleLong || isLadderWickLong;
 
         if (isLadderLong) {
           const totalSteps = isSmLong
             ? Math.max(2, Math.min(6, smCfg.ladderSteps || 4))
-            : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 3));
+            : isAntiMartingaleLong
+              ? Math.max(2, Math.min(6, this.config.exit?.antiMartingaleLadderSteps || 2))
+              : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 3));
           const currentStep = (pos.ladderStepIndex || 0) + 1;
           const stepTargetPrice = this.getLadderTargetPrice(pos, currentStep, totalSteps);
           pos.targetTpPrice = stepTargetPrice;
@@ -3421,6 +3428,13 @@ export class WickSniperEngine {
 
     if (isAntiMartingale) {
       const tpMult = pos.paramsSnapshot?.isLowVolumeAdjusted ? (pos.paramsSnapshot.lowVolumeTpMultiplier || 1.0) : 1.0;
+      const isLadder = !!this.config.exit?.antiMartingaleAutoLadderEnabled && this.isAntiMartingaleLadderActive();
+      if (isLadder) {
+        const totalSteps = Math.max(2, Math.min(6, this.config.exit?.antiMartingaleLadderSteps || 2));
+        const currentStep = Math.min(totalSteps, (pos.ladderStepIndex || 0) + 1);
+        const ladderTarget = this.getLadderTargetPrice(pos, currentStep, totalSteps);
+        return { targetTpPrice: ladderTarget, targetTp2Price: ladderTarget, isBepActive: false };
+      }
       const singleTp = pos.avgEntryPrice * (1 + (exitCfg.takeProfitPct * tpMult) / 100);
       return { targetTpPrice: singleTp, targetTp2Price: singleTp, isBepActive: false };
     }
@@ -3760,11 +3774,80 @@ export class WickSniperEngine {
   }
 
   /**
+   * Menghitung Win Rate dari trade terakhir (default 20 trade) untuk Anti-Martingale Hysteresis
+   */
+  public getAntiMartingale20TradeWinRate(windowSize: number = 20): { winRate: number; totalSample: number; wins: number } {
+    const isPaper = this.config.tradingMode === 'PAPER';
+    const amTrades = this.closedTrades.filter(
+      (t) => (t.paramsSnapshot?.strategy === 'WICK_SNIPER_ANTI_MARTINGALE' || (t as any).strategy === 'WICK_SNIPER_ANTI_MARTINGALE') &&
+             (t.isPaper === isPaper)
+    );
+
+    let sampleTrades = amTrades.slice(0, windowSize);
+    if (sampleTrades.length < windowSize) {
+      const otherTrades = this.closedTrades.filter(
+        (t) => t.isPaper === isPaper && !sampleTrades.some((st) => st.id === t.id)
+      );
+      sampleTrades = [...sampleTrades, ...otherTrades].slice(0, windowSize);
+    }
+
+    if (sampleTrades.length === 0) {
+      return { winRate: 60, totalSample: 0, wins: 0 };
+    }
+
+    const wins = sampleTrades.filter((t) => t.realizedPnl > 0).length;
+    const winRate = Math.round((wins / sampleTrades.length) * 1000) / 10;
+    return { winRate, totalSample: sampleTrades.length, wins };
+  }
+
+  /**
+   * Evaluasi status Auto-Ladder Anti-Martingale dengan Hysteresis Loop 8% (WR < 52% Aktif, WR > 60% Nonaktif)
+   */
+  public updateAntiMartingaleLadderState(): boolean {
+    if (!this.config.exit?.antiMartingaleAutoLadderEnabled) {
+      this.antiMartingaleLadderState = false;
+      return false;
+    }
+
+    const { winRate, totalSample } = this.getAntiMartingale20TradeWinRate(20);
+    const lowThreshold = this.config.exit?.antiMartingaleLadderWrLow ?? 52;
+    const highThreshold = this.config.exit?.antiMartingaleLadderWrHigh ?? 60;
+
+    if (winRate < lowThreshold) {
+      if (!this.antiMartingaleLadderState) {
+        this.antiMartingaleLadderState = true;
+        logger.log(
+          'WARN',
+          `🪜 [AUTO-LADDER ANTI-MARTINGALE AKTIF] WR 20 trade (${winRate.toFixed(1)}% [${totalSample} trade]) < ${lowThreshold}%. Mengaktifkan Exit Ladder untuk de-risking defensif & kunci BEP!`
+        );
+      }
+    } else if (winRate > highThreshold) {
+      if (this.antiMartingaleLadderState) {
+        this.antiMartingaleLadderState = false;
+        logger.log(
+          'SUCCESS',
+          `🎯 [AUTO-LADDER ANTI-MARTINGALE NONAKTIF] WR 20 trade (${winRate.toFixed(1)}% [${totalSample} trade]) > ${highThreshold}%. Menonaktifkan Exit Ladder kembali ke Flat TP tunggal untuk profit maksimal!`
+        );
+      }
+    }
+    // Jika lowThreshold <= winRate <= highThreshold:
+    // Pertahankan status sebelumnya (Hysteresis buffer 8%)
+
+    return this.antiMartingaleLadderState;
+  }
+
+  public isAntiMartingaleLadderActive(): boolean {
+    if (!this.config.exit?.antiMartingaleAutoLadderEnabled) return false;
+    return this.antiMartingaleLadderState;
+  }
+
+  /**
    * Menghitung target harga per tangga untuk Exit Ladder (mendukung Model Emas 3-Tier & 4-Tier)
    */
   public getLadderTargetPrice(pos: ActivePosition, step: number, totalSteps: number): number {
     const isLong = pos.side === 'LONG';
     const isSm = pos.strategyType === 'SMART_MONEY';
+    const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE';
     const exitCfg = this.config.exit;
     const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
 
@@ -3776,6 +3859,32 @@ export class WickSniperEngine {
         binanceFutures.formatPrice(
           pos.symbol,
           isLong ? pos.avgEntryPrice * (1 + targetPct / 100) : pos.avgEntryPrice * (1 - targetPct / 100)
+        )
+      );
+    }
+
+    if (isAntiMartingale) {
+      const tp1Pct = exitCfg?.takeProfitPct ?? 1.6;
+      const tp2Pct = (exitCfg?.takeProfit2Pct && exitCfg.takeProfit2Pct > 0) ? exitCfg.takeProfit2Pct : (tp1Pct * 1.8);
+      const tp3Pct = (exitCfg?.takeProfit3Pct && exitCfg.takeProfit3Pct > 0) ? exitCfg.takeProfit3Pct : (tp1Pct * 2.8);
+
+      let targetPct: number;
+      if (totalSteps === 2) {
+        // Model 2 Tangga: Tangga 1 (de-risking 50% + kunci BEP) -> Tangga 2 (Full Cuan 50%)
+        targetPct = step === 1 ? tp1Pct : tp2Pct;
+      } else if (totalSteps === 3) {
+        if (step === 1) targetPct = tp1Pct;
+        else if (step === 2) targetPct = tp2Pct;
+        else targetPct = tp3Pct;
+      } else {
+        const stepMult = totalSteps === 1 ? 1.0 : (0.7 + ((step - 1) / (totalSteps - 1)) * 1.3);
+        targetPct = tp1Pct * stepMult;
+      }
+
+      return parseFloat(
+        binanceFutures.formatPrice(
+          pos.symbol,
+          pos.avgEntryPrice * (1 + targetPct / 100)
         )
       );
     }
@@ -4506,15 +4615,23 @@ export class WickSniperEngine {
       const isAntiMartingale = pos.strategyType === 'WICK_SNIPER_ANTI_MARTINGALE';
       const smCfg = this.config.smartMoney || this.getDefaultSmartMoneyConfig();
       const isLadderActive = (isSm && (smCfg.ladderExitEnabled ?? ((smCfg.entryLayers || 1) > 1)))
-        || (!isSm && !isAntiMartingale && !!this.config.exit?.ladderExitEnabled);
+        || (!isSm && !isAntiMartingale && !!this.config.exit?.ladderExitEnabled)
+        || (isAntiMartingale && !!this.config.exit?.antiMartingaleAutoLadderEnabled && this.isAntiMartingaleLadderActive());
 
       if (isLadderActive) {
+        if (pos.tpOrderId) {
+          binanceFutures.cancelOrder(pos.symbol, pos.tpOrderId).catch(() => {});
+          pos.lastTpOrderId = pos.tpOrderId;
+          pos.tpOrderId = undefined;
+        }
         const totalSteps = isSm
           ? Math.max(2, Math.min(6, smCfg.ladderSteps || 4))
-          : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 4));
+          : isAntiMartingale
+            ? Math.max(2, Math.min(6, this.config.exit?.antiMartingaleLadderSteps || 2))
+            : Math.max(2, Math.min(6, this.config.exit?.ladderSteps || 4));
         logger.log(
           'INFO',
-          `🪜 [LADDER TP SIAGA] ${pos.symbol}: Mode Cicil Keluar Bertahap aktif (${totalSteps} Tangga @ ${Math.round(100 / totalSteps)}%). Bot mengawal eksekusi retrace secara dinamis.`,
+          `🪜 [LADDER TP SIAGA] ${pos.symbol}: Mode Cicil Keluar Bertahap aktif (${totalSteps} Tangga @ ${Math.round(100 / totalSteps)}%). Bot mengawal eksekusi secara dinamis.`,
           pos.symbol
         );
         return;
@@ -4841,6 +4958,11 @@ export class WickSniperEngine {
       partialTpRatio: this.config.exit?.partialTpRatio,
       ladderExitEnabled: this.config.exit?.ladderExitEnabled,
       ladderSteps: this.config.exit?.ladderSteps,
+      antiMartingaleAutoLadderEnabled: this.config.exit?.antiMartingaleAutoLadderEnabled,
+      antiMartingaleLadderActive: this.isAntiMartingaleLadderActive(),
+      antiMartingaleLadderWrLow: this.config.exit?.antiMartingaleLadderWrLow,
+      antiMartingaleLadderWrHigh: this.config.exit?.antiMartingaleLadderWrHigh,
+      antiMartingaleLadderSteps: this.config.exit?.antiMartingaleLadderSteps,
       extendHoldOnRedCandleEnabled: this.config.exit?.extendHoldOnRedCandleEnabled,
       extendHoldSeconds: this.config.exit?.extendHoldSeconds,
       maxHoldExtensions: this.config.exit?.maxHoldExtensions,
@@ -5514,6 +5636,7 @@ export class WickSniperEngine {
 
       this.closedTrades.unshift(trade);
       if (this.closedTrades.length > 100) this.closedTrades.pop();
+      this.updateAntiMartingaleLadderState();
 
       pos.status = 'CLOSED';
       this.activePositions.delete(pos.symbol);
@@ -6862,6 +6985,14 @@ export class WickSniperEngine {
         reason: this.isWithinTradingSchedule().reason,
       },
       pendingSignals: Array.from(this.pendingSignals.values()),
+      antiMartingaleAutoLadder: {
+        enabled: !!this.config.exit?.antiMartingaleAutoLadderEnabled,
+        active: this.isAntiMartingaleLadderActive(),
+        ...this.getAntiMartingale20TradeWinRate(20),
+        lowThreshold: this.config.exit?.antiMartingaleLadderWrLow ?? 52,
+        highThreshold: this.config.exit?.antiMartingaleLadderWrHigh ?? 60,
+        hysteresisBuffer: 8,
+      },
       macroCooldown: this.getMacroCutLossCooldownStatus(),
     };
   }
@@ -7248,6 +7379,7 @@ export class WickSniperEngine {
             this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
           }
           this.syncScannerLifecycle();
+    this.updateAntiMartingaleLadderState();
           this.broadcastConfig();
           this.broadcastStatus();
           return true;
@@ -7280,6 +7412,7 @@ export class WickSniperEngine {
           this.smartMoneyScanner.updateConfig(this.config.smartMoney, this.config.scanner);
         }
         this.syncScannerLifecycle();
+    this.updateAntiMartingaleLadderState();
         if (this.config.telegram) {
           telegram.updateConfig(this.config.telegram);
         }
@@ -7338,6 +7471,7 @@ export class WickSniperEngine {
       ]);
       if (recentTrades && recentTrades.length >= 0) {
         this.closedTrades = recentTrades;
+        this.updateAntiMartingaleLadderState();
       }
       if (dbStats) {
         this.cachedDbStats = dbStats;

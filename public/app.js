@@ -1379,6 +1379,28 @@ function renderStatus(status) {
     renderBtcFilter(status.btcTrendStatus);
   }
 
+  // 4b. Render Anti-Martingale Auto-Ladder Live Status
+  const amLadderPill = document.getElementById('am-auto-ladder-live-pill');
+  if (amLadderPill && status.antiMartingaleAutoLadder) {
+    const am = status.antiMartingaleAutoLadder;
+    if (!am.enabled) {
+      amLadderPill.innerHTML = `🪜 Auto-Ladder: Standby (Toggle Off)`;
+      amLadderPill.style.background = 'rgba(148, 163, 184, 0.12)';
+      amLadderPill.style.color = '#94a3b8';
+      amLadderPill.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+    } else if (am.active) {
+      amLadderPill.innerHTML = `🪜 <b>Auto-Ladder: AKTIF</b> (WR 20 Trade: ${am.winRate.toFixed(1)}% &lt; ${am.lowThreshold}%) • De-Risking 50% + BEP`;
+      amLadderPill.style.background = 'rgba(48, 209, 88, 0.15)';
+      amLadderPill.style.color = '#30d158';
+      amLadderPill.style.borderColor = 'rgba(48, 209, 88, 0.4)';
+    } else {
+      amLadderPill.innerHTML = `🎯 <b>Auto-Ladder: FLAT TP</b> (WR 20 Trade: ${am.winRate.toFixed(1)}% &gt; ${am.highThreshold}%) • Full Profit Run`;
+      amLadderPill.style.background = 'rgba(0, 240, 255, 0.12)';
+      amLadderPill.style.color = '#00f0ff';
+      amLadderPill.style.borderColor = 'rgba(0, 240, 255, 0.3)';
+    }
+  }
+
   // 5. Render Pending Signals (2-Stage Execution) & Active Positions
   renderPendingSignals(status.pendingSignals || []);
   renderActivePositions(status.activePositions || []);
@@ -5273,6 +5295,16 @@ function populateSettingsForm(cfg) {
   setVal('cfg-tp3-pct', cfg.exit?.takeProfit3Pct ?? 4.5);
   if (typeof updateLadderStepsDescription === 'function') updateLadderStepsDescription();
 
+  // Auto-Ladder Anti-Martingale (Regime Switching WR 20 Trade)
+  const amAutoLadderCb = document.getElementById('cfg-am-auto-ladder-enabled');
+  if (amAutoLadderCb) {
+    amAutoLadderCb.checked = !!cfg.exit?.antiMartingaleAutoLadderEnabled;
+    if (typeof toggleAmAutoLadderInput === 'function') toggleAmAutoLadderInput();
+  }
+  setVal('cfg-am-ladder-wr-low', cfg.exit?.antiMartingaleLadderWrLow ?? 52);
+  setVal('cfg-am-ladder-wr-high', cfg.exit?.antiMartingaleLadderWrHigh ?? 60);
+  setVal('cfg-am-ladder-steps', cfg.exit?.antiMartingaleLadderSteps ?? 2);
+
   // Total Floating Profit Target (Portfolio TP)
   const portTpCheckbox = document.getElementById('cfg-portfolio-tp-enabled');
   if (portTpCheckbox) {
@@ -5716,6 +5748,10 @@ function getSettingsFormData() {
       partialTpRatio: (parseFloat(getVal('cfg-partial-tp-ratio', '70')) || 70) / 100,
       ladderExitEnabled: !!document.getElementById('cfg-ladder-exit-enabled')?.checked,
       ladderSteps: parseInt(getVal('cfg-ladder-steps', '3'), 10) || 3,
+      antiMartingaleAutoLadderEnabled: !!document.getElementById('cfg-am-auto-ladder-enabled')?.checked,
+      antiMartingaleLadderWrLow: parseFloat(getVal('cfg-am-ladder-wr-low', '52')) || 52,
+      antiMartingaleLadderWrHigh: parseFloat(getVal('cfg-am-ladder-wr-high', '60')) || 60,
+      antiMartingaleLadderSteps: parseInt(getVal('cfg-am-ladder-steps', '2'), 10) || 2,
       portfolioTpEnabled: document.getElementById('cfg-portfolio-tp-enabled') ? !!document.getElementById('cfg-portfolio-tp-enabled').checked : true,
       portfolioTpTargetPct: parseFloat(getVal('cfg-portfolio-tp-target', '10.0')) || 10.0,
       portfolioTpMinProfitPct: parseFloat(getVal('cfg-portfolio-tp-min-profit', '0.5')) || 0.5,
@@ -6242,6 +6278,15 @@ function toggleLadderExitInput() {
   }
 }
 window.toggleLadderExitInput = toggleLadderExitInput;
+
+function toggleAmAutoLadderInput() {
+  const checkbox = document.getElementById('cfg-am-auto-ladder-enabled');
+  const group = document.getElementById('am-auto-ladder-params-group');
+  if (group) {
+    group.style.display = checkbox && checkbox.checked ? 'flex' : 'none';
+  }
+}
+window.toggleAmAutoLadderInput = toggleAmAutoLadderInput;
 
 function updateLadderStepsDescription() {
   const stepsVal = document.getElementById('cfg-ladder-steps')?.value;

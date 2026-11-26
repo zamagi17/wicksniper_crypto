@@ -97,6 +97,10 @@ export interface BotConfig {
     partialTpRatio?: number; // default 0.5 (50%)
     ladderExitEnabled?: boolean; // Cicil keluar bertahap saat retrace profit (Wick Sniper)
     ladderSteps?: number;        // Jumlah tangga cicil keluar (2, 3, 4, 5, 6 tangga; default 4)
+    antiMartingaleAutoLadderEnabled?: boolean; // Auto-Ladder Anti-Martingale adaptif berbasis Win Rate 20 trade
+    antiMartingaleLadderWrLow?: number;        // Ambang batas bawah WR aktivasi ladder (%, default: 52)
+    antiMartingaleLadderWrHigh?: number;       // Ambang batas atas WR deaktivasi ladder (%, default: 60)
+    antiMartingaleLadderSteps?: number;        // Jumlah tangga ladder Anti-Martingale (default: 2)
     bepDefenseEnabled?: boolean;
     bepFinalLayerEnabled?: boolean;
     bepMaxLayersTrigger?: number;
@@ -796,6 +800,16 @@ export interface EngineStatus {
   btcTrendStatus?: BtcTrendStatus;
   scheduleStatus?: ScheduleStatus;
   pendingSignals?: PendingSignalWatchlistItem[];
+  antiMartingaleAutoLadder?: {
+    enabled: boolean;
+    active: boolean;
+    winRate: number;
+    totalSample: number;
+    wins: number;
+    lowThreshold: number;
+    highThreshold: number;
+    hysteresisBuffer: number;
+  };
   macroCooldown?: {
     longUntil?: number;
     shortUntil?: number;

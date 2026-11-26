@@ -1427,8 +1427,11 @@
             <p style="font-size: 11.8px; color: #cbd5e1; margin: 4px 0 0 0; line-height: 1.45;">
               • Semua posisi otomatis <b>LONG</b> (eksekusi instan tanpa menunggu pullback -0.3%).<br>
               • Jaring Grid ditempatkan <b>naik ke atas</b> (beli tambah saat harga menanjak), lalu TP &amp; SL dihitung ulang dari Average Entry.<br>
-              • <b>TP Bertingkat (Ladder), Dual Partial TP, dan Auto-BEP Defense otomatis dinonaktifkan</b> sesuai aturan Anti-Martingale.
+              • <b>Mode Exit:</b> Default Flat TP tunggal. Tersedia toggle <b>Auto-Ladder Adaptif</b> di bawah (aktif jika WR 20 trade &lt; 52%, nonaktif jika WR &gt; 60%).
             </p>
+            <div id="am-auto-ladder-live-pill" style="margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 4px; font-size: 11.5px; font-weight: 600; background: rgba(0, 240, 255, 0.12); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3);">
+              🪜 Auto-Ladder: Standby
+            </div>
           </div>
 
           <!-- TOP GAINER EXHAUSTION SNIPER (LEADER MODE) -->
@@ -2162,6 +2165,40 @@
                 <label>Target TP3 / Runner (%)</label>
                 <input type="number" id="cfg-tp3-pct" step="0.1" class="form-control" placeholder="4.5">
                 <small class="form-hint">Target tangkapan dump besar (Tangga terakhir)</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- AUTO-LADDER ANTI-MARTINGALE (REGIME SWITCHING WR 20 TRADE) -->
+          <div class="form-row" style="background: rgba(0, 240, 255, 0.04); border: 1px dashed rgba(0, 240, 255, 0.35); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+            <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; color: #00f0ff;">
+                <input type="checkbox" id="cfg-am-auto-ladder-enabled" onchange="toggleAmAutoLadderInput()" style="width: 16px; height: 16px; accent-color: #00f0ff;">
+                🚀 Auto-Ladder Anti-Martingale (Regime Switching WR 20 Trade) <span class="badge-tag" style="background: rgba(0, 240, 255, 0.15); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3);">Adaptive De-Risking</span>
+              </label>
+              <small class="form-hint">Khusus strategi <b>Wick Sniper Anti-Martingale</b>. Bot memantau performa 20 trade terakhir: jika <b>Win Rate &lt; 52%</b>, bot otomatis mengaktifkan Exit Ladder (Tangga 1 jual 50% &amp; kunci SL ke BEP). Jika <b>Win Rate &gt; 60%</b>, bot otomatis kembali ke Flat TP penuh. Rentang 8% (Hysteresis) mencegah sistem bolak-balik.</small>
+            </div>
+
+            <div id="am-auto-ladder-params-group" style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Ambang Bawah WR Aktif (%)</label>
+                <input type="number" id="cfg-am-ladder-wr-low" step="1" class="form-control" placeholder="52" value="52">
+                <small class="form-hint">Ladder aktif jika WR &lt; nilai ini</small>
+              </div>
+
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Ambang Atas WR Nonaktif (%)</label>
+                <input type="number" id="cfg-am-ladder-wr-high" step="1" class="form-control" placeholder="60" value="60">
+                <small class="form-hint">Ladder nonaktif jika WR &gt; nilai ini (Buffer 8%)</small>
+              </div>
+
+              <div class="form-group" style="flex: 1.5; min-width: 200px;">
+                <label>Model Tangga Anti-Martingale</label>
+                <select id="cfg-am-ladder-steps" class="form-control">
+                  <option value="2" selected>⚖️ 2 Tangga Simpel (50% @ TP1 + BEP / 50% @ TP2)</option>
+                  <option value="3">🏆 3 Tangga (50% @ TP1 / 30% @ TP2 / 20% @ TP3)</option>
+                </select>
+                <small class="form-hint">Tangga 1 de-risking &amp; geser SL ke BEP</small>
               </div>
             </div>
           </div>
