@@ -36,6 +36,8 @@ export interface BotConfig {
     tradeGapCooldownMinutes?: number;
     minRsi1m?: number;
     minRsiCooldownMinutes?: number;
+    maxRsi1m?: number;
+    maxRsiCooldownMinutes?: number;
     minVolRatio?: number;
     minVolRatioCooldownMinutes?: number;
     maxVolRatio?: number;
@@ -101,6 +103,7 @@ export interface BotConfig {
     antiMartingaleLadderWrLow?: number;        // Ambang batas bawah WR aktivasi ladder (%, default: 52)
     antiMartingaleLadderWrHigh?: number;       // Ambang batas atas WR deaktivasi ladder (%, default: 60)
     antiMartingaleLadderSteps?: number;        // Jumlah tangga ladder Anti-Martingale (default: 2)
+    antiMartingaleLadderTp1Pct?: number;       // Target TP1 & Trigger Kunci BEP Ladder Anti-Martingale (%, 0/kosong = Auto 45% dari Take Profit)
     bepDefenseEnabled?: boolean;
     bepFinalLayerEnabled?: boolean;
     bepMaxLayersTrigger?: number;

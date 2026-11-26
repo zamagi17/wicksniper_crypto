@@ -1770,21 +1770,30 @@
             </div>
           </div>
 
-          <!-- RSI 1M MINIMUM -->
+          <!-- RSI 1M MINIMUM & MAKSIMUM -->
           <div class="form-row" style="background: rgba(168, 85, 247, 0.04); border: 1px dashed rgba(168, 85, 247, 0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
             <div class="form-group" style="grid-column: span 2; margin-bottom: 8px;">
               <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #c084fc;">
-                📊 Filter RSI 1m Minimum <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
+                📊 Filter RSI 1m (Minimum &amp; Maksimum) <span class="badge-tag badge-wick-only">⚡ Khusus Wick</span>
               </label>
             </div>
             <div style="grid-column: span 2; display: flex; gap: 12px; flex-wrap: wrap;">
-              <div class="form-group" style="flex: 1; min-width: 160px;">
+              <div class="form-group" style="flex: 1; min-width: 150px;">
                 <label>Batas Minimum RSI 1m</label>
                 <input type="number" id="cfg-min-rsi" min="0" max="90" step="1" class="form-control" placeholder="50">
               </div>
               <div class="form-group" style="flex: 1; min-width: 140px;">
                 <label>Cooldown RSI Rendah (Menit)</label>
                 <input type="number" id="cfg-min-rsi-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label>Batas Maksimum RSI 1m</label>
+                <input type="number" id="cfg-max-rsi" min="0" max="100" step="1" class="form-control" placeholder="0 (Nonaktif)">
+                <small class="form-hint">0/Kosong = Nonaktif (Anti-Pucuk LONG, misal 80)</small>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Cooldown RSI Tinggi (Menit)</label>
+                <input type="number" id="cfg-max-rsi-cooldown" min="1" max="1440" step="1" class="form-control" placeholder="10">
               </div>
             </div>
           </div>
@@ -2201,6 +2210,12 @@
                   <option value="3">🏆 3 Tangga (50% @ TP1 / 30% @ TP2 / 20% @ TP3)</option>
                 </select>
                 <small class="form-hint">Tangga 1 de-risking &amp; geser SL ke BEP</small>
+              </div>
+
+              <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label>Trigger TP1 + BEP (%)</label>
+                <input type="number" id="cfg-am-ladder-tp1-pct" step="0.1" min="0" class="form-control" placeholder="Auto 45% TP">
+                <small class="form-hint">Kosong/0 = Auto 45% TP (misal 1.35% jika TP 3%)</small>
               </div>
             </div>
           </div>

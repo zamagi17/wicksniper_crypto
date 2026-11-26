@@ -1913,8 +1913,13 @@ function renderActivePositions(positions) {
         const badgeBorder = smDriver === 'SMART_TRADER' ? 'rgba(192, 132, 252, 0.4)' : smDriver === 'DUAL_CONFLUENCE' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(46, 213, 115, 0.4)';
         tpStatusBadge = `<span class="badge-tag badge-smart-money" style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">${badgeText}</span>`;
       } else if (isAntiMartingale) {
+        const baseTpPct = pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0;
+        const customTp1Pct = pos.paramsSnapshot?.antiMartingaleLadderTp1Pct ?? currentConfig?.exit?.antiMartingaleLadderTp1Pct ?? 0;
+        const liveTp1Pct = (!pos.ladderStepIndex && pos.avgEntryPrice > 0 && pos.targetTpPrice > pos.avgEntryPrice)
+          ? Math.round(((pos.targetTpPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 10000) / 100
+          : (customTp1Pct > 0 ? customTp1Pct : Math.max(0.8, Math.round(baseTpPct * 0.45 * 100) / 100));
         if (isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0)) {
-          tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span> <span class="badge-tag" style="background: rgba(0, 240, 255, 0.15); border: 1px solid rgba(0, 240, 255, 0.4); color: #00f0ff; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 AUTO-LADDER SIAGA (2 Tangga @ 50%)</span>`;
+          tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span> <span class="badge-tag" style="background: rgba(0, 240, 255, 0.15); border: 1px solid rgba(0, 240, 255, 0.4); color: #00f0ff; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 AUTO-LADDER SIAGA (${totalLadderSteps} Tangga • TP1 +${liveTp1Pct}%)</span>`;
         } else if (!isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0)) {
           tpStatusBadge = `<span class="badge-tag" style="background: rgba(46, 213, 115, 0.14); border: 1px solid rgba(46, 213, 115, 0.45); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🚀 ANTI-MARTINGALE</span> <span class="badge-tag" style="background: rgba(46, 213, 115, 0.15); border: 1px solid rgba(46, 213, 115, 0.35); color: #2ed573; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🎯 FLAT TP TUNGGAL</span>`;
         } else {
@@ -1925,6 +1930,11 @@ function renderActivePositions(positions) {
       const isLong = pos.side === 'LONG';
       const smTpPct = pos.paramsSnapshot?.takeProfitPct || currentConfig?.smartMoney?.takeProfitPct || 1.5;
       const smSlPct = pos.paramsSnapshot?.stopLossPct || currentConfig?.smartMoney?.stopLossPct || 3.0;
+      const amBaseTp = pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0;
+      const amCustomTp1 = pos.paramsSnapshot?.antiMartingaleLadderTp1Pct ?? currentConfig?.exit?.antiMartingaleLadderTp1Pct ?? 0;
+      const amTp1Display = (!pos.ladderStepIndex && pos.avgEntryPrice > 0 && pos.targetTpPrice > pos.avgEntryPrice)
+        ? Math.round(((pos.targetTpPrice - pos.avgEntryPrice) / pos.avgEntryPrice) * 10000) / 100
+        : (amCustomTp1 > 0 ? amCustomTp1 : Math.max(0.8, Math.round(amBaseTp * 0.45 * 100) / 100));
 
       let slMetricLabel = isSm
         ? `Hard SL (${isLong ? '-' : '+'}${smSlPct}%)`
@@ -1935,12 +1945,12 @@ function renderActivePositions(positions) {
       let tpMetricLabel = isSm
         ? `Target TP (${isLong ? '-' : '+'}${smTpPct}%)`
         : isAntiMartingale
-        ? (isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0) ? `🎯 Target Tangga 1 (Jual 50% + BEP)` : `Target TP (+${pos.paramsSnapshot?.takeProfitPct ?? currentConfig?.exit?.takeProfitPct ?? 3.0}%)`)
+        ? (isLadderActivePos && (!pos.ladderStepIndex || pos.ladderStepIndex === 0) ? `🎯 Target Tangga 1 (+${amTp1Display}% ➜ BEP)` : `Target TP (+${amBaseTp}%)`)
         : `Target TP (-${currentConfig?.exit?.takeProfitPct || 1.2}%)`;
       let tpMetricHtml = `<span class="text-green">$${formatCryptoPrice(pos.targetTpPrice)}</span>`;
 
       if (pos.ladderStepIndex && pos.ladderStepIndex > 0) {
-        const totalStepsCount = pos.paramsSnapshot?.ladderSteps ?? (isSm ? currentConfig?.smartMoney?.ladderSteps : currentConfig?.exit?.ladderSteps) ?? 4;
+        const totalStepsCount = totalLadderSteps;
         const currentStep = pos.ladderStepIndex;
         tpStatusBadge = `<span class="badge-tp-stage-done" style="background: rgba(48, 209, 88, 0.15); border: 1px solid rgba(48, 209, 88, 0.4); color: #30d158; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">🪜 TANGGA ${currentStep}/${totalStepsCount} HIT • 🛡️ AUTO BEP AKTIF</span>`;
         tpBannerHtml = `
@@ -2632,7 +2642,8 @@ function openRadarSpikeDetail(spikeId) {
     tradingMode: 'Mode trading',
     leverage: 'Leverage',
     maxSpreadPct: 'Spread maksimum (%)',
-    minRsi1m: 'RSI minimum SHORT',
+    minRsi1m: 'RSI minimum 1m',
+    maxRsi1m: 'RSI maksimum 1m',
     maxVolRatio: 'Rasio volume maksimum',
     emaTrendFilterEnabled: 'Filter tren EMA',
     tradeQualityScoringEnabled: 'Skor kualitas trade',
@@ -4057,6 +4068,8 @@ function openTradeDetailModal(tradeId, tradeIndex) {
       ${renderCompareRow('Cooldown Koin Sepi (Gap)', snap.tradeGapCooldownMinutes, currScanner.tradeGapCooldownMinutes, ' Menit')}
       ${renderCompareRow('Batas Min RSI 1m (Anti-Oversold)', snap.minRsi1m, currScanner.minRsi1m, '', (v) => v ? `≥ ${v}` : 'Nonaktif')}
       ${renderCompareRow('Cooldown RSI Rendah', snap.minRsiCooldownMinutes, currScanner.minRsiCooldownMinutes, ' Menit')}
+      ${renderCompareRow('Batas Max RSI 1m (Anti-Pucuk)', snap.maxRsi1m, currScanner.maxRsi1m, '', (v) => v ? `≤ ${v}` : 'Nonaktif')}
+      ${renderCompareRow('Cooldown RSI Tinggi', snap.maxRsiCooldownMinutes, currScanner.maxRsiCooldownMinutes, ' Menit')}
       ${renderCompareRow('Minimal Rasio Volume 1m', snap.minVolRatio, currScanner.minVolRatio, 'x', (v) => v ? `≥ ${v}x` : 'Nonaktif')}
       ${renderCompareRow('Cooldown Volume Tipis', snap.minVolRatioCooldownMinutes, currScanner.minVolRatioCooldownMinutes, ' Menit')}
       ${renderCompareRow('Maksimal Rasio Volume Breakout', snap.maxVolRatio, currScanner.maxVolRatio, 'x', (v) => v ? `≤ ${v}x` : 'Nonaktif')}
@@ -4795,6 +4808,8 @@ function applySnapshotParamsToConfig() {
   setVal('cfg-trade-gap-cooldown', snap.tradeGapCooldownMinutes);
   setVal('cfg-min-rsi', snap.minRsi1m ?? '');
   setVal('cfg-min-rsi-cooldown', snap.minRsiCooldownMinutes ?? '');
+  setVal('cfg-max-rsi', snap.maxRsi1m > 0 ? snap.maxRsi1m : '');
+  setVal('cfg-max-rsi-cooldown', snap.maxRsiCooldownMinutes ?? '');
   setVal('cfg-min-vol-ratio', snap.minVolRatio ?? '');
   setVal('cfg-min-vol-ratio-cooldown', snap.minVolRatioCooldownMinutes ?? '');
   setVal('cfg-max-vol-ratio', snap.maxVolRatio ?? '');
@@ -5350,6 +5365,8 @@ function populateSettingsForm(cfg) {
   setVal('cfg-trade-gap-cooldown', cfg.scanner?.tradeGapCooldownMinutes ?? 5);
   setVal('cfg-min-rsi', cfg.scanner?.minRsi1m ?? 50);
   setVal('cfg-min-rsi-cooldown', cfg.scanner?.minRsiCooldownMinutes ?? 10);
+  setVal('cfg-max-rsi', cfg.scanner?.maxRsi1m > 0 ? cfg.scanner.maxRsi1m : '');
+  setVal('cfg-max-rsi-cooldown', cfg.scanner?.maxRsiCooldownMinutes ?? 10);
   setVal('cfg-min-vol-ratio', cfg.scanner?.minVolRatio ?? 1.0);
   setVal('cfg-min-vol-ratio-cooldown', cfg.scanner?.minVolRatioCooldownMinutes ?? 5);
   setVal('cfg-max-vol-ratio', cfg.scanner?.maxVolRatio ?? 20.0);
@@ -5392,6 +5409,7 @@ function populateSettingsForm(cfg) {
   setVal('cfg-am-ladder-wr-low', cfg.exit?.antiMartingaleLadderWrLow ?? 52);
   setVal('cfg-am-ladder-wr-high', cfg.exit?.antiMartingaleLadderWrHigh ?? 60);
   setVal('cfg-am-ladder-steps', cfg.exit?.antiMartingaleLadderSteps ?? 2);
+  setVal('cfg-am-ladder-tp1-pct', cfg.exit?.antiMartingaleLadderTp1Pct > 0 ? cfg.exit.antiMartingaleLadderTp1Pct : '');
 
   // Total Floating Profit Target (Portfolio TP)
   const portTpCheckbox = document.getElementById('cfg-portfolio-tp-enabled');
@@ -5781,6 +5799,8 @@ function getSettingsFormData() {
       tradeGapCooldownMinutes: parseInt(getVal('cfg-trade-gap-cooldown', '5'), 10) || 5,
       minRsi1m: parseFloat(getVal('cfg-min-rsi', '50')) || 0,
       minRsiCooldownMinutes: parseInt(getVal('cfg-min-rsi-cooldown', '10'), 10) || 10,
+      maxRsi1m: parseFloat(getVal('cfg-max-rsi', '0')) || 0,
+      maxRsiCooldownMinutes: parseInt(getVal('cfg-max-rsi-cooldown', '10'), 10) || 10,
       minVolRatio: parseFloat(getVal('cfg-min-vol-ratio', '1.0')) || 0,
       minVolRatioCooldownMinutes: parseInt(getVal('cfg-min-vol-ratio-cooldown', '5'), 10) || 5,
       maxVolRatio: parseFloat(getVal('cfg-max-vol-ratio', '20.0')) || 0,
@@ -5840,6 +5860,7 @@ function getSettingsFormData() {
       antiMartingaleLadderWrLow: parseFloat(getVal('cfg-am-ladder-wr-low', '52')) || 52,
       antiMartingaleLadderWrHigh: parseFloat(getVal('cfg-am-ladder-wr-high', '60')) || 60,
       antiMartingaleLadderSteps: parseInt(getVal('cfg-am-ladder-steps', '2'), 10) || 2,
+      antiMartingaleLadderTp1Pct: parseFloat(getVal('cfg-am-ladder-tp1-pct', '0')) || 0,
       portfolioTpEnabled: document.getElementById('cfg-portfolio-tp-enabled') ? !!document.getElementById('cfg-portfolio-tp-enabled').checked : true,
       portfolioTpTargetPct: parseFloat(getVal('cfg-portfolio-tp-target', '10.0')) || 10.0,
       portfolioTpMinProfitPct: parseFloat(getVal('cfg-portfolio-tp-min-profit', '0.5')) || 0.5,
