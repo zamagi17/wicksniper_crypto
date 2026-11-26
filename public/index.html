@@ -229,6 +229,7 @@
               <span class="badge-margin-tag" id="active-margin-tag" style="display: none;">Margin Aktif: $0.00 USDT</span>
               <span class="badge-floating-tag" id="active-floating-pnl-tag" style="display: none; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">Floating: +$0.00</span>
               <span class="tag-counter" id="active-count-tag">0 Posisi</span>
+              <button type="button" class="btn btn-xs" id="btn-toggle-btc-card" onclick="toggleBtcFilterCard()" title="Lipat / Tampilkan Panel Makro BTC" style="padding: 2px 7px; font-size: 11px; color: var(--color-gold, #ffd60a);">₿ Lipat</button>
             </div>
           </div>
 
@@ -401,25 +402,6 @@
 
       <!-- RIGHT COLUMN: TRADES & LOGS -->
       <div class="col-right">
-        <!-- LIVE TERMINAL LOGS -->
-        <div class="panel mobile-tab-panel" id="panel-logs" data-tab-name="logs">
-          <div class="panel-header">
-            <div class="panel-title">
-              <span class="icon">📟</span>
-              <h2>Live Terminal Log</h2>
-              <span class="tag-counter" id="terminal-count-tag">0 Log</span>
-            </div>
-            <div class="panel-header-actions" style="display: flex; gap: 6px; align-items: center;">
-              <button class="btn btn-xs" id="btn-scroll-bottom" onclick="scrollTerminalToBottom()" style="display: none; color: var(--color-cyan);" title="Gulir ke log terbaru">⬇ Terbaru</button>
-              <button class="btn btn-xs" onclick="clearLocalLogs()" title="Bersihkan tampilan log">Bersihkan</button>
-            </div>
-          </div>
-
-          <div class="terminal-box" id="terminal-logs">
-            <div class="terminal-empty">Menunggu aktivitas engine &amp; order stream...</div>
-          </div>
-        </div>
-
         <!-- CLOSED TRADES HISTORY -->
         <div class="panel mobile-tab-panel" id="panel-trades" data-tab-name="trades">
           <div class="panel-header">
@@ -482,6 +464,25 @@
               <button type="button" class="btn-page" id="trades-prev-btn" onclick="changeTradesPage(-1)" disabled>◀ Sebelumnya</button>
               <button type="button" class="btn-page" id="trades-next-btn" onclick="changeTradesPage(1)" disabled>Berikutnya ▶</button>
             </div>
+          </div>
+        </div>
+
+        <!-- LIVE TERMINAL LOGS -->
+        <div class="panel mobile-tab-panel" id="panel-logs" data-tab-name="logs">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="icon">📟</span>
+              <h2>Live Terminal Log</h2>
+              <span class="tag-counter" id="terminal-count-tag">0 Log</span>
+            </div>
+            <div class="panel-header-actions" style="display: flex; gap: 6px; align-items: center;">
+              <button class="btn btn-xs" id="btn-scroll-bottom" onclick="scrollTerminalToBottom()" style="display: none; color: var(--color-cyan);" title="Gulir ke log terbaru">⬇ Terbaru</button>
+              <button class="btn btn-xs" onclick="clearLocalLogs()" title="Bersihkan tampilan log">Bersihkan</button>
+            </div>
+          </div>
+
+          <div class="terminal-box" id="terminal-logs">
+            <div class="terminal-empty">Menunggu aktivitas engine &amp; order stream...</div>
           </div>
         </div>
 

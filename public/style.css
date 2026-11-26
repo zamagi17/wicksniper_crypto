@@ -665,6 +665,12 @@ body {
   flex: 1;
 }
 
+@media (max-width: 1440px) {
+  .container {
+    padding: 16px 14px;
+  }
+}
+
 /* KPI GRID */
 .kpi-grid {
   display: grid;
@@ -723,8 +729,12 @@ body {
 /* DASHBOARD COLUMNS */
 .dashboard-columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 @media (max-width: 1023px) {
@@ -736,7 +746,10 @@ body {
 .col-left, .col-right {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* PANEL */
@@ -747,6 +760,9 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .panel-header {
@@ -832,6 +848,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 1024px) {
+  #active-positions-container {
+    max-height: calc(100vh - 280px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
 }
 
 .position-card {
@@ -843,12 +870,18 @@ body {
   flex-direction: column;
   gap: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .pos-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
 }
 
 .pos-symbol {
@@ -856,7 +889,18 @@ body {
   font-weight: 800;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.pos-head-pnl-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .badge-side {
@@ -929,6 +973,10 @@ body {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  max-height: 110px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
 }
 
 .layer-badge {
@@ -996,8 +1044,13 @@ body {
 
 /* DATA TABLE */
 .table-responsive {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
-  max-height: 380px;
+  max-height: 420px;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
 }
 
 .data-table {

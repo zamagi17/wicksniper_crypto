@@ -1672,6 +1672,28 @@ async function refreshBtcFilterNow() {
 }
 window.refreshBtcFilterNow = refreshBtcFilterNow;
 
+function toggleBtcFilterCard() {
+  const card = document.getElementById('btc-filter-card');
+  const btn = document.getElementById('btn-toggle-btc-card');
+  if (!card) return;
+  const isHidden = card.style.display === 'none';
+  card.style.display = isHidden ? '' : 'none';
+  if (btn) btn.innerText = isHidden ? '₿ Lipat' : '₿ Buka';
+  try { localStorage.setItem('btc_filter_card_hidden', isHidden ? '0' : '1'); } catch (_) {}
+}
+window.toggleBtcFilterCard = toggleBtcFilterCard;
+
+try {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('btc_filter_card_hidden') === '1') {
+    setTimeout(() => {
+      const card = document.getElementById('btc-filter-card');
+      const btn = document.getElementById('btn-toggle-btc-card');
+      if (card) card.style.display = 'none';
+      if (btn) btn.innerText = '₿ Buka';
+    }, 50);
+  }
+} catch (_) {}
+
 function renderPendingSignals(signals) {
   const wrapper = document.getElementById('pending-watchlist-wrapper');
   const container = document.getElementById('pending-watchlist-container');
@@ -2168,7 +2190,7 @@ function renderActivePositions(positions) {
               ${fundingTag}
               <span class="badge-margin-tag">💰 Margin: ${isSm ? `$${(pos.totalMarginUsed || 0).toFixed(2)} USDT • Vol: $${((pos.totalQty || 0) * (pos.avgEntryPrice || pos.currentPrice || 0)).toFixed(1)} USDT` : `$${(pos.totalMarginUsed || 0).toFixed(2)} / $${currentConfig?.grid?.maxTotalMarginPerCoin || 35} USDT`}</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="pos-head-pnl-actions">
               <div class="pos-pnl">
                 <div class="pos-pnl-val ${pnlColor}">${pnlSign}$${(pos.unrealizedPnl || 0).toFixed(2)}</div>
                 <div class="pos-pnl-pct ${pnlColor}">${pnlSign}${(pos.pnlPct || 0).toFixed(1)}%</div>
